@@ -11,11 +11,12 @@ choose.
 Three [tiers](docs/glossary.md#tier), dependencies pointing down only. The core
 is `params`, `undo`, `session`, `learn` and `ump`. The projections are `bridge`
 (the page) and `host` (plugin formats). Shells (a plugin crate, the JUCE
-adapter) sit on top and may depend on both. Why each rule below exists is in
-[the decision record](docs/transfer-from-seam-juce.md), and
-[docs/decision-index.md](docs/decision-index.md) leads from each decision to its
-code. A word Seam coins links to [the glossary](docs/glossary.md) where it first
-appears. To write a plugin before reading how Seam works inside, start with
+adapter) sit on top and may depend on both. Each rule below links the entry of
+[the decision record](docs/transfer-from-seam-juce.md) that says why it exists,
+where the record has one, and [docs/decision-index.md](docs/decision-index.md)
+leads from each decision to its code. A word Seam coins links to [the
+glossary](docs/glossary.md) where it first appears. To write a plugin before
+reading how Seam works inside, start with
 [docs/first-plugin.md](docs/first-plugin.md).
 
 ## Codemap
@@ -137,9 +138,13 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 
 - The core crates and `bridge` never depend on a window, WebView, UI toolkit or
   plugin format, with any features, on any platform.
-  `scripts/check-core-deps.py` checks it in CI.
+  `scripts/check-core-deps.py` checks it in CI ([where the WebView pieces
+  live][webview]).
 - `undo` and `session` never depend on each other. Both take the same restore
-  clock from the parameter set that owns it, so a load can never be undone over.
+  clock from the parameter set that owns it ([who makes the clock][clock]). A
+  load moves the clock with every parameter it writes, under the lock a replay
+  step checks it under, so an undo never writes over a loaded value ([a load
+  and a replay][load]).
 - `unsafe` is denied workspace-wide. Only `host`'s `vst3` and `cabi` modules
   and the `boundary`, `engine` and `faults` modules they share allow it, with a
   `// SAFETY:` comment on every block.
@@ -147,16 +152,20 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   counts it as a fault, and a processor that panicked plays silence until the
   next activation. The first fault of each kind in an instance is reported as a
   line of text, never on the audio thread
-  ([`faults.rs`](crates/host/src/faults.rs) says when, and on which thread).
+  ([`faults.rs`](crates/host/src/faults.rs) says when, and on which thread;
+  [a panic in a host's call][panic], [making a fault visible][faults]).
 - The audio path never allocates, locks or makes a system call, except while a
   panic unwinds (`faults.rs` says why). Allocation gates, and in a debug build
   the exporters' audio-thread mark, check what the tests reach;
   [testing.md](docs/testing.md#2-the-audio-path-does-not-allocate) says what
-  each sees and what is left to review.
+  each sees and what is left to review ([checking the audio-thread
+  rule][mark]).
 - Generated files (the page's protocol types, its test parameter map, `seam.h`,
-  each plugin's JUCE settings) are committed and compared byte for byte in CI.
+  the example EQ's JUCE settings) are committed and compared byte for byte in
+  CI ([what runs the generator][generator], [keeping the header true][header]).
 - Absent: no WebView glue exists yet, so nothing in the repository opens a page
-  in a plugin window, and no exporter delivers MIDI events yet.
+  in a plugin window, and no exporter delivers MIDI events yet ([where the
+  WebView pieces live][webview], [the VST3 exporter's shape][vst3]).
 
 ## Threads
 
@@ -169,15 +178,16 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   every platform. The VST3 exporter runs its own timer on Windows and macOS, and
   refuses to build for any other platform. There nothing would tick it: no edit
   would reach the host, and a load would never apply session sections to their
-  participants.
+  participants ([what ticks a plugin][tick], [when a restore
+  applies][applies]).
 - Audio: owns the processor and never waits. A host write may arrive here, and
   so may the C interface's `get`, which the JUCE adapter's parameter reads call
-  there. The audio thread reads parameter values straight from the set's atomic
-  cells.
+  there ([the C interface][cabi]). The audio thread reads parameter values
+  straight from the set's atomic cells.
 - Any but audio: the host's save and load, and its text and query calls. Save
   and load go through `SavedState`. Text and query calls read the declarations,
   the parameter store, and the latency, tail and layout the main thread last
-  read. None touches the plugin.
+  read. None touches the plugin ([whether a plugin must be Send][send]).
 - Which thread is main: VST3 builds the plugin at `initialize`, on the thread
   that calls it, which stays its main thread. The C interface keeps a plugin
   that is not `Send` on the thread that called `create`, and lends one that is
@@ -185,7 +195,8 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   [loan](docs/glossary.md#loan)). The state is `MainThread` (`boundary.rs`),
   bound to one thread or lent call by call. The rule in full is on `Engine`
   (`engine/mod.rs`) for Seam's code, on `Plugin` (`plugin.rs`) for plugin
-  authors, and on `SeamPlugin` in `seam.h` for C users.
+  authors, and on `SeamPlugin` in `seam.h` for C users ([whether a plugin must
+  be Send][send], [the VST3 exporter's shape][vst3], [the C interface][cabi]).
 
 ## Decided, not built
 
@@ -214,3 +225,17 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   snapshot rests on, the fallback is a hand-written table with a reader count
   and `SeqCst` fences. Its `unsafe` is under the boundary's rules, with a miri
   job.
+
+[applies]: docs/transfer-from-seam-juce.md#d13-when-a-session-restore-applies
+[cabi]: docs/transfer-from-seam-juce.md#d62-the-c-interface-for-the-juce-adapter
+[clock]: docs/transfer-from-seam-juce.md#d52-who-makes-the-restoreclock
+[faults]: docs/transfer-from-seam-juce.md#d75-making-a-caught-fault-visible
+[generator]: docs/transfer-from-seam-juce.md#d27-what-runs-the-generator
+[header]: docs/transfer-from-seam-juce.md#d63-keeping-the-c-header-true
+[load]: docs/transfer-from-seam-juce.md#d39-a-load-between-a-replays-check-and-its-write
+[mark]: docs/transfer-from-seam-juce.md#d67-checking-the-audio-thread-locking-rule
+[panic]: docs/transfer-from-seam-juce.md#d60-a-panic-inside-a-hosts-call
+[send]: docs/transfer-from-seam-juce.md#d51-whether-a-plugin-must-be-send
+[tick]: docs/transfer-from-seam-juce.md#d53-what-ticks-a-plugin-with-no-editor-open
+[vst3]: docs/transfer-from-seam-juce.md#d59-the-shape-of-the-vst3-exporter
+[webview]: docs/transfer-from-seam-juce.md#d16-where-the-webview-pieces-live

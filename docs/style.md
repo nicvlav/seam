@@ -13,13 +13,13 @@ notice; the right is what Rust offers instead, with an example from Seam.
 | A C++ instinct | The Rust shape |
 | --- | --- |
 | Shared mutable state behind pointers, guarded by convention | One owner, borrows for access, and a handle per role: `ParamSet::take_ui` hands out the one UI side, and the type system keeps it on its thread. |
-| Flags, sentinel values and pairs of bools | An enum whose variants carry their own data: the main thread's `Binding` is bound to one thread or lent call by call, never both. |
+| Flags, sentinel values and pairs of bools | An enum whose variants carry their own data: the main thread's `Binding` (`crates/host/src/boundary.rs`) is bound to one thread or lent call by call, never both. |
 | Error codes, `bool` returns and out-parameters | `Result` and `Option` with a typed error, propagated with `?`: `SavedState::load` returns `LoadError`. |
 | Two-phase construction (`init` after the constructor) | A constructor or builder that returns a valid value or an error, so an invalid one cannot exist: `Range::new` refuses a bad range. |
 | Raw integers for ids, units and bits | Newtypes that check once and carry the meaning: `ParamId`, `Position`, the packed value word. |
 | Index loops and hand-checked bounds | Iterators, slices and `get`; an index only where the bound is proven, and the audio path's lints refuse the rest. |
 | Base classes and virtual hierarchies | Traits and generics for open sets, enums for closed ones, composition over inheritance: `Plugin` and `Processor` are traits a plugin implements. |
-| Cleanup by convention, paired begin and end calls | A guard or a closure that makes the pair one call: `Stager::block` counts a block begun and ended around its offers. |
+| Cleanup by convention, paired begin and end calls | A guard or a closure that makes the pair one call: `Stager::block` (`crates/learn/src/capture.rs`) counts a block begun and ended around its offers. |
 | A getter and setter for every field | Public fields on plain data; methods only where an invariant needs them. |
 
 When a design needs `unsafe`, interior mutability or a lock, say why the safe,
