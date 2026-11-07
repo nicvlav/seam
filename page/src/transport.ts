@@ -2,9 +2,9 @@
 //
 // The page never knows what carries them: whatever does is a Transport, and
 // nothing in this package imports one. Only the in-memory transport exists
-// today, for tests and a browser-only mock backend. The transports for a
-// plugin window and for a standalone app are planned, together with the native
-// side of the protocol.
+// today, for tests; a mock native side in a browser could use it too, but none
+// is built. The transports for a plugin window and for a standalone app are
+// planned, together with the native side of the protocol.
 
 import type { NativeMessage, PageMessage } from "./generated/protocol";
 
@@ -34,7 +34,7 @@ export interface MemoryTransport {
   };
 }
 
-/** An in-memory transport, for tests and the browser-only mock backend. */
+/** An in-memory transport, for tests and for a mock native side. */
 export function memoryTransport(): MemoryTransport {
   const pageListeners = new Set<(message: NativeMessage) => void>();
   const nativeListeners = new Set<(message: PageMessage) => void>();
