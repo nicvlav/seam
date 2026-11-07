@@ -2,8 +2,8 @@
 # use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #
 # use seam_host::{
-#     Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-#     Status, Tail,
+#     AuCodes, Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
+#     SavedState, Status, Tail,
 # };
 # use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet};
 # use seam_session::Session;
@@ -48,7 +48,7 @@
 #     version: "0.1.0",
 #     id: "dev.example.gain",
 #     vst3_class_id: [0; 16],
-#     au_codes: (*b"gain", *b"Exmp"),
+#     au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
 #     category: Category::Effect,
 #     features: &[],
 #     layouts: &[Layout::STEREO],

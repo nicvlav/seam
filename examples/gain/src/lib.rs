@@ -17,7 +17,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status,
+    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+    Status,
 };
 use seam_learn::{Config, Learn, LearnAudio, LearnError, Takes};
 use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet, UiParams, Value};
@@ -157,7 +158,10 @@ impl Plugin for Gain {
         version: "0.1.0",
         id: "dev.seam.example-gain",
         vst3_class_id: 0x5b0a_d271_3e96_4c18_a37f_e024_8db5_6a19_u128.to_be_bytes(),
-        au_codes: (*b"SmGn", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"SmGn",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[],
         layouts: &[Layout::STEREO],

@@ -69,7 +69,7 @@ use crate::state::SavedState;
 /// use std::sync::Arc;
 ///
 /// use seam_host::{
-///     Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
+///     AuCodes, Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
 ///     SavedState, Status,
 /// };
 /// use seam_params::{Kind, ParamDecl, ParamSet};
@@ -97,7 +97,7 @@ use crate::state::SavedState;
 ///         version: "0.1.0",
 ///         id: "dev.example.gain",
 ///         vst3_class_id: [0; 16],
-///         au_codes: (*b"gain", *b"Exmp"),
+///         au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
 ///         category: Category::Effect,
 ///         features: &[],
 ///         layouts: &[Layout::STEREO],
@@ -252,7 +252,7 @@ pub trait Plugin: 'static {
     /// use seam_params::{Kind, ParamDecl, ParamSet, UiParams};
     /// use seam_session::{Session, SessionUi};
     /// use seam_undo::{Bound, History};
-    /// # use seam_host::{Category, Layout, PluginInfo};
+    /// # use seam_host::{AuCodes, Category, Layout, PluginInfo};
     /// # use seam_ump::{ChannelVoice, EventList, Voice};
     ///
     /// /// The processor: learn's audio side reads each block's MIDI first.
@@ -286,7 +286,7 @@ pub trait Plugin: 'static {
     /// #       version: "0.1.0",
     /// #       id: "dev.example.synth",
     /// #       vst3_class_id: [0; 16],
-    /// #       au_codes: (*b"synt", *b"Exmp"),
+    /// #       au_codes: AuCodes { subtype: *b"synt", manufacturer: *b"Exmp" },
     /// #       category: Category::Instrument,
     /// #       features: &[],
     /// #       layouts: &[Layout::new(0, 2)],

@@ -20,8 +20,8 @@ use super::{
 use crate::boundary::tests::Watched;
 use crate::faults::{thread_faults, written};
 use crate::{
-    Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status, Tail,
+    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
+    SavedState, Status, Tail,
 };
 use seam_testkit::sync::{Latch, PATIENCE, wait_until};
 
@@ -143,7 +143,10 @@ impl Plugin for Probe {
         version: "1.2.3",
         id: "dev.seam.probe",
         vst3_class_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-        au_codes: (*b"prob", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"prob",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[Feature::Equalizer, Feature::PitchShift],
         layouts: &[Layout::STEREO, Layout::MONO],

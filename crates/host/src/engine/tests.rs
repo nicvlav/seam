@@ -10,8 +10,8 @@ use seam_session::Session;
 
 use crate::faults::written;
 use crate::{
-    Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status, Tail,
-    boundary_faults,
+    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+    Status, Tail, boundary_faults,
 };
 
 const PARAMS: &[ParamDecl] = &[ParamDecl::new(
@@ -92,7 +92,10 @@ impl Plugin for Probe {
         version: "1.0.0",
         id: "dev.seam.engine-probe",
         vst3_class_id: [7; 16],
-        au_codes: (*b"engp", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"engp",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[],
         layouts: &[Layout::STEREO],

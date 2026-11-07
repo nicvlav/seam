@@ -9,7 +9,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status,
+    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+    Status,
 };
 use seam_params::{Kind, ParamDecl, ParamSetBuilder};
 use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
@@ -116,7 +117,10 @@ impl Plugin for Fuzzed {
         version: "0.0.0",
         id: "dev.seam.fuzzed",
         vst3_class_id: [0; 16],
-        au_codes: (*b"Fuzz", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"Fuzz",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[],
         layouts: &[Layout::STEREO],

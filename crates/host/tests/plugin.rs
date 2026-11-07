@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status,
+    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+    Status,
 };
 use seam_params::{Kind, ParamDecl, ParamSet};
 use seam_session::{Session, SessionUi};
@@ -39,7 +40,10 @@ impl Plugin for Minimal {
         version: "0.1.0",
         id: "dev.seam.minimal",
         vst3_class_id: [0; 16],
-        au_codes: (*b"mini", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"mini",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[],
         layouts: &[Layout::STEREO],

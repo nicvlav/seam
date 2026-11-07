@@ -27,9 +27,10 @@ const JUCE_MIDI_CONTROLLER_IDS: RangeInclusive<u32> = 0x6d63_6d00..=0x6d63_6d00 
 ///
 /// Each setting is a `SEAM_PLUGIN_` variable. The VST3 categories are the
 /// VST3 exporter's own. The codes are the plugin's
-/// [`au_codes`](crate::PluginInfo::au_codes), which JUCE also derives its
-/// VST3 class id from, so the adapter's build is a different plugin from
-/// the native one.
+/// [`au_codes`](crate::PluginInfo::au_codes): the subtype is JUCE's plugin
+/// code and the manufacturer its manufacturer code. JUCE derives its VST3
+/// class id from both, so the adapter's build is a different plugin from the
+/// native one.
 ///
 /// # Panics
 ///
@@ -48,6 +49,7 @@ const JUCE_MIDI_CONTROLLER_IDS: RangeInclusive<u32> = 0x6d63_6d00..=0x6d63_6d00 
 /// let cmake = juce_settings::<Gain>("examples/gain/src/lib.rs");
 /// assert!(cmake.contains("set(SEAM_PLUGIN_NAME \"Gain\")"));
 /// assert!(cmake.contains("set(SEAM_PLUGIN_CODE \"gain\")"));
+/// assert!(cmake.contains("set(SEAM_PLUGIN_MANUFACTURER_CODE \"Exmp\")"));
 /// ```
 pub fn juce_settings<P: Plugin>(source: &str) -> String {
     check_juce_ids(P::PARAMS.iter().map(|decl| decl.key), P::INFO.midi_input);
@@ -68,8 +70,8 @@ pub fn juce_settings<P: Plugin>(source: &str) -> String {
     text("DESCRIPTION", info.description);
     text("VERSION", info.version);
     text("ID", info.id);
-    text("CODE", &code(info.au_codes.0));
-    text("MANUFACTURER_CODE", &code(info.au_codes.1));
+    text("CODE", &code(info.au_codes.subtype));
+    text("MANUFACTURER_CODE", &code(info.au_codes.manufacturer));
     let flag = |on: bool| if on { "TRUE" } else { "FALSE" };
     let _ = writeln!(
         out,

@@ -108,6 +108,30 @@ impl Layout {
     }
 }
 
+/// A plugin's two Audio Unit codes, four characters each.
+///
+/// The JUCE adapter's build also takes them as its plugin and manufacturer
+/// codes, from which JUCE derives that build's VST3 class id. The fields are
+/// named, so the two cannot be swapped unseen.
+///
+/// # Examples
+///
+/// ```
+/// use seam_host::AuCodes;
+///
+/// // Each plugin's own subtype, under the vendor's one manufacturer code.
+/// const TONE: AuCodes = AuCodes { subtype: *b"tone", manufacturer: *b"Exmp" };
+/// const GATE: AuCodes = AuCodes { subtype: *b"gate", ..TONE };
+/// assert_eq!(GATE.manufacturer, TONE.manufacturer);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuCodes {
+    /// The plugin's own code, unique among its manufacturer's plugins.
+    pub subtype: [u8; 4],
+    /// The manufacturer's code, the same for all of its plugins.
+    pub manufacturer: [u8; 4],
+}
+
 /// A plugin's identity and description, the same for every format.
 ///
 /// A plugin's [`Plugin::INFO`](crate::Plugin::INFO) is one of these, a
@@ -116,7 +140,7 @@ impl Layout {
 /// # Examples
 ///
 /// ```
-/// use seam_host::{Category, Feature, Layout, PluginInfo};
+/// use seam_host::{AuCodes, Category, Feature, Layout, PluginInfo};
 ///
 /// const INFO: PluginInfo = PluginInfo {
 ///     name: "Tone",
@@ -128,7 +152,7 @@ impl Layout {
 ///     id: "com.example.tone",
 ///     // A version 4 UUID, made once for this plugin and never changed.
 ///     vst3_class_id: 0x8f3c_2a71_5d0e_4b96_a1c4_7e25_d9b0_3f68_u128.to_be_bytes(),
-///     au_codes: (*b"tone", *b"Exmp"),
+///     au_codes: AuCodes { subtype: *b"tone", manufacturer: *b"Exmp" },
 ///     category: Category::Effect,
 ///     features: &[Feature::Equalizer],
 ///     layouts: &[Layout::STEREO, Layout::MONO],
@@ -161,10 +185,8 @@ pub struct PluginInfo {
     /// never change it after release: a host treats a plugin with a new id as
     /// a different plugin, and its sessions lose it.
     pub vst3_class_id: [u8; 16],
-    /// The AU subtype and manufacturer codes, four characters each. The JUCE
-    /// adapter's build also takes them as its plugin and manufacturer codes,
-    /// from which JUCE derives that build's VST3 class id.
-    pub au_codes: ([u8; 4], [u8; 4]),
+    /// The AU codes: the plugin's subtype and its manufacturer's.
+    pub au_codes: AuCodes,
     /// What kind of plugin it is.
     pub category: Category,
     /// What it does, finer: for a host's browser.

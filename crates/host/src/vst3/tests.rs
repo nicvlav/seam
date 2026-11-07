@@ -34,8 +34,8 @@ use super::{HostCall, RESTART_LATENCY, RESTART_VALUES, TestHost, plugin_factory}
 use crate::engine::timer::{detached, pump};
 use crate::faults::{thread_faults, written};
 use crate::{
-    Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status, Tail,
+    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
+    SavedState, Status, Tail,
 };
 
 const PARAMS: &[ParamDecl] = &[
@@ -147,7 +147,10 @@ impl Plugin for Probe {
         version: "1.2.3",
         id: "dev.seam.probe",
         vst3_class_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-        au_codes: (*b"prob", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"prob",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[Feature::Equalizer, Feature::Delay],
         layouts: &[Layout::STEREO, Layout::MONO],
@@ -704,7 +707,10 @@ impl<const INPUTS: usize, const OUTPUTS: usize> Plugin for Shaped<INPUTS, OUTPUT
         version: "1.0.0",
         id: "dev.seam.shaped",
         vst3_class_id: [2; 16],
-        au_codes: (*b"shap", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"shap",
+            manufacturer: *b"Seam",
+        },
         category: if INPUTS == 0 {
             Category::Instrument
         } else {

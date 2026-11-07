@@ -36,7 +36,8 @@
 //! use std::sync::Arc;
 //!
 //! use seam_host::{
-//!     Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status,
+//!     AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+//!     Status,
 //! };
 //! use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet};
 //! use seam_session::Session;
@@ -75,7 +76,7 @@
 //!         id: "dev.example.gain",
 //!         // A real plugin needs its own fixed, unique id here.
 //!         vst3_class_id: [0; 16],
-//!         au_codes: (*b"gain", *b"Exmp"),
+//!         au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
 //!         category: Category::Effect,
 //!         features: &[],
 //!         layouts: &[Layout::STEREO],
@@ -155,6 +156,6 @@ pub mod vst3;
 pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
-pub use info::{Category, Feature, Layout, PluginInfo};
+pub use info::{AuCodes, Category, Feature, Layout, PluginInfo};
 pub use plugin::{Plugin, Processor, Tail};
 pub use state::{LoadError, MAX_STATE_BYTES, STATE_VERSION, SavedState};

@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use seam_host::cabi::TestHost;
 use seam_host::{
-    Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState, Status,
+    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+    Status,
 };
 use seam_params::{Kind, ParamDecl, ParamSet};
 use seam_session::Session;
@@ -40,7 +41,10 @@ impl Plugin for Canary {
         version: "0.1.0",
         id: "dev.seam.rtsan-canary",
         vst3_class_id: [9; 16],
-        au_codes: (*b"cnry", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"cnry",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[],
         layouts: &[Layout::STEREO],

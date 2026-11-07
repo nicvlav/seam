@@ -23,8 +23,8 @@ seam_host::export_cabi!(ExampleEq);
 use std::sync::Arc;
 
 use seam_host::{
-    Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status,
+    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
+    SavedState, Status,
 };
 use seam_params::{AudioParams, ParamDecl, ParamId, ParamSet};
 use seam_session::Session;
@@ -49,7 +49,10 @@ impl Plugin for ExampleEq {
         version: "0.1.0",
         id: "dev.seam.example-eq",
         vst3_class_id: 0x44f0_fc1b_fd79_434d_a987_84b8_01dc_348b_u128.to_be_bytes(),
-        au_codes: (*b"SmEq", *b"Seam"),
+        au_codes: AuCodes {
+            subtype: *b"SmEq",
+            manufacturer: *b"Seam",
+        },
         category: Category::Effect,
         features: &[Feature::Equalizer],
         layouts: &[Layout::STEREO, Layout::MONO],
