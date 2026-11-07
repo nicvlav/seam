@@ -1,0 +1,69 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+authors = ["Christopher N Vlavianos"]
+license = "MIT"
+repository = "https://github.com/nicvlav/seam"
+readme = "README.md"
+publish = false
+
+# Three tiers (core, projections, shells) as seven layers, each crate
+# depending only on lower ones:
+#   0  seam-testkit (test tools)
+#   1  seam-params, seam-ump
+#   2  seam-undo, seam-session
+#   3  seam-learn (the core's top), seam-bridge (the page)
+#   4  seam-host (plugin formats)
+#   5  seam-example-eq and seam-example-gain, plugins; 6 xtask
+# The core (layers 1 to 3) builds with no window, WebView or host dependency.
+[workspace.dependencies]
+# Tests only: counts allocations made where the audio thread may not make
+# one. Without the default "disable_release", so it also guards release-built
+# tests; the warn features count a violation instead of aborting, so a gate
+# fails as a test with a message rather than killing the test binary.
+assert_no_alloc = { version = "1.1.2", default-features = false, features = ["warn_debug", "warn_release"] }
+
+[workspace.lints.rust]
+# Only the boundary code may use unsafe: seam-host's format exporters (VST3
+# COM, CLAP and the C ABI) and the modules they share (the boundary, the
+# engine and the fault reports), each allowing it on its own module.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+# Every public item says what it is for.
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+# A `pub` item nothing outside its crate can reach is `pub(crate)`.
+unreachable_pub = "warn"
+# `loom` is the model checker's cfg: RUSTFLAGS="--cfg loom" swaps the atomics
+# of the hand-offs it models. `seam_rtsan` marks the audio entry points for
+# the nightly real-time sanitizer lane.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(seam_rtsan)'] }
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+# Every unsafe block says why it holds (`// SAFETY:`).
+undocumented_unsafe_blocks = "warn"
+redundant_closure_for_method_calls = "warn"
+# Public docs carry their failure modes in the standard sections.
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_safety_doc = "warn"
+doc_markdown = "warn"
+# Functions stay under 100 lines (clippy's default threshold).
+too_many_lines = "warn"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+# A release build with debug info, for profilers.
+[profile.profiling]
+inherits = "release"
+debug = true

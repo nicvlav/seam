@@ -1,0 +1,19 @@
+[package]
+name = "seam-testkit"
+description = "Test tools shared by the Seam crates: the allocation gate, latches, expected contract assertions and the drift check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["testing", "allocation", "real-time", "audio", "plugin"]
+categories = ["development-tools::testing"]
+publish.workspace = true
+
+[dependencies]
+assert_no_alloc.workspace = true
+
+[lints]
+workspace = true
