@@ -268,15 +268,18 @@ impl<T: Clone> Value<T> {
     fn write(&self, value: T, author: Author) {
         let (origin, recorded) = author.resolve(self.shared.clock.applying());
         let stamp = self.shared.clock.stamp();
-        // What the write replaces is declared before the guard, so it drops
-        // after the unlock on every path, a panicking `Clone` included,
-        // since a `T`'s `Drop` may call this value.
+        // Both clones are made before the lock, so a panicking `Clone`
+        // changes nothing. What the write replaces is declared before the
+        // guard, so it drops after the unlock on every path, since a `T`'s
+        // `Drop` may call this value.
+        let stored = value.clone();
+        let mut rebase = matches!(origin, Origin::Restore | Origin::Replay).then(|| value.clone());
         let old;
         let stale;
         let mut gesture = (None, None);
         let mut coalesced = None;
         let mut state = self.shared.lock();
-        old = std::mem::replace(&mut state.value, value.clone());
+        old = std::mem::replace(&mut state.value, stored);
         state.origin = origin;
         stale = if origin == Origin::Replay {
             // A replay writes over whatever another thread wrote since the
@@ -294,13 +297,15 @@ impl<T: Clone> Value<T> {
             // drag back keeps the drag.
             gesture.1 = state.after.replace(value);
         } else {
-            if state.gestures > 0 && matches!(origin, Origin::Restore | Origin::Replay) {
+            if state.gestures > 0
+                && let Some(rebase) = rebase.take()
+            {
                 // A restore or a replay during a gesture: the gesture
                 // records from the value it wrote, and the commit
                 // below moves the baseline even if the gesture writes
                 // nothing more. Host and learned writes leave the gesture's
                 // before and after alone.
-                gesture = (state.before.replace(value.clone()), state.after.take());
+                gesture = (state.before.replace(rebase), state.after.take());
             }
             if state.tracked {
                 let sequence = self.shared.clock.sequence();
