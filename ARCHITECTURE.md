@@ -162,6 +162,12 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   [testing.md](docs/testing.md#2-the-audio-path-does-not-allocate) says what
   each sees and what is left to review ([checking the audio-thread
   rule][mark]).
+- A saved block names two versions, each its own: `seamStateVersion` for the
+  frame Seam gives it, and `pluginStateVersion` for the plugin's schema. A save
+  writes the higher of the block's and the build's for each, and keeps the keys
+  it does not read, so a block a newer build wrote reaches it again whole
+  ([the saved block's two versions][versions], [upgrading an older
+  block][migration]).
 - Generated files (the page's protocol types, its test parameter map, `seam.h`,
   the example EQ's JUCE settings) are committed and compared byte for byte in
   CI ([what runs the generator][generator], [keeping the header true][header]).
@@ -236,8 +242,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 [header]: docs/transfer-from-seam-juce.md#d63-keeping-the-c-header-true
 [load]: docs/transfer-from-seam-juce.md#d39-a-load-between-a-replays-check-and-its-write
 [mark]: docs/transfer-from-seam-juce.md#d67-checking-the-audio-thread-locking-rule
+[migration]: docs/transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block
 [panic]: docs/transfer-from-seam-juce.md#d60-a-panic-inside-a-hosts-call
 [send]: docs/transfer-from-seam-juce.md#d51-whether-a-plugin-must-be-send
 [tick]: docs/transfer-from-seam-juce.md#d53-what-ticks-a-plugin-with-no-editor-open
+[versions]: docs/transfer-from-seam-juce.md#d84-the-saved-blocks-two-versions
 [vst3]: docs/transfer-from-seam-juce.md#d59-the-shape-of-the-vst3-exporter
 [webview]: docs/transfer-from-seam-juce.md#d16-where-the-webview-pieces-live

@@ -628,6 +628,11 @@ they are written again saved past the load limit (a reviewer's probe: 20 MiB of
 
 A version and a hook per session section was the first audit's plan.
 
+Amended on 2026-11-07 by two of the owner's decisions: the version a migration
+keys on is the plugin's own, `pluginStateVersion`, apart from Seam's frame
+(D84), and a migration returns a `Result` with its reason (D85). The form before
+keyed on `seamStateVersion` and answered a `bool`.
+
 ### D81. A registration made while a panic unwinds
 
 [The decision](transfer-from-seam-juce.md#d81-a-registration-made-while-a-panic-unwinds)
@@ -658,6 +663,53 @@ unmap too. The implementer's choice; to confirm.
 
 The first form had two functions with the same body. They are one since
 2026-11-07, the implementer's choice; to confirm.
+
+### D84. The saved block's two versions
+
+[The decision](transfer-from-seam-juce.md#d84-the-saved-blocks-two-versions)
+
+Decided by the owner on 2026-11-07. The form before carried one number,
+`seamStateVersion`, for Seam's frame and the plugin's schema both. A plugin
+raised it through `with_migration`, which refused a version below Seam's 1, so
+Seam could never reshape its own frame, and a block could not say whose number
+it carried. That a save writes the plugin's version at 0 too, rather than
+leaving it out, is the implementer's choice within the decision, as the owner
+leaned to blocks that describe themselves. So is refusing a block whose plugin
+version is there but not a whole number, with a `LoadError` of its own, rather
+than reading it as 0.
+
+### D85. A migration that cannot upgrade a block
+
+[The decision](transfer-from-seam-juce.md#d85-a-migration-that-cannot-upgrade-a-block)
+
+Decided by the owner on 2026-11-07. The form before returned `bool`, and its
+false became `LoadError::MigrationFailed` with no reason. That the error is one
+boxed type, not a type the closure chooses, is the implementer's choice within
+the decision: a generic one could not be inferred from `Ok(())` or `?`.
+
+### D86. The AU codes
+
+[The decision](transfer-from-seam-juce.md#d86-the-au-codes)
+
+Decided by the owner on 2026-11-07. The form before was the pair
+`([u8; 4], [u8; 4])`, subtype first, which a plugin could swap silently. One
+struct as one field, rather than two fields, is the implementer's choice within
+the decision.
+
+### D87. The main bus in `ProcessSetup`
+
+[The decision](transfer-from-seam-juce.md#d87-the-main-bus-in-processsetup)
+
+Decided by the owner on 2026-11-07. The form before had `inputs` and `outputs`
+fields.
+
+### D88. A call a test host was refused
+
+[The decision](transfer-from-seam-juce.md#d88-a-call-a-test-host-was-refused)
+
+Decided by the owner on 2026-11-07. The form before answered `bool`, true for
+`kResultOk` and the C interface's true. A `Refused` per host, rather than one
+for both, is the implementer's choice within the decision.
 
 ## Rules
 
@@ -707,3 +759,6 @@ The check was planned for stage 3, with the exporters.
 [The rule](transfer-from-seam-juce.md#h1-the-saved-block)
 
 Writing a choice as an integer answers ST-14, and `float_roundtrip` ST-2.
+
+Since 2026-11-07 the block carries `pluginStateVersion` after
+`seamStateVersion`, the owner's decision (D84).

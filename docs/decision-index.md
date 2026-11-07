@@ -834,8 +834,8 @@ move its line here; when a decision gains code, add one.
 
 [Record section](transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block)
 
-- `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::versions`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
-- test `crates/host/tests/state.rs`: `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `a_newer_builds_block_keeps_its_version_and_values_through_an_older_builds_save`, `a_fresh_state_and_one_that_loaded_an_older_block_save_their_own_version`, `unknown_top_level_keys_are_kept_saved_after_extra_in_key_order_and_replaced_by_the_next_load`, `a_block_within_the_limit_that_would_save_back_past_it_is_refused_and_changes_nothing`
+- `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::versions`, `Migration`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
+- test `crates/host/tests/state.rs`: `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `a_newer_builds_block_keeps_its_version_and_values_through_an_older_builds_save`, `a_fresh_state_and_one_that_loaded_an_older_block_save_their_own_version`, `unknown_top_level_keys_are_kept_saved_after_extra_in_key_order_and_replaced_by_the_next_load`, `a_block_within_the_limit_that_would_save_back_past_it_is_refused_and_changes_nothing`, `the_migration_runs_only_for_a_block_of_an_older_plugin_version_and_gets_that_version`
 
 ### D81. A registration made while a panic unwinds
 
@@ -858,6 +858,49 @@ move its line here; when a decision gains code, add one.
 
 - `page/src/hooks.ts`: `useParam`, `onDrag`, `setValue`
 - test `page/test/useParam.test.ts`: `brackets one drag into begin, set..., end in order`, `setValue outside a drag sends only a set`
+
+### D84. The saved block's two versions
+
+[Record section](transfer-from-seam-juce.md#d84-the-saved-blocks-two-versions)
+
+- `crates/host/src/state.rs`: `STATE_VERSION`, `SEAM_VERSION`, `PLUGIN_VERSION`, `Versions`, `Versions::newest`, `LastLoad::versions`, `SavedState::versions`, `SavedState::new`, `SavedState::save`, `SavedState::load`, `versions`, `whole`, `LoadError::BadVersion`, `LoadError::BadPluginVersion`
+- test `crates/host/tests/state.rs`: `a_block_is_version_parameters_extra_in_that_order_with_each_value_typed_by_kind`, `each_version_saves_as_the_higher_of_the_blocks_and_this_builds_on_its_own`, `the_migration_runs_only_for_a_block_of_an_older_plugin_version_and_gets_that_version`, `a_block_without_a_plugin_version_is_at_0`, `a_save_writes_both_versions_first_whatever_order_the_block_held_them_in`, `a_version_past_u64s_range_or_written_as_a_float_still_loads`, `a_refused_block_says_which_check_it_failed`, `the_largest_capture_saves_a_block_at_the_limit_that_loads_and_one_byte_more_is_refused`
+- test `crates/host/tests/hostile.rs`: `block`, `check`
+
+### D85. A migration that cannot upgrade a block
+
+[Record section](transfer-from-seam-juce.md#d85-a-migration-that-cannot-upgrade-a-block)
+
+- `crates/host/src/state.rs`: `Migrate`, `Migration`, `SavedState::with_migration`, `SavedState::load`, `LoadError::MigrationFailed`, `LoadError::source`
+- test `crates/host/tests/state.rs`: `a_migrations_error_fails_the_load_with_its_reason_and_changes_nothing`, `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `hostile_blocks_through_a_migration_keep_every_promise`
+
+### D86. The AU codes
+
+[Record section](transfer-from-seam-juce.md#d86-the-au-codes)
+
+- `crates/host/src/info.rs`: `AuCodes`, `PluginInfo::au_codes`
+- `crates/host/src/cabi/juce.rs`: `juce_settings`
+- `examples/eq/seam-juce.cmake`: `SEAM_PLUGIN_CODE`, `SEAM_PLUGIN_MANUFACTURER_CODE`
+- test `xtask/tests/drift.rs`: `every_generated_file_is_current`
+
+### D87. The main bus in `ProcessSetup`
+
+[Record section](transfer-from-seam-juce.md#d87-the-main-bus-in-processsetup)
+
+- `crates/host/src/audio.rs`: `ProcessSetup::layout`, `Block::channels`
+- `crates/host/src/engine/process.rs`: `Audio::new`
+- test `crates/host/src/cabi/tests.rs`: `an_instrument_plays_with_no_input_or_a_narrower_one`, `activation_builds_a_processor_for_the_setup_and_layout`
+- test `crates/host/src/vst3/tests.rs`: `layouts_follow_the_declaration`
+
+### D88. A call a test host was refused
+
+[Record section](transfer-from-seam-juce.md#d88-a-call-a-test-host-was-refused)
+
+- `crates/host/src/vst3/test_host.rs`: `Refused`, `Refused::check`, `REFUSALS`, `TestHost::load`, `Blocks::send`
+- `crates/host/src/cabi/test_host.rs`: `Refused`, `Refused::check`, `TestHost::activate`, `TestHost::load`
+- test `crates/host/src/engine/tests.rs`: `Shell::Refused`, `a_block_padded_with_nuls_loads_and_one_followed_by_anything_else_fails`
+- test `crates/host/src/vst3/tests.rs`: `the_host_writes_through_process_and_through_the_controller`, `layouts_follow_the_declaration`, `a_panicking_entry_point_answers_an_error`, `state_round_trips_through_streams_on_any_thread`, `setup_is_refused_while_active`, `a_setup_with_no_block_size_keeps_its_rate_and_one_past_the_limit_is_built_for_the_limit`
+- test `crates/host/src/cabi/tests.rs`: `activation_builds_a_processor_for_the_setup_and_layout`, `a_panic_in_activate_or_idle_is_answered`, `the_saved_block_round_trips_and_a_stranger_changes_nothing`, `an_instrument_plays_with_no_input_or_a_narrower_one`
 
 ## Parameters
 
@@ -1457,7 +1500,7 @@ move its line here; when a decision gains code, add one.
 - `Cargo.toml`: `float_roundtrip`
 - `crates/host/src/lib.rs`: module
 - `crates/host/src/plugin.rs`: `Plugin::saved`
-- `crates/host/src/state.rs`: module, `STATE_VERSION`, `SavedState::save`, `SavedState::with_migration`
+- `crates/host/src/state.rs`: module, `STATE_VERSION`, `SEAM_VERSION`, `PLUGIN_VERSION`, `SavedState::save`, `SavedState::with_migration`
 - `crates/host/src/vst3/mod.rs`: module
 - test `crates/host/tests/state.rs`: module, `a_block_is_version_parameters_extra_in_that_order_with_each_value_typed_by_kind`, `save_load_save_gives_the_same_bytes_on_linear_skewed_and_stepped_ranges`, `a_save_racing_loads_writes_one_block_or_the_other_never_a_mix`, `save_load_save_is_a_fixpoint_for_any_double_in_a_section_or_a_kept_key`
 - test `crates/session/tests/float_fixpoint.rs`: module
@@ -1471,7 +1514,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/cabi/abi.rs`: `SeamPlugin::load`
 - `crates/host/src/cabi/mod.rs`: `load`
 - `crates/host/src/plugin.rs`: `Plugin::saved`
-- `crates/host/src/state.rs`: `SavedState::load`
+- `crates/host/src/state.rs`: `SavedState::load`, `versions`, `whole`
 - `crates/host/src/vst3/component.rs`: `Component::setState`
 - `crates/host/src/vst3/stream.rs`: `read_all`
 - test `crates/host/src/engine/tests.rs`: `a_block_padded_with_nuls_loads_and_one_followed_by_anything_else_fails`

@@ -49,12 +49,14 @@ delivered to a plugin through an exporter.
 - `seam-ump`: Universal MIDI Packets: a fixed-capacity event list per block, and
   the channel voice messages read from it and written back.
 - `seam-host`: the `Plugin` and `Processor` traits and `PluginInfo`, and
-  `SavedState`, the saved block as JSON. A load keeps unknown parameter ids and
-  top-level keys, migrates an older block, and refuses what is past fixed
-  limits, a block that would save back past the size limit included; a setup
-  past the block size limit is built for the limit. A plugin
-  that is `Send` is lent to each main-thread call in turn, and a call that meets
-  another thread's loan waits a bounded time before it is refused.
+  `SavedState`, the saved block as JSON, which names Seam's frame version and
+  the plugin's own schema version apart. A load keeps unknown parameter ids and
+  top-level keys, migrates a block of an older plugin version or fails with the
+  migration's reason, and refuses what is past fixed limits, a block that would
+  save back past the size limit included; a setup past the block size limit is
+  built for the limit. A plugin that is `Send` is lent to each main-thread call
+  in turn, and a call that meets another thread's loan waits a bounded time
+  before it is refused.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
   main-thread timer.
 - The C interface (`export_cabi!`) and its generated header, `include/seam.h`,
@@ -63,7 +65,7 @@ delivered to a plugin through an exporter.
   counts and reports faults, and flushes denormals around each block. It stages
   each piece of a block's channels in place, and a model of every way a host may
   hand its buffers checks that. Test hosts drive a plugin through either
-  exporter.
+  exporter, and answer a refused call with what the host was told.
 - `seam-bridge`: the page protocol, versioned, with its TypeScript generated
   from the Rust types and a check that the version moves when a message's shape
   does. Decoding refuses a position outside 0 to 1, from either side.

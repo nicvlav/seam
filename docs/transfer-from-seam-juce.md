@@ -113,10 +113,15 @@ that.
 | D77 | [How deep may a session section nest? (S1, S4, H2)](#d77-how-deep-a-session-section-may-nest) | 125 levels (`seam_session::MAX_SECTION_DEPTH`). A deeper capture is refused as it is taken, so a save never writes a block the same build cannot load. A capture that would grow the block past `MAX_STATE_BYTES` is refused too, against a budget the saved state sets whenever it is made, and a load whose block would save back past it is refused whole. | to confirm |
 | D78 | [How do a page and a native side of different protocol versions find out? (B1, B4)](#d78-protocol-versions) | The native side answers every `ready`: with a snapshot when it speaks the page's version, and otherwise with a `reject` carrying its own version and a reason, which fails the page. No native side exists yet; the decoding and the page's half are built. | to confirm |
 | D79 | [What does the page client do while the native side has not answered, and when a hook's command changes? (B1, B5)](#d79-the-page-client-before-the-native-side-answers) | The client sends `ready` again every second until a snapshot or a reject arrives, it fails, or it is disposed. `useCommand` keys its pending count and its last result and error by the command's name. The page holds its writes until it is answered, so each `ready` may start a new page session. | to confirm |
-| D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | `SavedState::with_migration(version, migrate)`: a block of an older version is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads. A save keeps the unknown parameter and top-level keys the older build does not read. | to confirm |
+| D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | `SavedState::with_migration(version, migrate)`: a block of an older plugin version (D84) is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads, or to refuse with its reason (D85). A save keeps the unknown parameter and top-level keys the older build does not read. | to confirm |
 | D81 | [Does a late apply made while a panic unwinds leave the session owing a pass? (S6, S10, D55)](#d81-a-registration-made-while-a-panic-unwinds) | No. Only a panic that began inside a pass or a late apply leaves the pass owed, for the next tick to run again; a registration made from a destructor during another panic owes none, so it clears no undo history. | to confirm |
 | D82 | [When do a restore and an unmap run a learn target's own code? (L8, L9, D54, D71)](#d82-when-learn-runs-a-targets-own-code) | Last: after learn has settled its table, published it and told the session, so a target whose `end` panics leaves no earlier mapping routing, in learn or on the audio side, and learn usable. | to confirm |
 | D83 | [Do a page control's `onDrag` and `setValue` differ? (B2)](#d83-a-controls-drag-and-one-shot-set) | Only in the gesture `onDragStart` and `onDragEnd` put around a drag: they are one function, so a `setValue` during a drag joins it. | to confirm |
+| D84 | [Whose version does the saved block carry? (H1, H2, D80)](#d84-the-saved-blocks-two-versions) | Two, each its own: `seamStateVersion` is Seam's frame, at 1, and `pluginStateVersion` the plugin's schema, 0 with no migration and when absent. A save writes both, each the higher of the block's and the build's. | decided |
+| D85 | [How does a migration say it cannot upgrade a block? (D80)](#d85-a-migration-that-cannot-upgrade-a-block) | It returns a `Result` whose error is a boxed `Error`, so it can use `?`, and `LoadError::MigrationFailed` carries the reason. | decided |
+| D86 | [How does `PluginInfo` hold the AU codes? (D64)](#d86-the-au-codes) | As one `AuCodes` with named `subtype` and `manufacturer` fields, so the two cannot be swapped unseen. | decided |
+| D87 | [How does `ProcessSetup` give the main bus? (D58)](#d87-the-main-bus-in-processsetup) | As one `layout: Layout`, the one of the plugin's layouts the host chose. | decided |
+| D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1324,10 +1329,10 @@ plugin crate exports with `export_vst3!` behind a default `vst3` feature and
 `export_cabi!` behind `cabi`.
 
 JUCE's build-time facts come from a `seam-juce.cmake` that `cargo xtask gen`
-writes per plugin from `PluginInfo`: names, the AU codes (from which JUCE also
-derives its VST3 class id, so the adapter's build is a different plugin from
-Seam's native one), the VST3 categories, MIDI. Writing it refuses keys whose
-JUCE ids collide, with each other or with JUCE's own bypass and program
+writes per plugin from `PluginInfo`: names, the AU codes (D86; from which JUCE
+also derives its VST3 class id, so the adapter's build is a different plugin
+from Seam's native one), the VST3 categories, MIDI. Writing it refuses keys
+whose JUCE ids collide, with each other or with JUCE's own bypass and program
 parameters.
 
 `seam_add_juce_plugin` in `adapters/juce/SeamJuce.cmake` reads them, runs cargo
@@ -1791,23 +1796,25 @@ the page, and a result kept across a change of name.
 **Question and C++ Seam.** How does a plugin upgrade a block an older version of
 it saved? (H1, H2) Not checked against C++.
 
-**Rust.** `SavedState::with_migration(version, migrate)`: the plugin writes
-`version`, at least `STATE_VERSION` (1), or the version of the block it last
-loaded when that is higher, so a newer build's block that an older build loads
-and saves back keeps its version, and the newer build does not migrate it as an
-older one. The block keeps what the older build does not read, too: the
-parameters it does not declare (D4), and the top-level keys other than the
-version, `parameters` and `extra`, saved after `extra` in key order. The newer
-build then finds everything it wrote, under the version that promises it. What
-it keeps counts against the load limit: a block whose kept keys would write it
-back past `MAX_STATE_BYTES` is refused whole (D77).
+**Rust.** `SavedState::with_migration(version, migrate)`: `version` is the
+plugin's own schema version, `pluginStateVersion`, apart from Seam's frame
+(D84), and a plugin with no migration is at 0. A save writes it, or the version
+of the block it last loaded when that is higher, so a newer build's block that
+an older build loads and saves back keeps its version, and the newer build does
+not migrate it as an older one. The block keeps what the older build does not
+read, too: the parameters it does not declare (D4), and the top-level keys other
+than the versions, `parameters` and `extra`, saved after `extra` in key order.
+The newer build then finds everything it wrote, under the version that promises
+it. What it keeps counts against the load limit: a block whose kept keys would
+write it back past `MAX_STATE_BYTES` is refused whole (D77).
 
-A block of an older version is handed to `migrate` whole, as a JSON object, to
-rewrite in place before it loads; a migration adds what the block lacks and
-never overwrites a key the block holds, which may be newer than anything it
-derives. `migrate` answering false makes the block unrecognised, so it changes
-nothing; a block of the plugin's version or a newer one loads as it is (H2). It
-runs inside the load, on the loading thread, so it touches only the block.
+A block of an older plugin version is handed to `migrate` whole, with that
+version, as a JSON object, to rewrite in place before it loads; a migration adds
+what the block lacks and never overwrites a key the block holds, which may be
+newer than anything it derives. A migration that cannot upgrade the block
+returns its reason, and the load fails with it and changes nothing (D85); a
+block of the plugin's version or a newer one loads as it is (H2). It runs inside
+the load, on the loading thread, so it touches only the block.
 
 One hook keyed by the block's version, not one per section; learn's section
 carries its own schema (L9).
@@ -1871,6 +1878,104 @@ one-shot set, whose gesture the native side is to open (B2).
 drift apart.
 
 [History](decision-history.md#d83-a-controls-drag-and-one-shot-set)
+
+### D84. The saved block's two versions
+
+**Question and C++ Seam.** Whose version does the saved block carry? (H1, H2,
+D80) The C++ Seam wrote one, `seamStateVersion` (H1).
+
+**Rust.** Two, each its own. `seamStateVersion` is the version of Seam's frame,
+the shape Seam gives `parameters`, `extra` and the keys a load keeps:
+`STATE_VERSION`, at 1. `pluginStateVersion` is the plugin's own schema, the
+version `with_migration` names (D80). A plugin with no migration is at 0, and a
+block without the key reads as 0. A save always writes both, the plugin's at 0
+too, so every block says what it holds, in this order: `seamStateVersion`,
+`pluginStateVersion`, `parameters`, `extra`, then the kept keys in key order
+(H1).
+
+A block from a newer build loads what this build reads. Each version saves back
+as the higher of the block's and this build's, on its own, so neither lifts the
+other, and the keys a load keeps are kept as before (D80). A frame version that
+is missing, not a whole number or below 1 makes the block unrecognised, and so
+does a plugin version that is there but not a whole number from 0 (H2). Seam
+would migrate its own frame first, and the plugin's migration after it; the
+frame has had one shape, so only the plugin's runs, when the block's plugin
+version is below the plugin's.
+
+**Alternatives.** The alternatives were one number for both, which Seam could
+never raise for its own frame, and a plugin version left out at 0, which a
+reader would have to know means 0.
+
+[History](decision-history.md#d84-the-saved-blocks-two-versions)
+
+### D85. A migration that cannot upgrade a block
+
+**Question and C++ Seam.** How does a migration say it cannot upgrade a block?
+(D80) Not checked against C++.
+
+**Rust.** `migrate` returns `Result<(), Box<dyn Error + Send + Sync>>`, so it
+can use `?` on any error, and give text with `.into()`. The load then fails with
+`LoadError::MigrationFailed`, which holds the reason and returns it as its
+`source`, and changes nothing. So `LoadError` is neither `Copy` nor `PartialEq`,
+and a test matches on its variant. Each exporter answers the host as it did for
+any failed load (D66).
+
+**Alternatives.** The alternatives were a closure generic over its error type,
+which neither `Ok(())` nor `?` lets the compiler infer, so every migration would
+name its error type, and the `bool` it returned before, which dropped the
+reason.
+
+[History](decision-history.md#d85-a-migration-that-cannot-upgrade-a-block)
+
+### D86. The AU codes
+
+**Question and C++ Seam.** How does `PluginInfo` hold the AU codes? (D64) Not
+applicable: the C++ Seam's plugins were JUCE's, whose build names them
+`PLUGIN_CODE` and `PLUGIN_MANUFACTURER_CODE`.
+
+**Rust.** `PluginInfo::au_codes` is one `AuCodes`, whose `subtype` and
+`manufacturer` fields are four bytes each, so a plugin that swapped them says so
+where it writes them. The JUCE adapter's settings take the subtype as JUCE's
+plugin code and the manufacturer as its manufacturer code (D64).
+
+**Alternatives.** The alternatives were two fields on `PluginInfo`, which split
+one identity across the struct, and the pair `([u8; 4], [u8; 4])` it was, whose
+order nothing checked.
+
+[History](decision-history.md#d86-the-au-codes)
+
+### D87. The main bus in `ProcessSetup`
+
+**Question and C++ Seam.** How does `ProcessSetup` give the main bus? (D58)
+JUCE's `prepareToPlay` took the rate and the block size; the channel counts came
+from the processor's buses.
+
+**Rust.** As one `layout: Layout`, the one of `PluginInfo::layouts` the host
+chose, which every exporter checks before it activates. The C interface's
+`SeamLayout` and `seam.h` are unchanged: only the Rust type is.
+
+**Alternatives.** The alternative was the two counts, `inputs` and `outputs`, it
+had, which a processor put back together by hand.
+
+[History](decision-history.md#d87-the-main-bus-in-processsetup)
+
+### D88. A call a test host was refused
+
+**Question and C++ Seam.** What does a test host answer for a call the plugin
+refused? (D60) Not applicable.
+
+**Rust.** `Result<(), Refused>`, for every call the plugin can refuse.
+`seam_host::vst3::Refused` carries the `tresult` the plugin answered and names
+it when shown; `seam_host::cabi::Refused` stands for the C interface's `false`,
+which carries nothing more. A test then pins the exact answer, or uses `?`. A
+lookup (`parameter`, `text`, `parse`) and `save` answer `Option`. Open: `save`
+answers `None` for a refused `getState`, and so drops its `tresult`.
+
+**Alternatives.** The alternatives were the `bool` each returned, which mirrored
+the `tresult` as a C++ host would, and one `Refused` for both hosts, whose
+variants each host would only half use.
+
+[History](decision-history.md#d88-a-call-a-test-host-was-refused)
 
 ## How to read this
 
@@ -3324,7 +3429,8 @@ false`, which is new in Rust. The exporters do not check it yet.
 **Invariant.** The plugin's saved state is UTF-8 JSON with no byte-order mark or
 framing: one object with `seamStateVersion` (an integer, currently 1),
 `parameters` (a flat object from key to value in real units) and `extra` (the
-session, left out when empty), in that order. Bool parameters write
+session, left out when empty), in that order. In Rust a second version,
+`pluginStateVersion`, follows the first (D84). Bool parameters write
 `true`/`false`, a discrete parameter with an integral value writes an integer,
 everything else a double that round-trips the f32 exactly. Only host-projected
 parameters are written, in P10 order (`seam_StateJson.h:148-166`). A save may
@@ -3344,11 +3450,13 @@ and the unknown top-level keys follow `extra` (D80).
 `seam_host::SavedState` holds the parameter set, whose clock its load marks
 (D52), and the session, and saves and loads from any thread but audio. The
 discrete parameters are bool and choice (P17), so a choice writes its index as
-an integer and a stepped continuous range writes a double, 2.0 say. The version
-is 1 unless the plugin raises it with a migration, which upgrades an older block
-before it loads (D80). `serde_json`'s `float_roundtrip` reads every double back
-to the bits it was written from, so save, load, save writes the same bytes for
-any double in a section or a kept key; without it about one value in ten drifted
+an integer and a stepped continuous range writes a double, 2.0 say.
+`seamStateVersion` is Seam's frame, at 1, and `pluginStateVersion` the plugin's
+own schema, 0 unless the plugin raises it with a migration, which upgrades a
+block of an older plugin version before it loads (D80, D84). `serde_json`'s
+`float_roundtrip` reads every double back to the bits it was written from, so
+save, load, save writes the same bytes for any double in a section or a kept
+key; without it about one value in ten drifted
 by a bit on every load.
 
 [History](decision-history.md#h1-the-saved-block)
@@ -3358,18 +3466,20 @@ by a bit on every load.
 **Invariant.** A block that is not recognised (empty, binary, longer than 64 MiB
 or one that would save back longer, not JSON, not an object, followed by any
 byte but JSON whitespace and NUL padding, a version that is missing, not a whole
-number or below 1, `parameters` not an object) writes nothing and raises nothing
-in the plugin, and the host is told the load failed where its format can hear it
-(D66, D72). A recognised block assigns every parameter: a missing value, a
-mistyped one (a string, array, object or null), a non-finite one, or one outside
-f32's range takes that parameter's default; anything else goes through the
-restore write (P8), which snaps and clamps it to the parameter's range. A number
-past f64's range, anywhere in the block, reads as null, so only that value is
-refused and the rest loads. A whole-number version written as a float (1.0)
-loads, and one past u64's range reads as the largest. A newer version loads
-best-effort, never refused; an older one is first upgraded by the plugin's
-migration, when it has one (D80). The same block always produces the same state,
-learn's routing included (D71), whatever the instance held before.
+number or below 1, in Rust a plugin version that is there but not a whole number
+from 0, `parameters` not an object) writes nothing and raises nothing in the
+plugin, and the host is told the load failed where its format can hear it (D66,
+D72). A recognised block assigns every parameter: a missing value, a mistyped
+one (a string, array, object or null), a non-finite one, or one outside f32's
+range takes that parameter's default; anything else goes through the restore
+write (P8), which snaps and clamps it to the parameter's range. A number past
+f64's range, anywhere in the block, reads as null, so only that value is refused
+and the rest loads. A whole-number version written as a float (1.0) loads, and
+one past u64's range reads as the largest. A newer version of either loads
+best-effort, never refused; an older plugin version is first upgraded by the
+plugin's migration, when it has one (D80, D84). The same block always produces
+the same state, learn's routing included (D71), whatever the instance held
+before.
 
 **Why.** Reproducible preset and session recall. This deliberately differs from
 keeping the current value for a missing key: a load must not depend on prior

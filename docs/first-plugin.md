@@ -134,7 +134,11 @@ let saved = Arc::new(SavedState::new(&set, &session));
 plugin, and `expect` panics with its message. `saved` hands the exporter the
 [`SavedState`](../crates/host/src/state.rs), and the exporter does every host
 save and load through it without touching the plugin. The saved block is JSON:
-the parameters' values, and one keyed section per session participant.
+Seam's version and the plugin's own, the parameters' values, and one keyed
+section per session participant. A later version of the plugin that renames or
+rescales a parameter raises its own version with
+[`SavedState::with_migration`](../crates/host/src/state.rs), which upgrades an
+older block as it loads.
 
 ## 4. Undo
 
@@ -260,10 +264,11 @@ reasons; the history's place in it does not matter.
 `seam_host::vst3::TestHost` drives the plugin through the VST3 exporter's own
 interfaces, as a host would.
 [`examples/gain/tests/gain.rs`](../examples/gain/tests/gain.rs) uses it for
-what a host can reach: it sets up, activates and starts the host, then calls
-`process_in_place` with changes given by host id, in the host's 0 to 1
-(`normalize` converts dB first), reads the modes' names through `parameter`
-and `text`, and carries the saved block through `save` and `load`.
+what a host can reach: it sets up, activates and starts the host, each call
+answering `Ok(())` or the plugin's refusal, then calls `process_in_place` with
+changes given by host id, in the host's 0 to 1 (`normalize` converts dB first),
+reads the modes' names through `parameter` and `text`, and carries the saved
+block through `save` and `load`.
 
 Learn and undo are driven on the plugin itself, since a host cannot reach them:
 the test arms the gain, feeds a controller through the processor, calls `idle`,

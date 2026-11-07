@@ -7,10 +7,10 @@ the contract; this page is the map.
 ### Activation
 
 The host's call that builds a processor:
-[`Plugin::activate`](../crates/host/src/plugin.rs) takes a `ProcessSetup` and
-allocates everything the audio thread will touch. Deactivation hands the
-processor back to the main thread, so what it holds is never freed on the audio
-thread.
+[`Plugin::activate`](../crates/host/src/plugin.rs) takes a `ProcessSetup`, the
+rate, block size and main bus layout the host chose, and allocates everything
+the audio thread will touch. Deactivation hands the processor back to the main
+thread, so what it holds is never freed on the audio thread.
 
 ### Applying mark
 
@@ -39,7 +39,9 @@ Three senses:
   [`Block`](../crates/host/src/audio.rs) holds the channels in place, the frame
   count and the events in and out.
 - **The saved block**: the plugin's saved state, the JSON object a host stores
-  and hands back ([`SavedState`](../crates/host/src/state.rs)).
+  and hands back ([`SavedState`](../crates/host/src/state.rs)). It names two
+  versions: `seamStateVersion`, of the frame Seam gives it, and
+  `pluginStateVersion`, of the plugin's own schema, which a migration raises.
 - **A reserved block**: a range of NRPN numbers the plugin's own protocol owns
   (see [reservation](#reservation)).
 

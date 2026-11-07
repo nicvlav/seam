@@ -117,12 +117,15 @@ What keeps that true:
 
   `seam_host::vst3::TestHost` drives a plugin through the VST3 exporter's own
   COM interfaces. `seam_host::cabi::TestHost` drives it through the C
-  interface's table, as the JUCE adapter calls it. Both exist only with
-  `seam-host`'s `test-host` feature, which a plugin crate turns on in its
-  dev-dependencies, so a shipping plugin carries neither. When dropped, each
-  checks that its instance had no fault on any thread, less the faults the test
-  declares with `expect_faults`. A test that provokes one on purpose declares it
-  and checks that the count moved by exactly one.
+  interface's table, as the JUCE adapter calls it. A call the plugin may refuse
+  answers `Result<(), Refused>`: the VST3 host's `Refused` carries the
+  `tresult`, the C interface's stands for its `false`, so a test pins what the
+  host was told. Both exist only with `seam-host`'s `test-host` feature, which a
+  plugin crate turns on in its dev-dependencies, so a shipping plugin carries
+  neither. When dropped, each checks that its instance had no fault on any
+  thread, less the faults the test declares with `expect_faults`. A test that
+  provokes one on purpose declares it and checks that the count moved by exactly
+  one.
 
 ## 2. The audio path does not allocate
 
