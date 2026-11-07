@@ -1,0 +1,43 @@
+[package]
+name = "seam-bridge"
+description = "The page bridge: the messages between a plugin and its web page, transport-agnostic, with TypeScript generated from the Rust types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "webview", "typescript", "ipc"]
+categories = ["multimedia::audio", "gui", "web-programming"]
+publish.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+seam-params.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# The TypeScript generator (`typescript` module): `cargo xtask gen` and the
+# drift tests enable it, so a plugin that links the bridge for its messages
+# does not build it.
+typescript = ["dep:ts-rs"]
+
+[[test]]
+name = "typescript_drift"
+required-features = ["typescript"]
+
+[[test]]
+name = "protocol_version"
+required-features = ["typescript"]
+
+[dev-dependencies]
+seam-testkit.workspace = true
+
+[lints]
+workspace = true

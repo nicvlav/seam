@@ -1,0 +1,4 @@
+# One line per protocol version: `version <n> shape <hash>`. A version is added
+# when PROTOCOL_VERSION is raised, and its line is never edited afterwards:
+# scripts/check-shape-append-only.py fails a pull request that does.
+version 2 shape 4801c04597036a69

@@ -1,0 +1,109 @@
+{
+  "page": [
+    { "name": "ready", "message": { "type": "ready", "protocol": 2 } },
+    { "name": "gesture begin", "message": { "type": "gestureBegin", "param": "gain" } },
+    { "name": "set", "message": { "type": "set", "param": "gain", "normalized": 0.25 } },
+    { "name": "gesture end", "message": { "type": "gestureEnd", "param": "gain" } },
+    {
+      "name": "invoke with arguments",
+      "message": { "type": "invoke", "call": 1, "command": "rename", "args": { "to": "Lead", "tags": [1, null, "x"] } }
+    },
+    { "name": "invoke with null arguments", "message": { "type": "invoke", "call": 2, "command": "undo", "args": null } }
+  ],
+  "native": [
+    {
+      "name": "snapshot",
+      "message": {
+        "type": "snapshot",
+        "protocol": 2,
+        "params": [
+          { "param": "gain", "normalized": 0.5, "text": "-6.0 dB" },
+          { "param": "mode", "normalized": 0.75, "text": "Warm" }
+        ]
+      }
+    },
+    { "name": "param", "message": { "type": "param", "state": { "param": "gain", "normalized": 0.75, "text": "3.0 dB" } } },
+    { "name": "reply ok", "message": { "type": "reply", "call": 1, "result": { "status": "ok", "value": { "renamed": true } } } },
+    { "name": "reply ok with nothing", "message": { "type": "reply", "call": 2, "result": { "status": "ok", "value": null } } },
+    { "name": "reply err", "message": { "type": "reply", "call": 3, "result": { "status": "err", "message": "no such command" } } },
+    { "name": "event", "message": { "type": "event", "name": "learned", "payload": { "controller": 74 } } },
+    { "name": "reject", "message": { "type": "reject", "protocol": 3, "message": "this plugin speaks protocol 3" } }
+  ],
+  "refusedByNative": [
+    { "name": "unknown type", "text": "{\"type\":\"teleport\"}" },
+    { "name": "unknown field in a set", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":0,\"x\":0}" },
+    { "name": "fractional call", "text": "{\"type\":\"invoke\",\"call\":3.5,\"command\":\"undo\"}" },
+    { "name": "call past u32", "text": "{\"type\":\"invoke\",\"call\":4294967296,\"command\":\"undo\"}" },
+    { "name": "ready without a version", "text": "{\"type\":\"ready\"}" },
+    { "name": "not JSON", "text": "ready" },
+    { "name": "negative call", "text": "{\"type\":\"invoke\",\"call\":-1,\"command\":\"undo\"}" },
+    { "name": "call as text", "text": "{\"type\":\"invoke\",\"call\":\"1\",\"command\":\"undo\"}" },
+    { "name": "protocol past u32", "text": "{\"type\":\"ready\",\"protocol\":4294967296}" },
+    { "name": "negative protocol", "text": "{\"type\":\"ready\",\"protocol\":-1}" },
+    { "name": "position as text", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":\"0.5\"}" },
+    { "name": "position missing", "text": "{\"type\":\"set\",\"param\":\"a\"}" },
+    { "name": "position above 1", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":2.5}" },
+    { "name": "position below 0", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":-0.25}" },
+    { "name": "parameter missing", "text": "{\"type\":\"gestureBegin\"}" }
+  ],
+  "refusedAsNative": [
+    { "name": "unknown field in a param message", "text": "{\"type\":\"param\",\"state\":{\"param\":\"gain\",\"normalized\":0.5,\"text\":\"\"},\"x\":0}" },
+    { "name": "unknown field in a parameter state", "text": "{\"type\":\"param\",\"state\":{\"param\":\"gain\",\"normalized\":0.5,\"text\":\"\",\"x\":0}}" },
+    { "name": "position above 1 in a parameter state", "text": "{\"type\":\"param\",\"state\":{\"param\":\"gain\",\"normalized\":1.5,\"text\":\"\"}}" },
+    { "name": "position as null in a snapshot", "text": "{\"type\":\"snapshot\",\"protocol\":2,\"params\":[{\"param\":\"gain\",\"normalized\":null,\"text\":\"\"}]}" },
+    { "name": "unknown field in a call result", "text": "{\"type\":\"reply\",\"call\":1,\"result\":{\"status\":\"ok\",\"value\":null,\"x\":0}}" },
+    { "name": "unknown type", "text": "{\"type\":\"teleport\"}" },
+    { "name": "reply call past u32", "text": "{\"type\":\"reply\",\"call\":4294967296,\"result\":{\"status\":\"ok\",\"value\":null}}" },
+    { "name": "snapshot protocol past u32", "text": "{\"type\":\"snapshot\",\"protocol\":4294967296,\"params\":[]}" },
+    { "name": "fractional reply call", "text": "{\"type\":\"reply\",\"call\":1.5,\"result\":{\"status\":\"ok\",\"value\":null}}" },
+    { "name": "fractional snapshot protocol", "text": "{\"type\":\"snapshot\",\"protocol\":2.5,\"params\":[]}" }
+  ],
+  "nativeLimits": [
+    { "name": "reply to the largest call", "message": { "type": "reply", "call": 4294967295, "result": { "status": "ok", "value": null } } },
+    { "name": "snapshot of the largest version", "message": { "type": "snapshot", "protocol": 4294967295, "params": [] } },
+    { "name": "a parameter at the low end", "message": { "type": "param", "state": { "param": "gain", "normalized": 0.0, "text": "-24.0 dB" } } },
+    { "name": "a parameter at the high end", "message": { "type": "param", "state": { "param": "gain", "normalized": 1.0, "text": "24.0 dB" } } }
+  ],
+  "tolerated": [
+    {
+      "name": "the largest call",
+      "text": "{\"type\":\"invoke\",\"call\":4294967295,\"command\":\"undo\"}",
+      "message": { "type": "invoke", "call": 4294967295, "command": "undo", "args": null }
+    },
+    {
+      "name": "call zero",
+      "text": "{\"type\":\"invoke\",\"call\":0,\"command\":\"undo\"}",
+      "message": { "type": "invoke", "call": 0, "command": "undo", "args": null }
+    },
+    {
+      "name": "the largest version",
+      "text": "{\"type\":\"ready\",\"protocol\":4294967295}",
+      "message": { "type": "ready", "protocol": 4294967295 }
+    },
+    {
+      "name": "a whole-number position is a float",
+      "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":1}",
+      "message": { "type": "set", "param": "a", "normalized": 1.0 }
+    },
+    {
+      "name": "position zero, the low end",
+      "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":0}",
+      "message": { "type": "set", "param": "a", "normalized": 0.0 }
+    },
+    {
+      "name": "arguments that are null stay null",
+      "text": "{\"type\":\"invoke\",\"call\":1,\"command\":\"undo\",\"args\":null}",
+      "message": { "type": "invoke", "call": 1, "command": "undo", "args": null }
+    },
+    {
+      "name": "ready from a newer page",
+      "text": "{\"type\":\"ready\",\"protocol\":99,\"features\":[]}",
+      "message": { "type": "ready", "protocol": 99 }
+    },
+    {
+      "name": "invoke without arguments, as a page sends a command that takes none",
+      "text": "{\"type\":\"invoke\",\"call\":1,\"command\":\"undo\"}",
+      "message": { "type": "invoke", "call": 1, "command": "undo", "args": null }
+    }
+  ]
+}
