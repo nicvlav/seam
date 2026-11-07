@@ -143,8 +143,8 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 - `undo` and `session` never depend on each other. Both take the same restore
   clock from the parameter set that owns it ([who makes the clock][clock]). A
   load moves the clock with every parameter it writes, under the lock a replay
-  step checks it under, so an undo never writes over a loaded value ([a load
-  and a replay][load]).
+  step checks it under, so no step for a change made before a load replays
+  over it ([a load and a replay][load]).
 - `unsafe` is denied workspace-wide. Only `host`'s `vst3` and `cabi` modules
   and the `boundary`, `engine` and `faults` modules they share allow it, with a
   `// SAFETY:` comment on every block.

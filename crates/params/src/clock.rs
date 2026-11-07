@@ -184,7 +184,7 @@ impl RestoreReader {
     ///
     /// Each load write marks a restore stored under this hold, so a replay
     /// step that checks the stored count under it and writes only while the
-    /// count is unmoved never overwrites a loaded value.
+    /// count is unmoved never overwrites a value loaded since its walk began.
     ///
     /// Hold it only around parameter writes. They take no other lock, so this
     /// stays a leaf lock; holding it around anything else can deadlock with a

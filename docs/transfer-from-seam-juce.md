@@ -72,7 +72,7 @@ that.
 | D36 | [In what order does one undo tick record the changes it sees? (U5, U14)](#d36-the-order-one-undo-tick-records) | In the order they happened: every gesture record, plain value commit and list verb takes a number from one sequence on the `RestoreClock`, and the tick records by it. | decided |
 | D37 | [Does the history keep enrolled values and lists alive? (U13)](#d37-whether-the-history-keeps-enrolled-values-alive) | No. A tracker holds its value or list by a `Weak` handle, so dropping the last handle frees it, and the history forgets the enrollment at its next tick. | decided |
 | D38 | [Do parameters and lists carry the origin of their newest write? (U10)](#d38-the-origin-of-a-newest-write) | Yes, beside the change counter, as a plain value does. A value derived from a parameter or list passes the origin on, and a derived change records nothing. | to confirm |
-| D39 | [What stops a load on another thread landing between a replay's check of the restore clock and its write? (U16, H3)](#d39-a-load-between-a-replays-check-and-its-write) | A lock in the `RestoreClock`. A `Load` takes it for each parameter write and moves the stored count under it, and each replay step that writes parameters holds it across its check of the stored count and its write, so an undo never writes over a loaded value. | to confirm |
+| D39 | [What stops a load on another thread landing between a replay's check of the restore clock and its write? (U16, H3)](#d39-a-load-between-a-replays-check-and-its-write) | A lock in the `RestoreClock`. A `Load` takes it for each parameter write and moves the stored count under it, and each replay step that writes parameters holds it across its check of the stored count and its write, so no undo step for a change made before a load replays over it. A drag open across the load keeps its pre-drag before (D11). | to confirm |
 | D40 | [How many undo histories may one `UiParams` have? (U1)](#d40-one-undo-history-per-uiparams) | One. A second history over the same handle is refused with `HistoryError::HistoryExists`. | to confirm |
 | D41 | [A list step replays while a verb from another thread waits for the tick: what then? (U17)](#d41-a-list-step-replaying-against-a-waiting-verb) | The step drops the waiting verb, which then records nothing, and moves the list's generation, so every step recorded before replays as nothing. | decided |
 | D42 | [Does a change another thread makes while a tick runs keep its order? (D36, U14)](#d42-order-across-ticks) | Yes. The tick takes a number from the sequence as it starts and records only changes numbered before it; later ones wait for the next tick, in order. | decided |
@@ -700,7 +700,8 @@ So either the replay's write lands before the load's, or the replay sees the
 load's write and stops, and the walk clears the history. That holds for a step
 recorded after the load began, too. Without it, an undo could store one
 pre-load value over a loaded one, and nothing re-applies parameters after a
-load (S13).
+load (S13). A drag still open when the load lands is outside this: its step
+keeps its pre-drag before, and undoing it writes that value (U16, D11).
 
 Only parameter steps hold it: a load writes only parameters, and a parameter
 write takes no other lock, so it is a leaf lock.

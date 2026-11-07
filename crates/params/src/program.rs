@@ -101,8 +101,10 @@ impl ProgramParams {
 }
 
 /// A saved state being loaded, after the restore was marked stored. Each
-/// write through it marks the restore stored again, so an undo never writes
-/// over a loaded value.
+/// write through it marks the restore stored again, so no undo step for a
+/// change made before the write replays over it. A user's gesture open
+/// across the write still records at its close, from the value before the
+/// gesture, as it does across any restore.
 ///
 /// # Examples
 ///
