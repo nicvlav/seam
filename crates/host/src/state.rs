@@ -327,9 +327,11 @@ impl SavedState {
     /// `parameters` and `extra`. `migrate` rewrites the block in place into
     /// the current shape, or returns why it cannot, and the load then fails
     /// with [`LoadError::MigrationFailed`] and changes nothing. A block of
-    /// this version or a newer one loads as it is. `migrate` runs inside the
-    /// load, on whichever thread the host loads from, so it touches only the
-    /// block.
+    /// this version or a newer one loads as it is, so at 0 `migrate` never
+    /// runs. The version keys `migrate` writes are ignored: a save writes
+    /// the higher of the block's versions and this build's. `migrate` runs
+    /// inside the load, on whichever thread the host loads from, so it
+    /// touches only the block.
     ///
     /// A migration adds what the block lacks and never overwrites a key the
     /// block already holds. An older build keeps the keys it does not know
@@ -623,7 +625,7 @@ fn versions(root: &Map<String, Json>) -> Result<Versions, LoadError> {
     Ok(Versions { seam, plugin })
 }
 
-/// A whole number from `least` up, as an integer or a float, one past
+/// A whole number from `least` up, as an integer or a float, a float past
 /// `u64`'s range read as `u64::MAX`.
 fn whole(value: &Json, least: u64) -> Option<u64> {
     let Json::Number(number) = value else {

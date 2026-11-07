@@ -705,8 +705,9 @@ So either the replay's write lands before the load's, or the replay sees the
 load's write and stops, and the walk clears the history. That holds for a step
 recorded after the load began, too. Without it, an undo could store one
 pre-load value over a loaded one, and nothing re-applies parameters after a
-load (S13). A drag still open when the load lands is outside this: its step
-keeps its pre-drag before, and undoing it writes that value (U16, D11).
+load (S13). A drag still open when the load lands, a lone write included, is
+outside this: its step keeps its pre-drag before, and undoing it writes that
+value (U16, D11).
 
 Only parameter steps hold it: a load writes only parameters, and a parameter
 write takes no other lock, so it is a leaf lock.
