@@ -412,8 +412,12 @@ impl<P: Plugin> TestHost<P> {
         unsafe { (self.table.tail)(self.instance) }
     }
 
-    /// Returns the saved block, or `None` when `save` refused.
-    pub fn save(&self) -> Option<Vec<u8>> {
+    /// Returns the saved block.
+    ///
+    /// # Errors
+    ///
+    /// [`Refused`], when the instance's `save` answered `false`.
+    pub fn save(&self) -> Result<Vec<u8>, Refused> {
         let mut bytes = Vec::new();
         // SAFETY: `self.instance` is the live instance `new` made (only
         // `release`, which takes the host by `&mut`, frees it). `collect`
@@ -426,7 +430,7 @@ impl<P: Plugin> TestHost<P> {
                 Some(collect),
             )
         };
-        saved.then_some(bytes)
+        Refused::check(saved).map(|()| bytes)
     }
 
     /// Loads a saved block.

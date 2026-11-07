@@ -725,7 +725,8 @@ fields.
 
 Decided by the owner on 2026-11-07. The form before answered `bool`, true for
 `kResultOk` and the C interface's true. A `Refused` per host, rather than one
-for both, is the implementer's choice within the decision.
+for both, is the implementer's choice within the decision, confirmed by the
+owner on 2026-11-07. `save` followed the same day, answering a `Result` too.
 
 ## Rules
 

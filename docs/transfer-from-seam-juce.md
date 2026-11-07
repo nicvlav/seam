@@ -1968,9 +1968,10 @@ refused? (D60) Not applicable.
 **Rust.** `Result<(), Refused>`, for every call the plugin can refuse.
 `seam_host::vst3::Refused` carries the `tresult` the plugin answered and names
 it when shown; `seam_host::cabi::Refused` stands for the C interface's `false`,
-which carries nothing more. A test then pins the exact answer, or uses `?`. A
-lookup (`parameter`, `text`, `parse`) and `save` answer `Option`. Open: `save`
-answers `None` for a refused `getState`, and so drops its `tresult`.
+which carries nothing more. A test then pins the exact answer, or uses `?`.
+`save` answers `Result<Vec<u8>, Refused>` too, so the VST3 host's carries the
+`tresult` `getState` answered. A lookup (`parameter`, `text`, `parse`) answers
+`Option`.
 
 **Alternatives.** The alternatives were the `bool` each returned, which mirrored
 the `tresult` as a C++ host would, and one `Refused` for both hosts, whose

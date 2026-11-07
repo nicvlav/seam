@@ -18,6 +18,6 @@ fuzz_target!(|data: &[u8]| {
         "a block this plugin saved does not load"
     );
     host.idle();
-    assert_eq!(host.save().as_deref(), Some(block.as_slice()));
+    assert_eq!(host.save().as_ref(), Ok(&block));
     assert_eq!(host.faults(), 0);
 });

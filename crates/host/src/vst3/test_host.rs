@@ -662,18 +662,22 @@ impl<P: Plugin> TestHost<P> {
     }
 
     /// Returns the saved block, through `getState`.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer `getState` gave.
     #[expect(
         clippy::missing_panics_doc,
         reason = "the stream's class lists `IBStream`, so asking it for one cannot fail"
     )]
-    pub fn save(&self) -> Option<Vec<u8>> {
+    pub fn save(&self) -> Result<Vec<u8>, Refused> {
         let stream = ComWrapper::new(Stream::default());
         let pointer = stream.as_com_ref::<IBStream>().expect("a stream").as_ptr();
         // SAFETY: the component is alive while this host holds its
         // interfaces, and `pointer` is a live `IBStream` until `stream`
         // drops, after the call.
         let result = unsafe { self.plugin.getState(pointer) };
-        (result == kResultOk).then(|| stream.bytes.borrow().clone())
+        Refused::check(result).map(|()| stream.bytes.borrow().clone())
     }
 
     /// Loads a block through `setState`, then hands the controller the same

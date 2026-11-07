@@ -72,7 +72,7 @@ fn the_label_saves_and_loads_back() {
     // Through the exporter, as a host reopening the project.
     let host = TestHost::<Gain>::new();
     assert_eq!(host.load(&block), Ok(()));
-    assert_eq!(host.save().as_deref(), Some(block.as_slice()));
+    assert_eq!(host.save().as_ref(), Ok(&block));
 
     // Into a new instance: the label applies on its next tick.
     let mut reopened = Gain::new();

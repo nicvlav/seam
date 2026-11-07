@@ -140,9 +140,5 @@ fn a_project_saved_through_the_exporter_reopens_the_same() {
         let id = host_id(decl.key);
         assert_eq!(reopened.normalized(id), host.normalized(id), "{}", decl.key);
     }
-    assert_eq!(
-        reopened.save().as_deref(),
-        Some(block.as_slice()),
-        "byte for byte"
-    );
+    assert_eq!(reopened.save().as_ref(), Ok(&block), "byte for byte");
 }
