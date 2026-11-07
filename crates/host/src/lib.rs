@@ -2,7 +2,8 @@
 //!
 //! A plugin implements [`Plugin`] once, with no knowledge of any format. An
 //! exporter, a module behind the cargo feature of its name, projects it into
-//! one format, as a thin shell over the core all exporters share.
+//! one format, as a thin shell over the core all exporters share: the `vst3`
+//! module natively.
 //!
 //! The audio thread gets each block as a [`Block`] in [`Processor::process`]
 //! and reads its parameters from the [`ParamSet`](seam_params::ParamSet) that
@@ -25,11 +26,11 @@
 //!
 //! # Examples
 //!
-//! A plugin is one [`Plugin`] impl, which an exporter's macro exports at the
-//! root of its crate. [`Plugin::idle`]'s example adds undo, the session and
-//! MIDI learn.
+//! A plugin is one [`Plugin`] impl and one export macro at the root of its
+//! crate: `export_vst3!` for a VST3 module. [`Plugin::idle`]'s example adds
+//! undo, the session and MIDI learn.
 //!
-//! ```
+//! ```no_run
 //! use std::sync::Arc;
 //!
 //! use seam_host::{
@@ -101,10 +102,16 @@
 //!         Level { params: set.audio(), gain: set.id("gain").expect("declared") }
 //!     }
 //! }
+//!
+//! // At the root of the plugin's `cdylib` crate.
+//! # #[cfg(all(feature = "vst3", any(windows, target_os = "macos")))]
+//! seam_host::export_vst3!(Gain);
 //! ```
 
 // The nightly real-time sanitizer lane marks the audio thread's entry points.
 #![cfg_attr(seam_rtsan, feature(sanitize))]
+// docs.rs shows which feature each gated item needs.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod audio;
 mod info;
@@ -115,21 +122,33 @@ mod state;
 // does.
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
 #[cfg_attr(
-    not(test),
+    not(any(feature = "vst3", test)),
     expect(dead_code, reason = "only an exporter drives the core")
 )]
 mod boundary;
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
-#[expect(dead_code, reason = "only an exporter drives the engine")]
+#[cfg_attr(
+    not(feature = "vst3"),
+    expect(dead_code, reason = "only an exporter drives the engine")
+)]
 mod engine;
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
-#[expect(dead_code, reason = "only an exporter drives the core")]
+#[cfg_attr(
+    not(feature = "vst3"),
+    expect(dead_code, reason = "only an exporter drives the core")
+)]
 mod faults;
+#[cfg(feature = "vst3")]
+#[cfg_attr(docsrs, doc(cfg(feature = "vst3")))]
+#[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
+pub mod vst3;
 
 // Inlined: `Event` and `EventList` are `seam_ump`'s, shown here as this
 // crate's, so a plugin needs no `seam_ump` import for its blocks.
 #[doc(inline)]
 pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
+#[cfg(feature = "vst3")]
+pub use faults::boundary_faults;
 pub use info::{Category, Feature, Layout, PluginInfo};
 pub use plugin::{Plugin, Processor, Tail};
 pub use state::{LoadError, MAX_STATE_BYTES, STATE_VERSION, SavedState};

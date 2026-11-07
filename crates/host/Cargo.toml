@@ -1,6 +1,6 @@
 [package]
 name = "seam-host"
-description = "The format-agnostic plugin trait, its saved block, and the core every format exporter shares"
+description = "The format-agnostic plugin trait, and its VST3 exporter behind a feature"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,15 +8,38 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-keywords = ["audio", "plugin"]
-categories = ["multimedia::audio"]
+keywords = ["audio", "plugin", "vst3"]
+categories = ["multimedia::audio", "api-bindings"]
 publish.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# VST3, natively in Rust: parameters, automation, state, bus layouts and a
+# main-thread timer, for Windows and macOS. No MIDI reaches a plugin through
+# it yet.
+vst3 = ["dep:vst3", "dep:windows-sys"]
+# The test host, `vst3::TestHost`, which drives a plugin through the
+# exporter in tests: for a plugin crate's dev-dependencies, so a shipping
+# plugin carries none of it.
+test-host = []
 
 [dependencies]
 seam-params.workspace = true
 seam-session.workspace = true
 seam-ump.workspace = true
 serde_json.workspace = true
+vst3 = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(loom)'.dependencies]
 loom.workspace = true

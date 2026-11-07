@@ -181,3 +181,64 @@ pub struct PluginInfo {
     /// [`Block::out_events`](crate::Block::out_events).
     pub midi_output: bool,
 }
+
+impl PluginInfo {
+    /// Its VST3 subcategories, in the SDK's words: its category, then each
+    /// feature ("Fx", "EQ"). The VST3 exporter joins them with `|`, and the
+    /// JUCE adapter's build hands them to JUCE, which does the same.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn vst3_categories(&self) -> Vec<&'static str> {
+        let first = match self.category {
+            Category::Effect => "Fx",
+            Category::Instrument => "Instrument",
+        };
+        std::iter::once(first)
+            .chain(
+                self.features
+                    .iter()
+                    .map(|&feature| vst3_subcategory(feature, self.category)),
+            )
+            .collect()
+    }
+}
+
+/// The VST3 subcategory of a feature, in a plugin of `category`.
+#[cfg(feature = "vst3")]
+fn vst3_subcategory(feature: Feature, category: Category) -> &'static str {
+    match feature {
+        Feature::Analyzer => "Analyzer",
+        Feature::Delay => "Delay",
+        Feature::Distortion => "Distortion",
+        Feature::Dynamics => "Dynamics",
+        Feature::Equalizer => "EQ",
+        Feature::Filter => "Filter",
+        Feature::Mastering => "Mastering",
+        Feature::Modulation => "Modulation",
+        Feature::PitchShift => "Pitch Shift",
+        Feature::Restoration => "Restoration",
+        Feature::Reverb => "Reverb",
+        Feature::Spatial => "Spatial",
+        Feature::Tools => "Tools",
+        // The SDK's names differ: `Fx|Drums` and `Instrument|Drum`.
+        Feature::Drum if category == Category::Effect => "Drums",
+        Feature::Drum => "Drum",
+        Feature::Piano => "Piano",
+        Feature::Sampler => "Sampler",
+        Feature::Synthesizer => "Synth",
+    }
+}
+
+#[cfg(all(test, feature = "vst3"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drums_are_named_as_the_sdk_names_them() {
+        assert_eq!(vst3_subcategory(Feature::Drum, Category::Effect), "Drums");
+        assert_eq!(
+            vst3_subcategory(Feature::Drum, Category::Instrument),
+            "Drum"
+        );
+        assert_eq!(vst3_subcategory(Feature::Equalizer, Category::Effect), "EQ");
+    }
+}

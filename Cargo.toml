@@ -36,6 +36,12 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 # TypeScript declarations generated from the bridge's Rust types.
 ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
+# VST3 SDK 3.8.0 bindings (the VST3 exporter is to define the 3.8.1 additions
+# itself), generated from the SDK's MIT-licensed headers (THIRD-PARTY-NOTICES).
+vst3 = "0.3.0"
+# Win32, for the VST3 exporter's main-thread timer on Windows. Already in
+# the lockfile through other crates.
+windows-sys = "0.61.2"
 # Learn's dispatch snapshot: the audio thread takes the newest table
 # without waiting, and a replaced one drops on the UI thread. MPL-2.0, used
 # unmodified (THIRD-PARTY-NOTICES).
@@ -58,9 +64,9 @@ loom = "0.7.2"
 assert_no_alloc = { version = "1.1.2", default-features = false, features = ["warn_debug", "warn_release"] }
 
 [workspace.lints.rust]
-# Only the boundary code may use unsafe: seam-host's format exporters (VST3
-# COM, CLAP and the C ABI) and the modules they share (the boundary, the
-# engine and the fault reports), each allowing it on its own module.
+# Only the boundary code may use unsafe: seam-host's format exporter (VST3
+# COM) and the modules under it (the boundary, the engine and the fault
+# reports), each allowing it on its own module.
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 missing_debug_implementations = "warn"

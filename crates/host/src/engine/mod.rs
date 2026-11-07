@@ -10,18 +10,29 @@
 
 mod automation;
 mod process;
-mod timer;
+pub(crate) mod timer;
+
+#[cfg(all(test, feature = "vst3"))]
+mod tests;
 
 use std::cell::{Cell, RefCell};
 use std::num::NonZeroUsize;
+#[cfg(feature = "vst3")]
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
+#[cfg(feature = "vst3")]
+use seam_params::ParamId;
 use seam_params::{AudioParams, HostEvent, HostEventDrain, ParamSet};
 
 use automation::Automation;
 pub(crate) use automation::Points;
+#[cfg(all(test, feature = "vst3"))]
+pub(crate) use automation::{MAX_SKIPPED_QUEUES, Point};
 use process::Audio;
+#[cfg(feature = "vst3")]
+pub(crate) use process::Outcome;
 use timer::{Handle, Timer, abandon};
 
 use crate::boundary::{AudioSlot, Lent, MainThread, Refused};
@@ -116,7 +127,8 @@ pub(crate) enum Release {
 }
 
 /// What the host may read on any thread. The main thread keeps it up to
-/// date: at creation, at each activation and deactivation, and at each tick.
+/// date: at creation, at each activation and deactivation, at each tick,
+/// and when a shell arranges the bus layout.
 #[derive(Debug)]
 struct Answers {
     /// The main bus layout: inputs in the high half, outputs in the low.
@@ -136,6 +148,15 @@ impl Answers {
         answers.set_layout(layout);
         answers.read(plugin);
         answers
+    }
+
+    #[cfg(feature = "vst3")]
+    fn layout(&self) -> Layout {
+        let packed = self.layout.load(Ordering::Acquire);
+        Layout::new(
+            (packed >> 32) as usize,
+            (packed & u64::from(u32::MAX)) as usize,
+        )
     }
 
     fn set_layout(&self, layout: Layout) {
@@ -174,6 +195,10 @@ pub(crate) struct Main<P: Plugin, H> {
     /// Read afresh for each call to the host: a release inside a tick
     /// clears it, so the tick calls the host no more.
     host: RefCell<Option<H>>,
+    /// The next activation's setup, for a shell whose host sets it apart
+    /// from activating (VST3's `setupProcessing`).
+    #[cfg(feature = "vst3")]
+    setup: Cell<Option<Setup>>,
     active: Cell<bool>,
     /// The latency the host last read or was told.
     reported: Cell<u32>,
@@ -183,14 +208,27 @@ pub(crate) struct Main<P: Plugin, H> {
     timer: RefCell<Option<Timer>>,
 }
 
+#[cfg(feature = "vst3")]
+impl<P: Plugin, H> Main<P, H> {
+    /// Whether a processor is built.
+    pub(crate) fn active(&self) -> bool {
+        self.active.get()
+    }
+
+    /// The setup the next activation is built for, as the shell last set it.
+    pub(crate) fn setup(&self) -> Option<Setup> {
+        self.setup.get()
+    }
+}
+
 /// One instance of a plugin, as every exporter drives it.
 ///
 /// The rules every shell shares:
 ///
 /// - **Threads**, the threading rule in full ([`Plugin`] states it for plugin
 ///   authors). A shell builds the engine bound to the calling thread
-///   ([`new`](Self::new)), and a main-thread call on any other thread is
-///   refused. An engine whose main-thread state is
+///   ([`new`](Self::new)), as VST3 does at `initialize`, and a main-thread
+///   call on any other thread is refused. An engine whose main-thread state is
 ///   [unbound](MainThread::unbound) lends the plugin instead, to one call at a
 ///   time for its length, on whichever thread it arrives. One that meets
 ///   another thread's loan waits as the state's patience says
@@ -205,7 +243,12 @@ pub(crate) struct Main<P: Plugin, H> {
 ///   which goes back to the plugin. An activation while active rebuilds, so
 ///   a processor that panicked recovers at any activation. A reset asked of
 ///   the processor it replaces is dropped: the new one has nothing to clear.
-/// - **Host writes** from the audio thread always land.
+/// - **Host writes** from the audio thread always land. A write through a
+///   controller lands too, except while the host says it is processing
+///   (VST3's `setProcessing`). The host then sends the same value through
+///   `process`, in order with its automation. Writing it here as well could
+///   land it after a newer one. A shell with no processing state never
+///   ignores one.
 /// - **Reset** may be asked for on any thread; the next block runs it first.
 /// - **Blocks.** A block that does not play (no processor, a processor that
 ///   panicked, or one an activation holds) is silence, which the shell
@@ -281,6 +324,8 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             plugin: RefCell::new(plugin),
             drain: RefCell::new(drain),
             host: RefCell::new(host),
+            #[cfg(feature = "vst3")]
+            setup: Cell::new(None),
             active: Cell::new(false),
             ticking: Cell::new(false),
             timer: RefCell::new(None),
@@ -316,6 +361,12 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         &self.saved
     }
 
+    /// The main bus layout. Any thread.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn layout(&self) -> Layout {
+        self.answers.layout()
+    }
+
     /// The latency the main thread last read. Any thread.
     pub(crate) fn latency(&self) -> u32 {
         self.answers.latency.load(Ordering::Acquire)
@@ -325,6 +376,26 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// [`TAIL_INFINITE`]. Any thread.
     pub(crate) fn tail(&self) -> u32 {
         self.answers.tail.load(Ordering::Acquire)
+    }
+
+    /// A host write through a controller: ignored while the host is
+    /// processing, since it sends the same value through `process`. Any
+    /// thread.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn controller_write(&self, id: ParamId, normalized: f64) {
+        if !self.processing.load(Ordering::Acquire) {
+            self.host.host_write(id, normalized);
+        }
+    }
+
+    /// The host starts or stops processing. A stop asks the next block to
+    /// reset the processor. Any thread: only atomics.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn set_processing(&self, processing: bool) {
+        self.processing.store(processing, Ordering::Release);
+        if !processing {
+            self.request_reset();
+        }
     }
 
     /// Asks the next block to reset the processor first. Any thread.
@@ -356,6 +427,26 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         self.faults.guard(refused, body)
     }
 
+    /// How many faults the instance has had, on every thread.
+    #[cfg(any(test, feature = "test-host"))]
+    pub(crate) fn faults(&self) -> u64 {
+        self.faults.count()
+    }
+
+    /// The timer's handle, once it started.
+    #[cfg(all(test, feature = "vst3"))]
+    pub(crate) fn timer_handle(&self) -> Option<timer::Handle> {
+        self.timer_handle.get().copied()
+    }
+
+    /// Every automation point the last block carried, and how many it had
+    /// no room for.
+    #[cfg(all(test, feature = "vst3"))]
+    pub(crate) fn carried(&self) -> (Vec<Point>, u64) {
+        let automation = self.automation.hold();
+        (automation.points().to_vec(), automation.dropped())
+    }
+
     /// Reports the faults not reported yet, as [`faults`](crate::faults)
     /// says. The caller is not the audio thread.
     fn report_faults(&self) {
@@ -364,6 +455,28 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             self.faults
                 .report(&format!("{} (instance {})", P::INFO.name, self.number));
         }
+    }
+
+    /// Sets the setup the next activation is built for; false while active,
+    /// when it would not apply.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn set_setup(&self, main: &Main<P, H>, setup: Setup) -> bool {
+        if main.active.get() {
+            return false;
+        }
+        main.setup.set(Some(setup));
+        true
+    }
+
+    /// Sets the main bus layout for the next activation; false while active
+    /// or for a layout the plugin does not declare.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn arrange(&self, main: &Main<P, H>, layout: Layout) -> bool {
+        if main.active.get() || !P::INFO.layouts.contains(&layout) {
+            return false;
+        }
+        self.answers.set_layout(layout);
+        true
     }
 
     /// Activates for `setup` and `layout`, as the activation rule above says.
@@ -417,6 +530,49 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         }
         self.answers.read(&*plugin);
         true
+    }
+
+    /// Links the host, first ending every gesture still open with the one
+    /// it replaces.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn connect(&self, main: &Main<P, H>, host: Option<H>) {
+        self.finish_edits(main);
+        *main.host.borrow_mut() = host;
+    }
+
+    /// Starts a timer that ticks the plugin about 60 times a second on this
+    /// thread, until the engine is released.
+    ///
+    /// Only an engine bound to this thread starts one, since the timer may
+    /// not leave it. One made unbound, or a system that refuses a timer,
+    /// counts as a fault, and the timer then never ticks.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn start_timer(&self) {
+        let Some(main) = self.main.owned() else {
+            self.faults.record(Fault::NoTimer);
+            return;
+        };
+        match Timer::start(self.ticker()) {
+            Some(timer) => {
+                let _ = self.timer_handle.set(timer.handle());
+                *main.timer.borrow_mut() = Some(timer);
+            }
+            None => self.faults.record(Fault::NoTimer),
+        }
+    }
+
+    /// The tick as a timer holds it, reaching the engine through a pointer:
+    /// a host may release the shell inside it.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn ticker(&self) -> Box<dyn Fn()> {
+        let engine = NonNull::from(self);
+        Box::new(move || {
+            // SAFETY: the engine is boxed and never moves. Its shell frees
+            // it only after `release` dropped the timer that holds this
+            // tick, on the main thread, outside any tick; otherwise it
+            // leaks. Either way, the engine is live whenever a tick runs.
+            unsafe { engine.as_ref() }.idle();
+        })
     }
 
     /// One tick, as a shell or its timer calls it, under the threading rule
@@ -504,7 +660,8 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// go, so a release that waited would free the engine under it. Either
     /// way a tick may call the host once more after the release, which only a
     /// host that breaks the threading rules meets; the engine leaks, so
-    /// Seam's side stays memory-safe.
+    /// Seam's side stays memory-safe. A VST3 handler is held by the engine's
+    /// own reference.
     pub(crate) fn release(&self) -> Release {
         self.guard(Release::Leak, || {
             let main = match self.main.lend() {

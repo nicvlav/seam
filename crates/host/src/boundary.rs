@@ -312,7 +312,7 @@ impl<T> MainThread<T> {
     /// made unbound, on any thread. The call binds nothing and lends
     /// nothing.
     #[cfg_attr(
-        not(test),
+        not(any(feature = "vst3", test)),
         expect(
             dead_code,
             reason = "only the VST3 shell starts a timer on its owner thread"

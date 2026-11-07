@@ -48,7 +48,7 @@ const POINTS_PER_PARAMETER: usize = 8;
 /// it. A block that moves every proxy therefore still reaches the plugin's
 /// own queues.
 #[cfg_attr(
-    not(test),
+    not(any(feature = "vst3", test)),
     expect(dead_code, reason = "only the VST3 shell walks queues")
 )]
 pub(crate) const MAX_SKIPPED_QUEUES: usize = 4096;
@@ -144,6 +144,12 @@ impl Automation {
         }
     }
 
+    /// Every point the last block carried, in the host's order.
+    #[cfg(all(test, feature = "vst3"))]
+    pub(crate) fn points(&self) -> &[Point] {
+        &self.points
+    }
+
     /// The points the last block had no room for.
     #[cfg(test)]
     pub(crate) fn dropped(&self) -> u64 {
@@ -154,7 +160,7 @@ impl Automation {
 /// A shell's way to hand the engine one block's automation, queue by
 /// queue or point by point. Wait-free and free of allocation.
 #[cfg_attr(
-    not(test),
+    not(any(feature = "vst3", test)),
     expect(
         dead_code,
         reason = "only the VST3 shell walks queues, which these count"
@@ -210,7 +216,7 @@ impl<'a> Points<'a> {
 }
 
 #[cfg_attr(
-    not(test),
+    not(any(feature = "vst3", test)),
     expect(dead_code, reason = "only the VST3 shell walks queues")
 )]
 impl Points<'_> {

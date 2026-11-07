@@ -41,9 +41,42 @@ static REPORTED: AtomicU8 = AtomicU8::new(0);
 /// Returns how many faults the exporters have caught in this process, on
 /// every thread and in every instance.
 ///
-/// Nothing in a working plugin moves the count. In a host, a count that
-/// moved is the first thing to check when a plugin goes quiet.
-pub(crate) fn boundary_faults() -> u64 {
+/// The faults include panics that would have unwound into the host, and
+/// calls refused for the thread they arrived on. Nothing in a working
+/// plugin moves the count. In a host, a count that moved is the first thing
+/// to check when a plugin goes quiet. Each instance also writes the first
+/// fault of each kind as a line of text, to an attached debugger on Windows
+/// and to stderr elsewhere.
+///
+/// # Examples
+///
+/// ```
+#[doc = include_str!("../doc/gain.rs")]
+/// // The VST3 exporter's test host, which needs the `vst3` and `test-host`
+/// // features.
+/// # #[cfg(all(feature = "vst3", feature = "test-host"))]
+/// # {
+/// use seam_host::boundary_faults;
+/// use seam_host::vst3::TestHost;
+///
+/// // `Gain` is a plugin with one parameter, whose `idle` panics while the
+/// // static `BREAK` is set.
+/// let before = boundary_faults();
+/// let host = TestHost::<Gain>::new();
+/// assert_eq!(boundary_faults(), before, "a working plugin moves nothing");
+///
+/// BREAK.store(true, Ordering::Relaxed); // the plugin's next tick panics
+/// host.expect_faults(1);
+/// host.tick(); // the exporter catches the panic and counts it
+/// assert_eq!(boundary_faults(), before + 1);
+/// # }
+/// ```
+#[cfg_attr(docsrs, doc(cfg(feature = "vst3")))]
+#[cfg_attr(
+    not(feature = "vst3"),
+    expect(unreachable_pub, reason = "an exporter re-exports it at the root")
+)]
+pub fn boundary_faults() -> u64 {
     TOTAL.load(Ordering::Relaxed)
 }
 
@@ -184,7 +217,7 @@ impl Faults {
     }
 
     /// How many faults the instance has had, on every thread.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-host"))]
     pub(crate) fn count(&self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
@@ -246,3 +279,5 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) use tests::thread_faults;
+#[cfg(all(test, feature = "vst3"))]
+pub(crate) use tests::written;
