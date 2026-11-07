@@ -9,10 +9,14 @@ use seam_host::cabi::TestHost;
 
 fuzz_target!(|data: &[u8]| {
     let host = TestHost::<Fuzzed>::new();
-    host.load(data);
+    let _ = host.load(data);
     host.idle();
     let block = host.save().expect("a block");
-    assert!(host.load(&block), "a block this plugin saved does not load");
+    assert_eq!(
+        host.load(&block),
+        Ok(()),
+        "a block this plugin saved does not load"
+    );
     host.idle();
     assert_eq!(host.save().as_deref(), Some(block.as_slice()));
     assert_eq!(host.faults(), 0);

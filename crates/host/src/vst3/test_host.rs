@@ -16,8 +16,8 @@ use ::vst3::Steinberg::Vst::{
     SpeakerArr, SpeakerArrangement, String128, SymbolicSampleSizes_,
 };
 use ::vst3::Steinberg::{
-    IBStream, IBStreamTrait, IPluginBaseTrait, int32, int64, kInvalidArgument, kResultFalse,
-    kResultOk, tresult,
+    IBStream, IBStreamTrait, IPluginBaseTrait, int32, int64, kInternalError, kInvalidArgument,
+    kNoInterface, kNotImplemented, kNotInitialized, kOutOfMemory, kResultFalse, kResultOk, tresult,
 };
 use ::vst3::{Class, ComPtr, ComWrapper};
 
@@ -63,6 +63,56 @@ pub enum HostCall {
     /// [`RESTART_LATENCY`]).
     Restart(i32),
 }
+
+/// A call the plugin refused, and the `tresult` it answered: anything but
+/// `kResultOk`.
+///
+/// # Examples
+///
+/// ```
+#[doc = include_str!("../../doc/gain.rs")]
+/// use seam_host::vst3::{Refused, TestHost};
+///
+/// let host = TestHost::<Gain>::new();
+/// // A block that is not a saved one: the host is told the load failed.
+/// let refused: Refused = host.load(b"not a block").expect_err("refused");
+/// assert_eq!(refused.to_string(), "the plugin answered kResultFalse");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refused(pub i32);
+
+impl Refused {
+    /// `Ok` for `kResultOk`, and the refusal for any other answer.
+    fn check(result: tresult) -> Result<(), Refused> {
+        if result == kResultOk {
+            Ok(())
+        } else {
+            Err(Refused(result))
+        }
+    }
+}
+
+/// The SDK's names for the answers a plugin refuses a call with.
+const REFUSALS: [(tresult, &str); 7] = [
+    (kResultFalse, "kResultFalse"),
+    (kInvalidArgument, "kInvalidArgument"),
+    (kNotImplemented, "kNotImplemented"),
+    (kInternalError, "kInternalError"),
+    (kNotInitialized, "kNotInitialized"),
+    (kOutOfMemory, "kOutOfMemory"),
+    (kNoInterface, "kNoInterface"),
+];
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match REFUSALS.iter().find(|(result, _)| *result == self.0) {
+            Some((_, name)) => write!(f, "the plugin answered {name}"),
+            None => write!(f, "the plugin answered the tresult {}", self.0),
+        }
+    }
+}
+
+impl std::error::Error for Refused {}
 
 /// A parameter as the host lists it.
 ///
@@ -149,13 +199,16 @@ pub struct Options {
 ///
 /// let mut host = TestHost::<Gain>::new();
 /// let id = host.parameter(0).expect("listed").id;
-/// assert!(host.setup(48_000.0, 4) && host.activate() && host.start());
+/// host.setup(48_000.0, 4)?;
+/// host.activate()?;
+/// host.start()?;
 ///
 /// let (mut left, mut right) = ([1.0_f32; 4], [1.0_f32; 4]);
 /// // The host sends 0.0 for the gain with the block: -24 dB.
 /// let block = &mut [&mut left[..], &mut right[..]];
-/// assert!(host.process_in_place(block, 4, &[(id, 0.0)]));
+/// host.process_in_place(block, 4, &[(id, 0.0)])?;
 /// assert!((left[0] - 0.0631).abs() < 1e-4);
+/// # Ok::<(), seam_host::vst3::Refused>(())
 /// ```
 pub struct TestHost<P: Plugin> {
     component: ComWrapper<Component<P>>,
@@ -397,26 +450,33 @@ impl<P: Plugin> TestHost<P> {
 
     /// Sets a parameter as a host's own controller would, through
     /// `setParamNormalized`.
-    pub fn set_normalized(&self, id: u32, normalized: f64) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer, for an id the plugin does not list say.
+    pub fn set_normalized(&self, id: u32, normalized: f64) -> Result<(), Refused> {
         // SAFETY: the component is alive while this host holds its
         // interfaces, and the call passes no pointer.
-        unsafe { self.controller.setParamNormalized(id, normalized) == kResultOk }
+        Refused::check(unsafe { self.controller.setParamNormalized(id, normalized) })
     }
 
-    /// Asks for a main bus layout through `setBusArrangements`, and returns
-    /// whether it was accepted.
-    pub fn arrange(&self, layout: Layout) -> bool {
+    /// Asks for a main bus layout through `setBusArrangements`.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer, for a layout the plugin does not declare, or
+    /// while it is active.
+    pub fn arrange(&self, layout: Layout) -> Result<(), Refused> {
         let mut input = arrangement(layout.inputs);
         let mut output = arrangement(layout.outputs);
         let input_count = int32::from(layout.inputs > 0);
         // SAFETY: the component is alive while this host holds its
         // interfaces, and `input` and `output` are one arrangement each, as
         // the counts say.
-        unsafe {
+        Refused::check(unsafe {
             self.processor
                 .setBusArrangements(&mut input, input_count, &mut output, 1)
-                == ::vst3::Steinberg::kResultTrue
-        }
+        })
     }
 
     /// Returns the main bus layout, read through `getBusArrangement`.
@@ -443,7 +503,12 @@ impl<P: Plugin> TestHost<P> {
     }
 
     /// Calls `setupProcessing`, realtime and 32-bit.
-    pub fn setup(&self, sample_rate: f64, max_frames: usize) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer, for a rate that is not a positive number or
+    /// while the plugin is active, say.
+    pub fn setup(&self, sample_rate: f64, max_frames: usize) -> Result<(), Refused> {
         let mut setup = VstSetup {
             processMode: ProcessModes_::kRealtime as int32,
             symbolicSampleSize: SymbolicSampleSizes_::kSample32 as int32,
@@ -452,39 +517,59 @@ impl<P: Plugin> TestHost<P> {
         };
         // SAFETY: the component is alive while this host holds its
         // interfaces, and `setup` is valid for reading during the call.
-        unsafe { self.processor.setupProcessing(&mut setup) == kResultOk }
+        Refused::check(unsafe { self.processor.setupProcessing(&mut setup) })
     }
 
     /// Calls `setActive(true)`.
-    pub fn activate(&self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer.
+    pub fn activate(&self) -> Result<(), Refused> {
         // SAFETY: the component is alive while this host holds its
         // interfaces, and the call passes no pointer.
-        unsafe { self.plugin.setActive(1) == kResultOk }
+        Refused::check(unsafe { self.plugin.setActive(1) })
     }
 
     /// Calls `setActive(false)`.
-    pub fn deactivate(&self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer.
+    pub fn deactivate(&self) -> Result<(), Refused> {
         // SAFETY: the component is alive while this host holds its
         // interfaces, and the call passes no pointer.
-        unsafe { self.plugin.setActive(0) == kResultOk }
+        Refused::check(unsafe { self.plugin.setActive(0) })
     }
 
     /// Calls `setProcessing(true)`.
-    pub fn start(&self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer.
+    pub fn start(&self) -> Result<(), Refused> {
         // SAFETY: the component is alive while this host holds its
         // interfaces, and the call passes no pointer.
-        unsafe { self.processor.setProcessing(1) == kResultOk }
+        Refused::check(unsafe { self.processor.setProcessing(1) })
     }
 
     /// Calls `setProcessing(false)`.
-    pub fn stop(&self) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer.
+    pub fn stop(&self) -> Result<(), Refused> {
         // SAFETY: the component is alive while this host holds its
         // interfaces, and the call passes no pointer.
-        unsafe { self.processor.setProcessing(0) == kResultOk }
+        Refused::check(unsafe { self.processor.setProcessing(0) })
     }
 
     /// Processes `frames` frames from separate input buffers into separate
     /// output buffers, after `changes`.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
     ///
     /// # Panics
     ///
@@ -495,12 +580,16 @@ impl<P: Plugin> TestHost<P> {
         outputs: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process(inputs, outputs, frames, changes)
     }
 
     /// Processes `frames` frames in place: the same buffers in and out, as
     /// many hosts hand them.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
     ///
     /// # Panics
     ///
@@ -510,13 +599,17 @@ impl<P: Plugin> TestHost<P> {
         channels: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process_in_place(channels, frames, changes)
     }
 
     /// Processes `frames` frames in place after `queues`, each a host id
     /// and its points as `(sample offset, 0..1)`, sent as the host sends
     /// automation.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
     ///
     /// # Panics
     ///
@@ -530,23 +623,26 @@ impl<P: Plugin> TestHost<P> {
     ///
     /// let mut host = TestHost::<Gain>::new();
     /// let id = host.parameter(0).expect("listed").id;
-    /// assert!(host.setup(48_000.0, 4) && host.activate() && host.start());
+    /// host.setup(48_000.0, 4)?;
+    /// host.activate()?;
+    /// host.start()?;
     /// let (mut left, mut right) = ([1.0_f32; 4], [1.0_f32; 4]);
     /// // Two points in the block: the processor sees the last for the whole
     /// // block.
     /// let queues: [(u32, &[(i32, f64)]); 1] = [(id, &[(0, 0.5), (2, 0.0)])];
     /// let block = &mut [&mut left[..], &mut right[..]];
-    /// assert!(host.process_queues(block, 4, &queues));
+    /// host.process_queues(block, 4, &queues)?;
     /// let first = left[0];
     /// assert!((first - 0.0631).abs() < 1e-4, "-24 dB from the first sample");
     /// assert_eq!(host.normalized(id), 0.0);
+    /// # Ok::<(), seam_host::vst3::Refused>(())
     /// ```
     pub fn process_queues(
         &mut self,
         channels: &mut [&mut [f32]],
         frames: usize,
         queues: &[(u32, &[(i32, f64)])],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process_queues(channels, frames, queues)
     }
 
@@ -581,12 +677,17 @@ impl<P: Plugin> TestHost<P> {
     }
 
     /// Loads a block through `setState`, then hands the controller the same
-    /// block, as a host does, and returns whether both took it.
+    /// block, as a host does.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer of the first of the two calls that refused,
+    /// for a block that is not a saved one say.
     #[expect(
         clippy::missing_panics_doc,
         reason = "the stream's class lists `IBStream`, so asking it for one cannot fail"
     )]
-    pub fn load(&self, bytes: &[u8]) -> bool {
+    pub fn load(&self, bytes: &[u8]) -> Result<(), Refused> {
         let stream = ComWrapper::new(Stream::default());
         stream.bytes.borrow_mut().extend_from_slice(bytes);
         let pointer = stream.as_com_ref::<IBStream>().expect("a stream").as_ptr();
@@ -594,9 +695,9 @@ impl<P: Plugin> TestHost<P> {
         // interfaces, and `pointer` is a live `IBStream` until `stream`
         // drops, after both calls.
         unsafe {
-            let loaded = self.plugin.setState(pointer) == kResultOk;
+            Refused::check(self.plugin.setState(pointer))?;
             stream.position.set(0);
-            loaded && self.controller.setComponentState(pointer) == kResultOk
+            Refused::check(self.controller.setComponentState(pointer))
         }
     }
 
@@ -670,7 +771,7 @@ impl Blocks {
         outputs: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         assert!(inputs.iter().all(|channel| channel.len() >= frames));
         assert!(outputs.iter().all(|channel| channel.len() >= frames));
         self.inputs.clear();
@@ -688,7 +789,7 @@ impl Blocks {
         channels: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         let inputs = self.in_place(channels, frames);
         self.fill(changes);
         self.send(frames, inputs)
@@ -699,7 +800,7 @@ impl Blocks {
         channels: &mut [&mut [f32]],
         frames: usize,
         queues: &[(u32, &[(i32, f64)])],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         let inputs = self.in_place(channels, frames);
         self.changes.fill(queues.iter().copied());
         self.send(frames, inputs)
@@ -742,7 +843,7 @@ impl Blocks {
         );
     }
 
-    fn send(&mut self, frames: usize, input_channels: usize) -> bool {
+    fn send(&mut self, frames: usize, input_channels: usize) -> Result<(), Refused> {
         // SAFETY: the component is alive while this side holds its
         // interfaces, and the call passes no pointer.
         let input_buses = unsafe {
@@ -789,9 +890,9 @@ impl Blocks {
         // bus's channel list holds `numChannels` pointers into buffers the
         // callers above borrow for at least `frames` floats. The changes and
         // their queues are this side's objects, alive throughout.
-        let processed = unsafe { self.processor.process(&mut data) == kResultOk };
+        let processed = unsafe { self.processor.process(&mut data) };
         self.silence = output.silenceFlags;
-        processed
+        Refused::check(processed)
     }
 }
 
@@ -807,17 +908,21 @@ impl Blocks {
 ///
 /// let host = TestHost::<Gain>::new();
 /// let id = host.parameter(0).expect("listed").id;
-/// assert!(host.setup(48_000.0, 4) && host.activate() && host.start());
+/// host.setup(48_000.0, 4)?;
+/// host.activate()?;
+/// host.start()?;
 ///
 /// // The host's audio thread gets a side of its own and sends blocks on it.
 /// let mut audio = host.audio_side();
 /// std::thread::scope(|scope| {
 ///     scope.spawn(move || {
 ///         let (mut left, mut right) = ([1.0_f32; 4], [1.0_f32; 4]);
-///         assert!(audio.process_in_place(&mut [&mut left[..], &mut right[..]], 4, &[(id, 0.0)]));
+///         let block = &mut [&mut left[..], &mut right[..]];
+///         assert_eq!(audio.process_in_place(block, 4, &[(id, 0.0)]), Ok(()));
 ///         assert!(left[0] < 0.1);
 ///     });
 /// });
+/// # Ok::<(), seam_host::vst3::Refused>(())
 /// ```
 pub struct AudioSide<'a> {
     blocks: Blocks,
@@ -834,6 +939,10 @@ unsafe impl Send for AudioSide<'_> {}
 impl AudioSide<'_> {
     /// As [`TestHost::process`], on this side's thread.
     ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
+    ///
     /// # Panics
     ///
     /// If a buffer is shorter than `frames`.
@@ -843,11 +952,15 @@ impl AudioSide<'_> {
         outputs: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process(inputs, outputs, frames, changes)
     }
 
     /// As [`TestHost::process_in_place`], on this side's thread.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
     ///
     /// # Panics
     ///
@@ -857,11 +970,15 @@ impl AudioSide<'_> {
         channels: &mut [&mut [f32]],
         frames: usize,
         changes: &[(u32, f64)],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process_in_place(channels, frames, changes)
     }
 
     /// As [`TestHost::process_queues`], on this side's thread.
+    ///
+    /// # Errors
+    ///
+    /// The [`Refused`] answer to `process`.
     ///
     /// # Panics
     ///
@@ -871,7 +988,7 @@ impl AudioSide<'_> {
         channels: &mut [&mut [f32]],
         frames: usize,
         queues: &[(u32, &[(i32, f64)])],
-    ) -> bool {
+    ) -> Result<(), Refused> {
         self.blocks.process_queues(channels, frames, queues)
     }
 

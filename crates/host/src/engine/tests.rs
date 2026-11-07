@@ -135,11 +135,13 @@ impl Plugin for Probe {
 
 /// A shell's test host, as the shared bodies drive it.
 trait Shell {
+    /// What the shell's host was answered when the plugin refused a call.
+    type Refused: std::fmt::Debug + PartialEq;
     fn create() -> Self;
     /// Creates the instance on another thread; this one calls it first.
     fn create_elsewhere() -> Self;
     /// Activates in stereo at 48 kHz for blocks of up to 64 frames.
-    fn activate(&mut self) -> bool;
+    fn activate(&mut self) -> Result<(), Self::Refused>;
     fn deactivate(&mut self);
     /// Whatever the shell's host says as it starts processing.
     fn start(&mut self);
@@ -163,13 +165,14 @@ trait Shell {
     fn tail(&self) -> u32;
     /// The saved block, through the host's save.
     fn save(&self) -> Vec<u8>;
-    /// The host's load of a block, and whether it says the load worked.
-    fn load(&mut self, block: &[u8]) -> bool;
+    /// The host's load of a block, and what it was answered.
+    fn load(&mut self, block: &[u8]) -> Result<(), Self::Refused>;
     fn expect_faults(&self, count: u64);
 }
 
 #[cfg(feature = "vst3")]
 impl Shell for crate::vst3::TestHost<Probe> {
+    type Refused = crate::vst3::Refused;
     const HOLDS_WRITES_WHILE_PROCESSING: bool = true;
 
     fn create() -> Self {
@@ -180,27 +183,29 @@ impl Shell for crate::vst3::TestHost<Probe> {
         Self::created_elsewhere()
     }
 
-    fn activate(&mut self) -> bool {
+    fn activate(&mut self) -> Result<(), Self::Refused> {
         // Refused while active, as the SDK has it; the setup stays.
-        self.setup(48_000.0, 64);
+        let _ = self.setup(48_000.0, 64);
         crate::vst3::TestHost::activate(self)
     }
 
     fn deactivate(&mut self) {
-        assert!(crate::vst3::TestHost::deactivate(self));
+        assert_eq!(crate::vst3::TestHost::deactivate(self), Ok(()));
     }
 
     fn start(&mut self) {
-        assert!(crate::vst3::TestHost::start(self));
+        assert_eq!(crate::vst3::TestHost::start(self), Ok(()));
     }
 
     fn ask_reset(&mut self) {
-        assert!(self.stop() && crate::vst3::TestHost::start(self));
+        assert_eq!(self.stop(), Ok(()));
+        assert_eq!(crate::vst3::TestHost::start(self), Ok(()));
     }
 
     fn play(&mut self, input: f32) -> [f32; 8] {
         let (mut left, mut right) = ([input; 8], [input; 8]);
-        assert!(self.process_in_place(&mut [&mut left, &mut right], 8, &[]));
+        let block = &mut [&mut left[..], &mut right[..]];
+        assert_eq!(self.process_in_place(block, 8, &[]), Ok(()));
         left
     }
 
@@ -209,7 +214,8 @@ impl Shell for crate::vst3::TestHost<Probe> {
         on_another_thread(
             move || {
                 let (mut left, mut right) = ([input; 8], [input; 8]);
-                assert!(side.process_in_place(&mut [&mut left, &mut right], 8, &[]));
+                let block = &mut [&mut left[..], &mut right[..]];
+                assert_eq!(side.process_in_place(block, 8, &[]), Ok(()));
                 left
             },
             panic,
@@ -217,7 +223,7 @@ impl Shell for crate::vst3::TestHost<Probe> {
     }
 
     fn write(&mut self, normalized: f64) {
-        assert!(self.set_normalized(host_id("gain"), normalized));
+        assert_eq!(self.set_normalized(host_id("gain"), normalized), Ok(()));
     }
 
     fn gain(&self) -> f64 {
@@ -236,7 +242,7 @@ impl Shell for crate::vst3::TestHost<Probe> {
         crate::vst3::TestHost::save(self).expect("saved")
     }
 
-    fn load(&mut self, block: &[u8]) -> bool {
+    fn load(&mut self, block: &[u8]) -> Result<(), Self::Refused> {
         crate::vst3::TestHost::load(self, block)
     }
 
@@ -247,6 +253,7 @@ impl Shell for crate::vst3::TestHost<Probe> {
 
 #[cfg(feature = "cabi")]
 impl Shell for crate::cabi::TestHost<Probe> {
+    type Refused = crate::cabi::Refused;
     const HOLDS_WRITES_WHILE_PROCESSING: bool = false;
 
     fn create() -> Self {
@@ -257,7 +264,7 @@ impl Shell for crate::cabi::TestHost<Probe> {
         Self::created_elsewhere()
     }
 
-    fn activate(&mut self) -> bool {
+    fn activate(&mut self) -> Result<(), Self::Refused> {
         crate::cabi::TestHost::activate(self, 48_000.0, 64, Layout::STEREO)
     }
 
@@ -309,7 +316,7 @@ impl Shell for crate::cabi::TestHost<Probe> {
         crate::cabi::TestHost::save(self).expect("saved")
     }
 
-    fn load(&mut self, block: &[u8]) -> bool {
+    fn load(&mut self, block: &[u8]) -> Result<(), Self::Refused> {
         crate::cabi::TestHost::load(self, block)
     }
 
@@ -375,7 +382,7 @@ through_every_shell!(
 fn a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first<S: Shell>() {
     let mut host = S::create_elsewhere();
     host.write(0.5);
-    assert!(host.activate(), "the main thread is this one");
+    assert_eq!(host.activate(), Ok(()), "the main thread is this one");
     assert_eq!(
         seen(|seen| seen.activations),
         1,
@@ -389,7 +396,7 @@ fn a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first<S: Shel
 fn an_activation_while_active_rebuilds_and_recovers_a_panicked_processor<S: Shell>() {
     let mut host = S::create();
     host.write(0.5);
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     assert_eq!(host.play(1.0), [6.0; 8]);
     host.expect_faults(1);
     seen(|seen| seen.panic_in_process = true);
@@ -397,7 +404,7 @@ fn an_activation_while_active_rebuilds_and_recovers_a_panicked_processor<S: Shel
     seen(|seen| seen.panic_in_process = false);
     assert_eq!(host.play(1.0), [0.0; 8], "and every block after it");
 
-    assert!(host.activate(), "again, while active");
+    assert_eq!(host.activate(), Ok(()), "again, while active");
     assert_eq!(seen(|seen| seen.activations), 2, "a fresh processor");
     assert_eq!(seen(|seen| seen.deactivations), 1, "the old one went back");
     assert_eq!(host.play(1.0), [6.0; 8], "playing again");
@@ -407,7 +414,7 @@ fn a_block_with_no_processor_is_silent<S: Shell>() {
     let mut host = S::create();
     host.write(0.5);
     assert_eq!(host.play(1.0), [0.0; 8], "never activated");
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     assert_eq!(host.play(1.0), [6.0; 8]);
     host.deactivate();
     assert_eq!(host.play(1.0), [0.0; 8], "deactivated");
@@ -415,7 +422,7 @@ fn a_block_with_no_processor_is_silent<S: Shell>() {
 
 fn a_reset_runs_before_the_next_block_unless_an_activation_replaced_the_processor<S: Shell>() {
     let mut host = S::create();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.start();
     host.play(0.0);
     host.ask_reset();
@@ -425,7 +432,7 @@ fn a_reset_runs_before_the_next_block_unless_an_activation_replaced_the_processo
     assert_eq!(seen(|seen| seen.resets), 1, "once, before the next block");
 
     host.ask_reset();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.play(0.0);
     assert_eq!(
         seen(|seen| seen.resets),
@@ -436,7 +443,7 @@ fn a_reset_runs_before_the_next_block_unless_an_activation_replaced_the_processo
 
 fn a_controller_write_while_processing_is_held_off_only_where_the_host_sends_it_again<S: Shell>() {
     let mut host = S::create();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.start();
     host.write(0.25);
     let expected = if S::HOLDS_WRITES_WHILE_PROCESSING {
@@ -452,7 +459,7 @@ fn a_controller_write_while_processing_is_held_off_only_where_the_host_sends_it_
 
 fn a_fault_on_the_audio_path_is_reported_at_the_next_tick_once_per_instance_and_kind<S: Shell>() {
     let mut host = S::create();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     written();
     let total = boundary_faults();
     host.expect_faults(2);
@@ -471,7 +478,7 @@ fn a_fault_on_the_audio_path_is_reported_at_the_next_tick_once_per_instance_and_
             && lines[0].contains("the processor panicked"),
         "{lines:?}"
     );
-    assert!(host.activate(), "recovered");
+    assert_eq!(host.activate(), Ok(()), "recovered");
     host.play(1.0);
     host.tick();
     assert_eq!(
@@ -485,7 +492,7 @@ fn a_fault_on_the_audio_path_is_reported_at_the_next_tick_once_per_instance_and_
 
 fn the_block_runs_marked_as_the_audio_thread_and_no_processor_drops_there<S: Shell>() {
     let mut host = S::create();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.play(1.0);
     assert_eq!(
         seen(|seen| seen.marked_blocks),
@@ -498,7 +505,11 @@ fn the_block_runs_marked_as_the_audio_thread_and_no_processor_drops_there<S: She
     host.play(1.0);
     seen(|seen| seen.panic_in_process = false);
     assert_eq!(host.play(1.0), [0.0; 8], "silent, the processor kept");
-    assert!(host.activate(), "replacing the processor that panicked");
+    assert_eq!(
+        host.activate(),
+        Ok(()),
+        "replacing the processor that panicked"
+    );
     host.play(1.0);
     host.deactivate();
     assert_eq!(seen(|seen| (seen.drops, seen.drops_marked)), (2, 0));
@@ -507,7 +518,7 @@ fn the_block_runs_marked_as_the_audio_thread_and_no_processor_drops_there<S: She
 fn created_on_one_thread_driven_from_a_second_and_played_on_a_third<S: Shell>() {
     let mut host = S::create_elsewhere();
     host.write(0.5);
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.start();
     let (left, lines) = host.play_elsewhere(1.0, false);
     assert_eq!(left, [6.0; 8]);
@@ -540,7 +551,7 @@ fn a_finite_tail_never_reads_as_infinite<S: Shell>() {
         (Tail::None, 0),
     ] {
         seen(|seen| seen.tail = Some(tail));
-        assert!(host.activate());
+        assert_eq!(host.activate(), Ok(()));
         assert_eq!(host.tail(), answer, "{tail:?}");
     }
 }
@@ -552,21 +563,24 @@ fn a_block_padded_with_nuls_loads_and_one_followed_by_anything_else_fails<S: She
     host.write(0.25);
     let mut padded = block.clone();
     padded.extend([0; 16]);
-    assert!(host.load(&padded), "NUL padding is trimmed");
+    assert_eq!(host.load(&padded), Ok(()), "NUL padding is trimmed");
     assert_eq!(host.gain(), 0.5);
 
     host.write(0.25);
     let mut followed = block.clone();
     followed.extend(br#"{"next": "chunk"}"#);
-    assert!(!host.load(&followed), "the host is told the load failed");
-    assert!(!host.load(b"\0\0"), "padding alone is no block");
-    assert!(!host.load(b"not a block"));
+    assert!(
+        host.load(&followed).is_err(),
+        "the host is told the load failed"
+    );
+    assert!(host.load(b"\0\0").is_err(), "padding alone is no block");
+    assert!(host.load(b"not a block").is_err());
     assert_eq!(host.gain(), 0.25, "and nothing changed");
 }
 
 fn a_release_reports_the_faults_no_tick_reported<S: Shell>() {
     let mut host = S::create();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     host.expect_faults(1);
     seen(|seen| seen.panic_in_process = true);
     host.play(1.0);

@@ -198,10 +198,10 @@ impl Shell for Vst3 {
 
     fn open(layout: Layout, rate: f64, max_frames: usize) -> Self {
         let host = Vst3Host::<ExampleEq>::new();
-        assert!(host.arrange(layout));
-        assert!(host.setup(rate, max_frames));
-        assert!(host.activate());
-        assert!(host.start());
+        assert_eq!(host.arrange(layout), Ok(()));
+        assert_eq!(host.setup(rate, max_frames), Ok(()));
+        assert_eq!(host.activate(), Ok(()));
+        assert_eq!(host.start(), Ok(()));
         Vst3 { host }
     }
 
@@ -216,7 +216,7 @@ impl Shell for Vst3 {
             })
             .collect();
         assert_no_allocations("a block through the VST3 exporter", || {
-            assert!(self.host.process_queues(channels, frames, &sends));
+            assert_eq!(self.host.process_queues(channels, frames, &sends), Ok(()));
         });
     }
 }
@@ -230,7 +230,8 @@ impl Shell for CInterface {
 
     fn open(layout: Layout, rate: f64, max_frames: usize) -> Self {
         let host = CHost::<ExampleEq>::new();
-        assert!(host.activate(rate, u32::try_from(max_frames).expect("small"), layout));
+        let max_frames = u32::try_from(max_frames).expect("small");
+        assert_eq!(host.activate(rate, max_frames, layout), Ok(()));
         for (index, decl) in PARAMS.iter().enumerate() {
             let info = host
                 .parameter(u32::try_from(index).expect("small"))

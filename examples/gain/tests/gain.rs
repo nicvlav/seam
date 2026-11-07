@@ -10,9 +10,9 @@ use seam_ump::{ChannelVoice, Voice};
 
 fn running() -> TestHost<Gain> {
     let host = TestHost::<Gain>::new();
-    assert!(host.setup(48_000.0, 64));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     host
 }
 
@@ -22,7 +22,10 @@ fn the_gain_applies_through_the_exporter() {
     let gain = host_id(GAIN);
     let plus_six = host.normalize(gain, 6.0);
     let (mut left, mut right) = ([0.5_f32; 8], [-0.25_f32; 8]);
-    assert!(host.process_in_place(&mut [&mut left, &mut right], 8, &[(gain, plus_six)]));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left, &mut right], 8, &[(gain, plus_six)]),
+        Ok(())
+    );
     let factor = 10.0_f32.powf(6.0 / 20.0);
     assert!((left[7] - 0.5 * factor).abs() < 1e-6, "{}", left[7]);
     assert!((right[0] + 0.25 * factor).abs() < 1e-6, "{}", right[0]);
@@ -37,7 +40,10 @@ fn bypass_passes_the_input_through() {
         (host_id(BYPASS), 1.0),
     ];
     let (mut left, mut right) = ([0.5_f32; 8], [-0.25_f32; 8]);
-    assert!(host.process_in_place(&mut [&mut left, &mut right], 8, &changes));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left, &mut right], 8, &changes),
+        Ok(())
+    );
     assert_eq!((left, right), ([0.5; 8], [-0.25; 8]));
 }
 
@@ -65,7 +71,7 @@ fn the_label_saves_and_loads_back() {
 
     // Through the exporter, as a host reopening the project.
     let host = TestHost::<Gain>::new();
-    assert!(host.load(&block));
+    assert_eq!(host.load(&block), Ok(()));
     assert_eq!(host.save().as_deref(), Some(block.as_slice()));
 
     // Into a new instance: the label applies on its next tick.

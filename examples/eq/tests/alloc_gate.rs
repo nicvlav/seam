@@ -42,9 +42,9 @@ fn processing_and_retuning_never_allocate() {
 #[test]
 fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
     let mut host = TestHost::<ExampleEq>::new();
-    assert!(host.setup(48_000.0, 256));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, 256), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     let (gain, on) = (host_id("mid.gain"), host_id("high.on"));
     let (mut left, mut right) = (vec![0.25f32; 600], vec![-0.25f32; 600]);
     let (input_left, input_right) = (vec![0.5f32; 600], vec![-0.5f32; 600]);
@@ -54,7 +54,10 @@ fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
             (on, f64::from(round % 2)),
         ];
         assert_no_allocations("a block through VST3, in place, retuning", || {
-            assert!(host.process_in_place(&mut [&mut left, &mut right], 256, &changes));
+            assert_eq!(
+                host.process_in_place(&mut [&mut left, &mut right], 256, &changes),
+                Ok(())
+            );
         });
         let ramp = [
             (0, f64::from(round % 24) / 24.0),
@@ -62,24 +65,30 @@ fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
             (255, f64::from(23 - round % 24) / 24.0),
         ];
         assert_no_allocations("a block through VST3 with points at offsets", || {
-            assert!(host.process_queues(
-                &mut [&mut left, &mut right],
-                256,
-                &[
-                    (gain, &ramp),
-                    (on, &[(0, f64::from(round % 2)), (100, 1.0)])
-                ],
-            ));
+            assert_eq!(
+                host.process_queues(
+                    &mut [&mut left, &mut right],
+                    256,
+                    &[
+                        (gain, &ramp),
+                        (on, &[(0, f64::from(round % 2)), (100, 1.0)])
+                    ],
+                ),
+                Ok(())
+            );
         });
         assert_no_allocations(
             "a block through VST3, separate and longer than the setup",
             || {
-                assert!(host.process(
-                    &[&input_left, &input_right],
-                    &mut [&mut left, &mut right],
-                    600,
-                    &changes,
-                ));
+                assert_eq!(
+                    host.process(
+                        &[&input_left, &input_right],
+                        &mut [&mut left, &mut right],
+                        600,
+                        &changes,
+                    ),
+                    Ok(())
+                );
             },
         );
     }
@@ -88,7 +97,7 @@ fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
 #[test]
 fn the_first_block_through_the_c_interface_allocates_nothing() {
     let host = seam_host::cabi::TestHost::<ExampleEq>::new();
-    assert!(host.activate(48_000.0, 256, Layout::STEREO));
+    assert_eq!(host.activate(48_000.0, 256, Layout::STEREO), Ok(()));
     let index = |key: &str| {
         (0..host.parameter_count() as u32)
             .find(|&index| host.parameter(index).expect("listed").key == key)

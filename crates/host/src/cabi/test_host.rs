@@ -41,6 +41,38 @@ pub enum HostCall {
     Restart(u32),
 }
 
+/// A call the plugin refused: the C interface's `false`, which carries
+/// nothing more.
+///
+/// # Examples
+///
+/// ```
+#[doc = include_str!("../../doc/gain.rs")]
+/// use seam_host::cabi::{Refused, TestHost};
+///
+/// let host = TestHost::<Gain>::new();
+/// // The plugin declares stereo only.
+/// assert_eq!(host.activate(48_000.0, 4, Layout::MONO), Err(Refused));
+/// assert_eq!(host.activate(48_000.0, 4, Layout::STEREO), Ok(()));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refused;
+
+impl Refused {
+    /// `Ok` for the C interface's `true`, and the refusal for `false`.
+    fn check(answer: bool) -> Result<(), Refused> {
+        if answer { Ok(()) } else { Err(Refused) }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the plugin answered false")
+    }
+}
+
+impl std::error::Error for Refused {}
+
 /// A parameter as the host lists it.
 ///
 /// # Examples
@@ -99,13 +131,14 @@ pub struct ParamInfo {
 /// use seam_host::cabi::TestHost;
 ///
 /// let host = TestHost::<Gain>::new();
-/// assert!(host.activate(48_000.0, 4, Layout::STEREO));
+/// host.activate(48_000.0, 4, Layout::STEREO)?;
 ///
 /// host.set(0, 0.0); // the host writes -24 dB
 /// let (mut left, mut right) = ([1.0_f32; 4], [1.0_f32; 4]);
 /// let status = host.process_in_place(&mut [&mut left[..], &mut right[..]], 4);
 /// assert_eq!(status, seam_host::cabi::STATUS_CONTINUE);
 /// assert!((left[0] - 0.0631).abs() < 1e-4);
+/// # Ok::<(), seam_host::cabi::Refused>(())
 /// ```
 pub struct TestHost<P: Plugin> {
     table: &'static SeamPlugin,
@@ -327,9 +360,18 @@ impl<P: Plugin> TestHost<P> {
             .then_some(normalized)
     }
 
-    /// Activates for a sample rate, a block size and a layout, and returns
-    /// whether it did.
-    pub fn activate(&self, sample_rate: f64, max_frames: u32, layout: Layout) -> bool {
+    /// Activates for a sample rate, a block size and a layout.
+    ///
+    /// # Errors
+    ///
+    /// [`Refused`], for a layout the plugin does not declare or a rate that
+    /// is not a positive number, say.
+    pub fn activate(
+        &self,
+        sample_rate: f64,
+        max_frames: u32,
+        layout: Layout,
+    ) -> Result<(), Refused> {
         let channels = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
         let layout = SeamLayout {
             inputs: channels(layout.inputs),
@@ -337,7 +379,9 @@ impl<P: Plugin> TestHost<P> {
         };
         // SAFETY: `self.instance` is the live instance `new` made: only
         // `release` frees it, and that takes the host by `&mut`.
-        unsafe { (self.table.activate)(self.instance, sample_rate, max_frames, layout) }
+        Refused::check(unsafe {
+            (self.table.activate)(self.instance, sample_rate, max_frames, layout)
+        })
     }
 
     /// Deactivates the instance.
@@ -385,12 +429,16 @@ impl<P: Plugin> TestHost<P> {
         saved.then_some(bytes)
     }
 
-    /// Loads a saved block and returns whether it was recognised.
-    pub fn load(&self, bytes: &[u8]) -> bool {
+    /// Loads a saved block.
+    ///
+    /// # Errors
+    ///
+    /// [`Refused`], for a block that is not a saved one.
+    pub fn load(&self, bytes: &[u8]) -> Result<(), Refused> {
         // SAFETY: `self.instance` is the live instance `new` made (only
         // `release`, which takes the host by `&mut`, frees it), and `bytes`
         // is valid for reading its length during the call.
-        unsafe { (self.table.load)(self.instance, bytes.as_ptr(), bytes.len()) }
+        Refused::check(unsafe { (self.table.load)(self.instance, bytes.as_ptr(), bytes.len()) })
     }
 
     /// Asks the next block to reset the processor.
@@ -499,7 +547,7 @@ impl<P: Plugin> std::fmt::Debug for TestHost<P> {
 /// use seam_host::cabi::TestHost;
 ///
 /// let host = TestHost::<Gain>::new();
-/// assert!(host.activate(48_000.0, 4, Layout::STEREO));
+/// host.activate(48_000.0, 4, Layout::STEREO)?;
 ///
 /// // The host's audio thread gets a side of its own and sends blocks on it.
 /// let audio = host.audio_side();
@@ -511,6 +559,7 @@ impl<P: Plugin> std::fmt::Debug for TestHost<P> {
 ///         assert!(left[0] < 0.1);
 ///     });
 /// });
+/// # Ok::<(), seam_host::cabi::Refused>(())
 /// ```
 pub struct AudioSide<'a> {
     table: &'static SeamPlugin,

@@ -13,9 +13,9 @@ use seam_session::Session;
 use super::instance::{Callbacks, Instance};
 use super::{
     ABI_VERSION, HostCall, KIND_BOOL, KIND_CHOICE, KIND_CONTINUOUS, PARAM_BYPASS, RESTART_LATENCY,
-    RESTART_VALUES, STATUS_CONTINUE, STATUS_CONTINUE_IF_NOT_QUIET, STATUS_SLEEP, STATUS_TAIL,
-    SeamHost, SeamInstance, SeamLayout, SeamParamInfo, SeamPlugin, SeamProcess, SeamStr,
-    TAIL_INFINITE, TAIL_NONE, TestHost, header, juce_settings, plugin,
+    RESTART_VALUES, Refused, STATUS_CONTINUE, STATUS_CONTINUE_IF_NOT_QUIET, STATUS_SLEEP,
+    STATUS_TAIL, SeamHost, SeamInstance, SeamLayout, SeamParamInfo, SeamPlugin, SeamProcess,
+    SeamStr, TAIL_INFINITE, TAIL_NONE, TestHost, header, juce_settings, plugin,
 };
 use crate::boundary::tests::Watched;
 use crate::faults::{thread_faults, written};
@@ -221,7 +221,7 @@ impl Plugin for Probe {
 /// block.
 fn running(max_frames: u32) -> TestHost<Probe> {
     let host = TestHost::<Probe>::new();
-    assert!(host.activate(48_000.0, max_frames, Layout::STEREO));
+    assert_eq!(host.activate(48_000.0, max_frames, Layout::STEREO), Ok(()));
     host
 }
 
@@ -363,15 +363,24 @@ fn a_host_write_lands_from_any_thread() {
 fn activation_builds_a_processor_for_the_setup_and_layout() {
     let host = TestHost::<Probe>::new();
     assert_eq!(host.tail(), 100, "answered from creation");
-    assert!(
-        !host.activate(48_000.0, 256, Layout::new(1, 2)),
+    assert_eq!(
+        host.activate(48_000.0, 256, Layout::new(1, 2)),
+        Err(Refused),
         "not a listed layout"
     );
-    assert!(!host.activate(f64::NAN, 256, Layout::STEREO), "no rate");
-    assert!(!host.activate(-1.0, 256, Layout::STEREO), "a negative rate");
+    assert_eq!(
+        host.activate(f64::NAN, 256, Layout::STEREO),
+        Err(Refused),
+        "no rate"
+    );
+    assert_eq!(
+        host.activate(-1.0, 256, Layout::STEREO),
+        Err(Refused),
+        "a negative rate"
+    );
     assert!(probe(|state| state.setups.is_empty()));
     probe(|state| state.latency = 32);
-    assert!(host.activate(44_100.0, 256, Layout::MONO));
+    assert_eq!(host.activate(44_100.0, 256, Layout::MONO), Ok(()));
     assert_eq!(host.latency(), 32, "read at activation");
     assert_eq!(
         probe(|state| state.setups.clone()),
@@ -385,7 +394,7 @@ fn activation_builds_a_processor_for_the_setup_and_layout() {
     );
     // A second activation replaces the processor, as JUCE calls
     // `prepareToPlay` again on a new rate.
-    assert!(host.activate(96_000.0, 128, Layout::STEREO));
+    assert_eq!(host.activate(96_000.0, 128, Layout::STEREO), Ok(()));
     assert_eq!(probe(|state| state.deactivations), 1, "the first went back");
     host.idle();
     assert_eq!(host.calls(), [], "the latency was read with the activation");
@@ -438,7 +447,7 @@ fn an_inactive_or_panicking_processor_plays_silence() {
     host.process_in_place(&mut [&mut left], 8);
     assert_eq!(left, [0.0; 8], "silent before any activation");
 
-    assert!(host.activate(48_000.0, 8, Layout::MONO));
+    assert_eq!(host.activate(48_000.0, 8, Layout::MONO), Ok(()));
     probe(|state| state.panic_in_process = true);
     host.expect_faults(1);
     let mut left = [5.0f32; 8];
@@ -449,8 +458,9 @@ fn an_inactive_or_panicking_processor_plays_silence() {
     host.process_in_place(&mut [&mut left], 8);
     assert_eq!(left, [0.0; 8], "and so is every block after it");
 
-    assert!(
+    assert_eq!(
         host.activate(48_000.0, 8, Layout::MONO),
+        Ok(()),
         "a fresh processor"
     );
     let mut left = [5.0f32; 8];
@@ -521,10 +531,11 @@ fn a_panic_in_activate_or_idle_is_answered() {
     let host = TestHost::<Probe>::new();
     probe(|state| state.panic_in_activate = true);
     host.expect_faults(1);
-    assert!(!host.activate(48_000.0, 64, Layout::STEREO));
+    assert_eq!(host.activate(48_000.0, 64, Layout::STEREO), Err(Refused));
     probe(|state| state.panic_in_activate = false);
-    assert!(
+    assert_eq!(
         host.activate(48_000.0, 64, Layout::STEREO),
+        Ok(()),
         "the next one works"
     );
     probe(|state| state.panic_in_idle = true);
@@ -698,10 +709,10 @@ fn the_saved_block_round_trips_and_a_stranger_changes_nothing() {
     assert_eq!(json["parameters"]["gain"], 12.0);
     assert_eq!(json["parameters"]["mode"], 2);
     host.set(GAIN, 0.0);
-    assert!(host.load(&saved));
+    assert_eq!(host.load(&saved), Ok(()));
     assert_eq!(host.get(GAIN), 0.75);
-    assert!(!host.load(b"not a block"), "not one");
-    assert!(!host.load(b""), "nor is nothing");
+    assert_eq!(host.load(b"not a block"), Err(Refused), "not one");
+    assert_eq!(host.load(b""), Err(Refused), "nor is nothing");
     assert_eq!(host.get(GAIN), 0.75, "and neither changed anything");
 }
 
@@ -1049,7 +1060,7 @@ fn deactivation_takes_the_processor_back_and_reads_the_answers() {
     probe(|state| state.tail = Some(Tail::Frames(7)));
     host.idle();
     assert_eq!(host.tail(), 7);
-    assert!(host.activate(48_000.0, 8, Layout::STEREO));
+    assert_eq!(host.activate(48_000.0, 8, Layout::STEREO), Ok(()));
     assert_eq!(
         probe(|state| state.deactivations),
         1,
@@ -1067,8 +1078,9 @@ fn deactivation_takes_the_processor_back_and_reads_the_answers() {
 fn an_activation_drops_a_reset_asked_of_the_processor_it_replaces() {
     let host = running(8);
     host.reset();
-    assert!(
+    assert_eq!(
         host.activate(48_000.0, 8, Layout::STEREO),
+        Ok(()),
         "a fresh processor"
     );
     let mut left = [0.0f32; 8];
@@ -1128,11 +1140,12 @@ impl Plugin for Instrument {
 fn an_instrument_plays_with_no_input_or_a_narrower_one() {
     let host = TestHost::<Instrument>::new();
     assert_eq!(host.layouts(), [Layout::new(0, 2), Layout::new(1, 2)]);
-    assert!(
-        !host.activate(48_000.0, 8, Layout::STEREO),
+    assert_eq!(
+        host.activate(48_000.0, 8, Layout::STEREO),
+        Err(Refused),
         "not a listed layout"
     );
-    assert!(host.activate(48_000.0, 8, Layout::new(0, 2)));
+    assert_eq!(host.activate(48_000.0, 8, Layout::new(0, 2)), Ok(()));
     let setup = probe(|state| state.setups[0]);
     assert_eq!(setup.layout, Layout::new(0, 2));
     assert_eq!(setup.max_events, 2048, "it takes MIDI");
@@ -1141,7 +1154,7 @@ fn an_instrument_plays_with_no_input_or_a_narrower_one() {
     host.process(&[], &mut [&mut left, &mut right], 8);
     assert_eq!((left, right), ([12.0; 8], [12.0; 8]), "from silence");
 
-    assert!(host.activate(48_000.0, 8, Layout::new(1, 2)));
+    assert_eq!(host.activate(48_000.0, 8, Layout::new(1, 2)), Ok(()));
     let input = [1.0f32; 8];
     host.process(&[&input], &mut [&mut left, &mut right], 8);
     assert_eq!(
@@ -1466,11 +1479,12 @@ fn the_exported_table_lends_a_send_plugin_to_any_thread_and_keeps_any_other_wher
 #[test]
 fn an_activation_with_no_block_size_takes_the_fallbacks() {
     let host = TestHost::<Probe>::new();
-    assert!(host.activate(96_000.0, 0, Layout::STEREO));
+    assert_eq!(host.activate(96_000.0, 0, Layout::STEREO), Ok(()));
     let setup = probe(|state| state.setups[0]);
     assert_eq!((setup.sample_rate, setup.max_frames), (96_000.0, 1024));
-    assert!(
+    assert_eq!(
         host.activate(48_000.0, super::MAX_FRAMES, Layout::STEREO),
+        Ok(()),
         "at the limit"
     );
 }
@@ -1479,8 +1493,9 @@ fn an_activation_with_no_block_size_takes_the_fallbacks() {
 fn an_activation_past_the_block_size_limit_builds_for_the_limit() {
     let host = TestHost::<Probe>::new();
     for promised in [super::MAX_FRAMES + 1, u32::MAX] {
-        assert!(
+        assert_eq!(
             host.activate(48_000.0, promised, Layout::STEREO),
+            Ok(()),
             "{promised} frames"
         );
         let setup = probe(|state| state.setups.last().copied()).expect("built");
@@ -1523,7 +1538,11 @@ fn a_moving_plugin_takes_main_thread_calls_from_any_thread_however_many_ticks_ra
         host.idle();
     }
     assert!(elsewhere(), "and after a hundred");
-    assert!(host.activate(48_000.0, 64, Layout::STEREO), "and here");
+    assert_eq!(
+        host.activate(48_000.0, 64, Layout::STEREO),
+        Ok(()),
+        "and here"
+    );
     assert_eq!(host.faults(), 0);
 }
 

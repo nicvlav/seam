@@ -19,8 +19,8 @@ use ::vst3::Steinberg::Vst::{
 use ::vst3::Steinberg::{
     IBStream, IPluginBaseTrait, IPluginFactory, IPluginFactory2Trait, IPluginFactory3,
     IPluginFactory3Trait, IPluginFactoryTrait, PClassInfo, PClassInfo2, PClassInfoW, PFactoryInfo,
-    int32, kInvalidArgument, kNoInterface, kNotImplemented, kNotInitialized, kResultFalse,
-    kResultOk, tresult,
+    int32, kInternalError, kInvalidArgument, kNoInterface, kNotImplemented, kNotInitialized,
+    kResultFalse, kResultOk, tresult,
 };
 use ::vst3::{Class, ComPtr, ComWrapper, Interface};
 use seam_params::{
@@ -30,7 +30,7 @@ use seam_session::Session;
 
 use super::component::Component;
 use super::test_host::{Recorder, Stream};
-use super::{HostCall, RESTART_LATENCY, RESTART_VALUES, TestHost, plugin_factory};
+use super::{HostCall, RESTART_LATENCY, RESTART_VALUES, Refused, TestHost, plugin_factory};
 use crate::engine::timer::{detached, pump};
 use crate::faults::{thread_faults, written};
 use crate::{
@@ -239,9 +239,9 @@ const BYPASS: u32 = host_id("bypass");
 /// block.
 fn running(max_frames: usize) -> TestHost<Probe> {
     let host = TestHost::<Probe>::new();
-    assert!(host.setup(48_000.0, max_frames));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, max_frames), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     host
 }
 
@@ -366,35 +366,49 @@ fn text_and_values_convert_through_the_declaration() {
 fn the_host_writes_through_process_and_through_the_controller() {
     let mut host = running(64);
     let (mut left, mut right) = ([0.0f32; 8], [0.0f32; 8]);
-    assert!(host.process_in_place(
-        &mut [&mut left, &mut right],
-        8,
-        &[(GAIN, 0.75), (GAIN, 0.25)]
-    ));
+    assert_eq!(
+        host.process_in_place(
+            &mut [&mut left, &mut right],
+            8,
+            &[(GAIN, 0.75), (GAIN, 0.25)]
+        ),
+        Ok(())
+    );
     assert_eq!(host.normalized(GAIN), 0.75, "the first queue wins");
     assert_eq!(left, [12.0; 8], "the block hears it");
-    assert!(host.process_in_place(&mut [&mut left, &mut right], 0, &[(MODE, 1.0), (99, 1.0)]));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left, &mut right], 0, &[(MODE, 1.0), (99, 1.0)]),
+        Ok(())
+    );
     assert_eq!(host.normalized(MODE), 1.0, "a flush of parameters");
     assert_eq!(probe(|state| state.blocks.len()), 1, "with no block");
 
     // While processing, a controller write is ignored: the host sends the
     // same value through `process`.
-    assert!(host.set_normalized(GAIN, 0.5));
+    assert_eq!(host.set_normalized(GAIN, 0.5), Ok(()));
     assert_eq!(host.normalized(GAIN), 0.75);
-    assert!(host.stop());
-    assert!(host.set_normalized(GAIN, 0.5));
+    assert_eq!(host.stop(), Ok(()));
+    assert_eq!(host.set_normalized(GAIN, 0.5), Ok(()));
     assert_eq!(host.normalized(GAIN), 0.5);
-    assert!(!host.set_normalized(99, 0.5), "an unknown id");
+    assert_eq!(
+        host.set_normalized(99, 0.5),
+        Err(Refused(kInvalidArgument)),
+        "an unknown id"
+    );
 }
 
 #[test]
 fn layouts_follow_the_declaration() {
     let host = TestHost::<Probe>::new();
     assert_eq!(host.layout(), Layout::STEREO, "the first layout by default");
-    assert!(host.arrange(Layout::MONO));
+    assert_eq!(host.arrange(Layout::MONO), Ok(()));
     assert_eq!(host.layout(), Layout::MONO);
-    assert!(!host.arrange(Layout::new(1, 2)), "not a declared layout");
-    assert!(!host.arrange(Layout::new(6, 6)));
+    assert_eq!(
+        host.arrange(Layout::new(1, 2)),
+        Err(Refused(kResultFalse)),
+        "not a declared layout"
+    );
+    assert_eq!(host.arrange(Layout::new(6, 6)), Err(Refused(kResultFalse)));
     assert_eq!(host.layout(), Layout::MONO);
     let (plugin, processor, _) = host.interfaces();
     // SAFETY: the component is alive while the host holds its interfaces;
@@ -431,8 +445,12 @@ fn layouts_follow_the_declaration() {
             "f32 only"
         );
     }
-    assert!(host.activate());
-    assert!(!host.arrange(Layout::STEREO), "not while active");
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(
+        host.arrange(Layout::STEREO),
+        Err(Refused(kResultFalse)),
+        "not while active"
+    );
     assert_eq!(
         probe(|state| state.setups.last().map(|setup| setup.layout)),
         Some(Layout::MONO)
@@ -445,12 +463,15 @@ fn blocks_run_on_separate_or_shared_buffers_and_in_pieces() {
     let mut host = running(16);
     let (left, right) = ([1.0f32; 40], [2.0f32; 40]);
     let (mut out_left, mut out_right) = ([0.0f32; 40], [0.0f32; 40]);
-    assert!(host.process(
-        &[&left, &right],
-        &mut [&mut out_left, &mut out_right],
-        40,
-        &[(GAIN, 0.75)]
-    ));
+    assert_eq!(
+        host.process(
+            &[&left, &right],
+            &mut [&mut out_left, &mut out_right],
+            40,
+            &[(GAIN, 0.75)]
+        ),
+        Ok(())
+    );
     assert_eq!(out_left, [13.0; 40]);
     assert_eq!(out_right, [14.0; 40]);
     assert_eq!(
@@ -459,7 +480,10 @@ fn blocks_run_on_separate_or_shared_buffers_and_in_pieces() {
         "longer than the setup"
     );
     let (mut left, mut right) = ([1.0f32; 4], [2.0f32; 4]);
-    assert!(host.process_in_place(&mut [&mut left, &mut right], 4, &[]));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left, &mut right], 4, &[]),
+        Ok(())
+    );
     assert_eq!((left, right), ([13.0; 4], [14.0; 4]));
     assert_eq!(
         probe(|state| state.flushed),
@@ -475,33 +499,36 @@ fn blocks_run_on_separate_or_shared_buffers_and_in_pieces() {
 #[test]
 fn an_inactive_or_panicking_processor_plays_silence() {
     let mut host = TestHost::<Probe>::new();
-    assert!(host.setup(48_000.0, 64));
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
     let mut left = [5.0f32; 8];
-    assert!(host.process_in_place(&mut [&mut left], 8, &[(GAIN, 1.0)]));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left], 8, &[(GAIN, 1.0)]),
+        Ok(())
+    );
     assert_eq!(left, [0.0; 8], "not active");
     assert_eq!(host.silence_flags(), 0b1, "and flagged silent");
     assert_eq!(host.normalized(GAIN), 1.0, "yet the host's write landed");
 
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     let mut left = [5.0f32; 8];
-    assert!(host.process_in_place(&mut [&mut left], 8, &[]));
+    assert_eq!(host.process_in_place(&mut [&mut left], 8, &[]), Ok(()));
     assert_eq!(host.silence_flags(), 0, "playing");
     let faults = thread_faults();
     host.expect_faults(1);
     probe(|state| state.panic_in_process = true);
     let mut left = [5.0f32; 8];
-    assert!(host.process_in_place(&mut [&mut left], 8, &[]));
+    assert_eq!(host.process_in_place(&mut [&mut left], 8, &[]), Ok(()));
     assert_eq!(left, [0.0; 8]);
     assert_eq!(thread_faults(), faults + 1, "caught and recorded");
     probe(|state| state.panic_in_process = false);
     let mut left = [5.0f32; 8];
-    assert!(host.process_in_place(&mut [&mut left], 8, &[]));
+    assert_eq!(host.process_in_place(&mut [&mut left], 8, &[]), Ok(()));
     assert_eq!(left, [0.0; 8], "silent until the next activation");
 
-    assert!(host.deactivate());
-    assert!(host.activate());
+    assert_eq!(host.deactivate(), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
     let mut left = [5.0f32; 8];
-    assert!(host.process_in_place(&mut [&mut left], 8, &[]));
+    assert_eq!(host.process_in_place(&mut [&mut left], 8, &[]), Ok(()));
     assert_eq!(left, [29.0; 8], "playing again");
     assert_eq!(host.silence_flags(), 0);
     assert_eq!(thread_faults(), faults + 1);
@@ -511,22 +538,22 @@ fn an_inactive_or_panicking_processor_plays_silence() {
 fn stopping_resets_before_the_next_block() {
     let mut host = running(64);
     let mut left = [0.0f32; 4];
-    assert!(host.process_in_place(&mut [&mut left], 4, &[]));
-    assert!(host.stop());
+    assert_eq!(host.process_in_place(&mut [&mut left], 4, &[]), Ok(()));
+    assert_eq!(host.stop(), Ok(()));
     assert_eq!(probe(|state| state.resets), 0, "not on the stopping thread");
-    assert!(host.start());
-    assert!(host.process_in_place(&mut [&mut left], 4, &[]));
+    assert_eq!(host.start(), Ok(()));
+    assert_eq!(host.process_in_place(&mut [&mut left], 4, &[]), Ok(()));
     assert_eq!(probe(|state| state.resets), 1);
-    assert!(host.process_in_place(&mut [&mut left], 4, &[]));
+    assert_eq!(host.process_in_place(&mut [&mut left], 4, &[]), Ok(()));
     assert_eq!(probe(|state| state.resets), 1);
 }
 
 #[test]
 fn activation_builds_the_processor_and_deactivation_hands_it_back() {
     let host = TestHost::<Probe>::new();
-    assert!(host.setup(96_000.0, 333));
-    assert!(host.activate());
-    assert!(host.activate(), "twice rebuilds");
+    assert_eq!(host.setup(96_000.0, 333), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.activate(), Ok(()), "twice rebuilds");
     assert_eq!(probe(|state| state.deactivations), 1, "the first went back");
     let setup = probe(|state| state.setups.clone());
     assert_eq!(setup.len(), 2);
@@ -535,9 +562,9 @@ fn activation_builds_the_processor_and_deactivation_hands_it_back() {
         (96_000.0, 333, Layout::STEREO)
     );
     assert_eq!((setup[0].max_events, setup[0].max_out_events), (0, 0));
-    assert!(host.deactivate());
+    assert_eq!(host.deactivate(), Ok(()));
     assert_eq!(probe(|state| state.deactivations), 2);
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     assert_eq!(host.tail(), 100);
     drop(host);
     assert_eq!(
@@ -553,17 +580,20 @@ fn a_panicking_entry_point_answers_an_error() {
     host.expect_faults(1);
     let faults = thread_faults();
     probe(|state| state.panic_in_activate = true);
-    assert!(!host.activate());
+    assert_eq!(host.activate(), Err(Refused(kInternalError)));
     assert_eq!(thread_faults(), faults + 1);
     probe(|state| state.panic_in_activate = false);
-    assert!(host.activate(), "the instance still works");
+    assert_eq!(host.activate(), Ok(()), "the instance still works");
 }
 
 #[test]
 fn state_round_trips_through_streams_on_any_thread() {
     let mut host = running(64);
     let mut left = [0.0f32; 4];
-    assert!(host.process_in_place(&mut [&mut left], 4, &[(GAIN, 0.75), (MODE, 1.0)]));
+    assert_eq!(
+        host.process_in_place(&mut [&mut left], 4, &[(GAIN, 0.75), (MODE, 1.0)]),
+        Ok(())
+    );
     let saved = host.save().expect("a block");
     let json: serde_json::Value = serde_json::from_slice(&saved).expect("JSON");
     assert_eq!(json["parameters"]["gain"], 12.0);
@@ -599,8 +629,16 @@ fn state_round_trips_through_streams_on_any_thread() {
         });
     });
     assert_eq!(host.normalized(GAIN), PARAMS[0].kind.normalize(-6.0));
-    assert!(!host.load(b"not a block"), "the host is told it failed");
-    assert!(!host.load(b""), "nor is nothing a block");
+    assert_eq!(
+        host.load(b"not a block"),
+        Err(Refused(kResultFalse)),
+        "the host is told it failed"
+    );
+    assert_eq!(
+        host.load(b""),
+        Err(Refused(kResultFalse)),
+        "nor is nothing a block"
+    );
     assert_eq!(host.normalized(GAIN), PARAMS[0].kind.normalize(-6.0));
 }
 
@@ -670,7 +708,7 @@ fn a_main_thread_call_from_another_thread_is_refused() {
             assert_eq!(thread_faults(), faults + 1);
         });
     });
-    assert!(host.activate(), "on its own thread");
+    assert_eq!(host.activate(), Ok(()), "on its own thread");
 }
 
 /// A plugin with one layout, whose processor adds 1 to every channel.
@@ -734,9 +772,9 @@ impl<const INPUTS: usize, const OUTPUTS: usize> Plugin for Shaped<INPUTS, OUTPUT
 /// A host processing `P` at 48 kHz, up to 64 frames a block.
 fn playing<P: Plugin>() -> TestHost<P> {
     let host = TestHost::<P>::new();
-    assert!(host.setup(48_000.0, 64));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     host
 }
 
@@ -747,8 +785,9 @@ const OUTPUT: BusDirection = BusDirections_::kOutput as BusDirection;
 #[test]
 fn a_plugin_without_input_has_no_input_bus() {
     let idle = TestHost::<Shaped<0, 2>>::new();
-    assert!(
+    assert_eq!(
         idle.arrange(Layout::new(0, 2)),
+        Ok(()),
         "arranged with no input bus"
     );
     let mut host = playing::<Shaped<0, 2>>();
@@ -761,7 +800,10 @@ fn a_plugin_without_input_has_no_input_bus() {
     }
     assert_eq!(host.layout(), Layout::new(0, 2));
     let (mut left, mut right) = ([5.0f32; 4], [5.0f32; 4]);
-    assert!(host.process(&[], &mut [&mut left, &mut right], 4, &[]));
+    assert_eq!(
+        host.process(&[], &mut [&mut left, &mut right], 4, &[]),
+        Ok(())
+    );
     assert_eq!(
         (left, right),
         ([1.0; 4], [1.0; 4]),
@@ -786,7 +828,10 @@ fn mono_in_stereo_out_starts_the_second_channel_silent() {
     assert_eq!(host.layout(), Layout::new(1, 2));
     let input = [3.0f32; 4];
     let (mut left, mut right) = ([9.0f32; 4], [9.0f32; 4]);
-    assert!(host.process(&[&input], &mut [&mut left, &mut right], 4, &[]));
+    assert_eq!(
+        host.process(&[&input], &mut [&mut left, &mut right], 4, &[]),
+        Ok(())
+    );
     assert_eq!((left, right), ([4.0; 4], [1.0; 4]));
 }
 
@@ -922,7 +967,10 @@ fn every_point_keeps_its_offset_and_each_queue_lands_its_last() {
     let mut host = running(64);
     let mut left = [0.0f32; 8];
     let gain: &[(i32, f64)] = &[(0, 0.25), (4, 0.5), (7, 0.75)];
-    assert!(host.process_queues(&mut [&mut left], 8, &[(GAIN, gain), (MODE, &[(2, 1.0)])]));
+    assert_eq!(
+        host.process_queues(&mut [&mut left], 8, &[(GAIN, gain), (MODE, &[(2, 1.0)])]),
+        Ok(())
+    );
     assert_eq!((host.normalized(GAIN), host.normalized(MODE)), (0.75, 1.0));
     assert_eq!(left, [12.0; 8], "one value for the whole block");
     let (points, dropped) = host.component().carried();
@@ -959,7 +1007,7 @@ fn a_host_claiming_more_queues_than_parameters_is_walked_no_further() {
         (BYPASS, &[(6, 1.0)]),
         (GAIN, &[(4, 0.75)]),
     ];
-    assert!(host.process_queues(&mut [&mut left], 8, queues));
+    assert_eq!(host.process_queues(&mut [&mut left], 8, queues), Ok(()));
     assert_eq!(host.normalized(GAIN), 0.25);
     assert_eq!(host.component().carried().0.len(), 3);
 }
@@ -998,7 +1046,7 @@ fn queues_for_ids_the_plugin_does_not_know_never_starve_its_own() {
         (GAIN, &[(3, 0.0)]),
         (MODE, &[(5, 1.0)]),
     ];
-    assert!(host.process_queues(&mut [&mut left], 8, queues));
+    assert_eq!(host.process_queues(&mut [&mut left], 8, queues), Ok(()));
     assert_eq!((host.normalized(GAIN), host.normalized(MODE)), (0.0, 1.0));
 }
 
@@ -1014,7 +1062,7 @@ fn a_parameter_in_two_queues_takes_one_parameter_s_place_and_its_first_queue_win
         (MODE, &[(2, 1.0)]),
         (BYPASS, &[(6, 1.0)]),
     ];
-    assert!(host.process_queues(&mut [&mut left], 8, queues));
+    assert_eq!(host.process_queues(&mut [&mut left], 8, queues), Ok(()));
     assert_eq!(
         (
             host.normalized(GAIN),
@@ -1046,7 +1094,7 @@ fn the_first_queue_for_a_parameter_wins_wherever_the_repeat_comes() {
         listed.insert(at, repeat);
         let mut host = running(64);
         let mut left = [0.0f32; 8];
-        assert!(host.process_queues(&mut [&mut left], 8, &listed));
+        assert_eq!(host.process_queues(&mut [&mut left], 8, &listed), Ok(()));
         assert_eq!(
             (
                 host.normalized(GAIN),
@@ -1073,7 +1121,7 @@ fn a_block_moving_every_proxy_of_learn_s_grid_still_reaches_the_plugin_s_own_que
     queues.push((GAIN, &[(3, 0.0)]));
     let mut host = running(64);
     let mut left = [0.0f32; 8];
-    assert!(host.process_queues(&mut [&mut left], 8, &queues));
+    assert_eq!(host.process_queues(&mut [&mut left], 8, &queues), Ok(()));
     assert_eq!(host.normalized(GAIN), 0.0, "the plugin's own point landed");
 }
 
@@ -1144,14 +1192,14 @@ fn a_64_bit_block_is_refused_unprocessed() {
 #[test]
 fn a_latency_activation_sets_reaches_a_host_that_asked_before() {
     let host = TestHost::<Probe>::new();
-    assert!(host.setup(48_000.0, 64));
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
     assert_eq!(
         host.latency(),
         0,
         "asked before activating, as JUCE's hosting does"
     );
     probe(|state| state.latency = 64);
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     assert_eq!(host.latency(), 64, "answered at once");
     host.tick();
     assert_eq!(host.calls(), [HostCall::Restart(RESTART_LATENCY)]);
@@ -1162,19 +1210,23 @@ fn a_latency_activation_sets_reaches_a_host_that_asked_before() {
 #[test]
 fn a_controller_write_after_deactivation_lands() {
     let host = running(64);
-    assert!(host.deactivate(), "with no setProcessing(false) first");
-    assert!(host.set_normalized(GAIN, 0.25));
+    assert_eq!(
+        host.deactivate(),
+        Ok(()),
+        "with no setProcessing(false) first"
+    );
+    assert_eq!(host.set_normalized(GAIN, 0.25), Ok(()));
     assert_eq!(host.normalized(GAIN), 0.25);
 }
 
 #[test]
 fn setup_is_refused_while_active() {
     let host = TestHost::<Probe>::new();
-    assert!(host.setup(48_000.0, 64));
-    assert!(host.activate());
-    assert!(!host.setup(96_000.0, 32));
-    assert!(host.deactivate());
-    assert!(host.activate());
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.setup(96_000.0, 32), Err(Refused(kResultFalse)));
+    assert_eq!(host.deactivate(), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
     let setups = probe(|state| {
         state
             .setups
@@ -1188,7 +1240,7 @@ fn setup_is_refused_while_active() {
 #[test]
 fn layout_latency_and_tail_answer_on_any_thread() {
     let host = TestHost::<Probe>::new();
-    assert!(host.arrange(Layout::MONO));
+    assert_eq!(host.arrange(Layout::MONO), Ok(()));
     probe(|state| state.latency = 64);
     host.tick();
     assert_eq!(host.calls(), [HostCall::Restart(RESTART_LATENCY)]);
@@ -1373,9 +1425,9 @@ fn a_processor_that_panics_as_it_drops_on_another_thread_is_caught_there() {
 fn a_block_with_no_output_buffers_is_answered() {
     for active in [false, true] {
         let host = TestHost::<Probe>::new();
-        assert!(host.setup(48_000.0, 64));
+        assert_eq!(host.setup(48_000.0, 64), Ok(()));
         if active {
-            assert!(host.activate());
+            assert_eq!(host.activate(), Ok(()));
         }
         let (_, processor, _) = host.interfaces();
         // SAFETY: all zeros is valid process data: buses counted, none
@@ -1396,7 +1448,7 @@ fn a_block_with_no_output_buffers_is_answered() {
 #[test]
 fn a_tick_that_panicked_leaves_the_instance_to_drop_normally() {
     let host = TestHost::<Probe>::new();
-    assert!(host.activate());
+    assert_eq!(host.activate(), Ok(()));
     probe(|state| state.panic_in_idle = true);
     host.expect_faults(1);
     host.tick();
@@ -1642,7 +1694,7 @@ fn the_timer_ticks_the_plugin_and_a_host_load_reaches_its_session() {
     let host = TestHost::<WithSession>::with_timer();
     assert!(host.pump_until(|| TICKS.with(Cell::get) >= 3), "ticked");
     let block = br#"{"seamStateVersion": 1, "parameters": {}, "extra": {"kept": 42}}"#;
-    assert!(host.load(block));
+    assert_eq!(host.load(block), Ok(()));
     assert!(
         host.pump_until(|| KEPT.with(|kept| *kept.borrow() == Some(serde_json::json!(42)))),
         "applied by a tick"
@@ -1663,7 +1715,9 @@ fn a_host_on_three_threads_with_real_ticks_and_points_at_offsets() {
         created_elsewhere: true,
         timer: true,
     });
-    assert!(host.setup(48_000.0, 64) && host.activate() && host.start());
+    assert_eq!(host.setup(48_000.0, 64), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     probe(|state| state.edit = Some(("gain", 6.0)));
     let side = host.audio_side();
     let edit = PARAMS[0].kind.normalize(6.0);
@@ -1675,7 +1729,10 @@ fn a_host_on_three_threads_with_real_ticks_and_points_at_offsets() {
             for block in 0u32.. {
                 let mode: &[(i32, f64)] = &[(1, 0.0), (5, f64::from(block % 2))];
                 let mut left = [1.0f32; 8];
-                assert!(side.process_queues(&mut [&mut left], 8, &[(MODE, mode)]));
+                assert_eq!(
+                    side.process_queues(&mut [&mut left], 8, &[(MODE, mode)]),
+                    Ok(())
+                );
                 if left == [7.0; 8] || Instant::now() > end {
                     return (left, f64::from(block % 2));
                 }
@@ -1700,9 +1757,13 @@ fn a_host_on_three_threads_with_real_ticks_and_points_at_offsets() {
 #[test]
 fn a_setup_with_no_block_size_keeps_its_rate_and_one_past_the_limit_is_built_for_the_limit() {
     let host = TestHost::<Probe>::new();
-    assert!(host.setup(96_000.0, 0), "a rate with no block size");
-    assert!(!host.setup(f64::NAN, 64), "no rate");
-    assert!(host.activate());
+    assert_eq!(host.setup(96_000.0, 0), Ok(()), "a rate with no block size");
+    assert_eq!(
+        host.setup(f64::NAN, 64),
+        Err(Refused(kInvalidArgument)),
+        "no rate"
+    );
+    assert_eq!(host.activate(), Ok(()));
     let setups = probe(|state| state.setups.clone());
     assert_eq!(
         (setups[0].sample_rate, setups[0].max_frames),
@@ -1711,9 +1772,9 @@ fn a_setup_with_no_block_size_keeps_its_rate_and_one_past_the_limit_is_built_for
     );
     // One past the limit, and the most a VST3 setup can promise.
     for promised in [crate::MAX_FRAMES + 1, usize::MAX] {
-        assert!(host.deactivate());
-        assert!(host.setup(44_100.0, promised), "{promised} frames");
-        assert!(host.activate());
+        assert_eq!(host.deactivate(), Ok(()));
+        assert_eq!(host.setup(44_100.0, promised), Ok(()), "{promised} frames");
+        assert_eq!(host.activate(), Ok(()));
         let setup = probe(|state| state.setups.last().copied()).expect("built");
         assert_eq!(
             (setup.sample_rate, setup.max_frames),
@@ -1779,7 +1840,7 @@ fn every_arrangement_offered_is_one_the_exporter_then_takes() {
     let host = TestHost::<Probe>::new();
     let (_, processor, _) = host.interfaces();
     for layout in [Layout::STEREO, Layout::MONO] {
-        assert!(host.arrange(layout));
+        assert_eq!(host.arrange(layout), Ok(()));
         let (mut input, mut output): (SpeakerArrangement, SpeakerArrangement) = (0, 0);
         // SAFETY: the component is alive while the host holds its
         // interfaces, and `input` and `output` are each one live arrangement,

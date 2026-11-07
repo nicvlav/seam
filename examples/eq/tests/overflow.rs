@@ -17,9 +17,9 @@ const POINTS: usize = 64;
 #[test]
 fn a_block_with_more_points_than_the_room_allocates_nothing_and_lands_each_last_point() {
     let mut host = TestHost::<ExampleEq>::new();
-    assert!(host.setup(48_000.0, FRAMES));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, FRAMES), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     let mut channels = [vec![0.1f32; FRAMES], vec![-0.1f32; FRAMES]];
     for round in 0..4usize {
         let queues: Vec<Vec<(i32, f64)>> = (0..PARAMS.len())
@@ -40,7 +40,10 @@ fn a_block_with_more_points_than_the_room_allocates_nothing_and_lands_each_last_
             .collect();
         let [left, right] = &mut channels;
         assert_no_allocations("a block whose points overflow the room", || {
-            assert!(host.process_queues(&mut [left, right], FRAMES, &sends));
+            assert_eq!(
+                host.process_queues(&mut [left, right], FRAMES, &sends),
+                Ok(())
+            );
         });
         for (decl, points) in PARAMS.iter().zip(&queues) {
             let (_, last) = *points.last().expect("points");

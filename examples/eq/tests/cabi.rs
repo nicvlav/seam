@@ -45,7 +45,7 @@ fn the_adapter_lists_every_parameter_with_its_key() {
 #[test]
 fn audio_through_the_c_interface_matches_the_processor_driven_directly() {
     let host = TestHost::<ExampleEq>::new();
-    assert!(host.activate(RATE, MAX_FRAMES, Layout::STEREO));
+    assert_eq!(host.activate(RATE, MAX_FRAMES, Layout::STEREO), Ok(()));
     let mut plugin = ExampleEq::new();
     let saved = plugin.saved();
     let mut processor = plugin.activate(&ProcessSetup {
@@ -111,6 +111,6 @@ fn a_saved_block_through_the_c_interface_loads_through_vst3() {
     adapter.set(index, 0.75);
     let saved = adapter.save().expect("a block");
     let native = seam_host::vst3::TestHost::<ExampleEq>::new();
-    assert!(native.load(&saved));
+    assert_eq!(native.load(&saved), Ok(()));
     assert_eq!(native.normalized(host_id("mid.gain")), adapter.get(index));
 }

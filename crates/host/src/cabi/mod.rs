@@ -47,7 +47,7 @@ pub use header::header;
 pub use juce::{juce_param_id, juce_settings};
 #[cfg(any(test, feature = "test-host"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-host")))]
-pub use test_host::{AudioSide, HostCall, ParamInfo, TestHost};
+pub use test_host::{AudioSide, HostCall, ParamInfo, Refused, TestHost};
 
 use crate::boundary::guard;
 use crate::engine::{LOAN_WAIT, Outcome, Release, Setup};

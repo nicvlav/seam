@@ -49,7 +49,7 @@ use ::vst3::{ComPtr, ComWrapper};
 #[cfg(any(test, feature = "test-host"))]
 #[cfg_attr(docsrs, doc(cfg(feature = "test-host")))]
 pub use test_host::{
-    AudioSide, HostCall, Options, ParamInfo, RESTART_LATENCY, RESTART_VALUES, TestHost,
+    AudioSide, HostCall, Options, ParamInfo, RESTART_LATENCY, RESTART_VALUES, Refused, TestHost,
 };
 
 use crate::boundary::guard;

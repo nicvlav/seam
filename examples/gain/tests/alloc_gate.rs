@@ -74,9 +74,9 @@ fn learning_and_a_learned_controller_never_allocate() {
 #[test]
 fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
     let mut host = TestHost::<Gain>::new();
-    assert!(host.setup(48_000.0, 256));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(48_000.0, 256), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     let (gain, mode, bypass) = (host_id(GAIN), host_id(MODE), host_id(BYPASS));
     let (mut left, mut right) = (vec![0.25f32; 600], vec![-0.25f32; 600]);
     let (input_left, input_right) = (vec![0.5f32; 600], vec![-0.5f32; 600]);
@@ -87,7 +87,10 @@ fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
             (bypass, f64::from(u8::from(round % 8 == 7))),
         ];
         assert_no_allocations("a block through VST3, in place, retuning", || {
-            assert!(host.process_in_place(&mut [&mut left, &mut right], 256, &changes));
+            assert_eq!(
+                host.process_in_place(&mut [&mut left, &mut right], 256, &changes),
+                Ok(())
+            );
         });
         let ramp = [
             (0, f64::from(round % 24) / 24.0),
@@ -95,21 +98,27 @@ fn the_first_block_through_the_vst3_exporter_allocates_nothing() {
             (255, f64::from(23 - round % 24) / 24.0),
         ];
         assert_no_allocations("a block through VST3 with points at offsets", || {
-            assert!(host.process_queues(
-                &mut [&mut left, &mut right],
-                256,
-                &[(gain, &ramp), (mode, &[(0, 0.0), (100, 1.0)])],
-            ));
+            assert_eq!(
+                host.process_queues(
+                    &mut [&mut left, &mut right],
+                    256,
+                    &[(gain, &ramp), (mode, &[(0, 0.0), (100, 1.0)])],
+                ),
+                Ok(())
+            );
         });
         assert_no_allocations(
             "a block through VST3, separate and longer than the setup",
             || {
-                assert!(host.process(
-                    &[&input_left, &input_right],
-                    &mut [&mut left, &mut right],
-                    600,
-                    &changes,
-                ));
+                assert_eq!(
+                    host.process(
+                        &[&input_left, &input_right],
+                        &mut [&mut left, &mut right],
+                        600,
+                        &changes,
+                    ),
+                    Ok(())
+                );
             },
         );
     }

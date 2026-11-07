@@ -15,9 +15,9 @@ const MAX_FRAMES: usize = 512;
 
 fn running() -> TestHost<ExampleEq> {
     let host = TestHost::<ExampleEq>::new();
-    assert!(host.setup(RATE, MAX_FRAMES));
-    assert!(host.activate());
-    assert!(host.start());
+    assert_eq!(host.setup(RATE, MAX_FRAMES), Ok(()));
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.start(), Ok(()));
     host
 }
 
@@ -45,8 +45,8 @@ fn the_host_lists_every_parameter_by_its_key_hash() {
         assert!(info.can_automate && !info.is_bypass, "{}", decl.key);
     }
     assert_eq!(host.layout(), Layout::STEREO);
-    assert!(host.arrange(Layout::MONO), "mono too");
-    assert!(!host.arrange(Layout::new(1, 2)));
+    assert_eq!(host.arrange(Layout::MONO), Ok(()), "mono too");
+    assert!(host.arrange(Layout::new(1, 2)).is_err());
 }
 
 #[test]
@@ -94,16 +94,22 @@ fn audio_through_the_exporter_matches_the_processor_driven_directly() {
 
         let (mut got_left, mut got_right) = (vec![0.0f32; frames], vec![0.0f32; frames]);
         if block % 2 == 0 {
-            assert!(host.process(
-                &[&left, &right],
-                &mut [&mut got_left, &mut got_right],
-                frames,
-                &changes
-            ));
+            assert_eq!(
+                host.process(
+                    &[&left, &right],
+                    &mut [&mut got_left, &mut got_right],
+                    frames,
+                    &changes
+                ),
+                Ok(())
+            );
         } else {
             got_left.copy_from_slice(&left);
             got_right.copy_from_slice(&right);
-            assert!(host.process_in_place(&mut [&mut got_left, &mut got_right], frames, &changes));
+            assert_eq!(
+                host.process_in_place(&mut [&mut got_left, &mut got_right], frames, &changes),
+                Ok(())
+            );
         }
         assert_eq!(bits(&got_left), bits(&expected_left), "block {block}, left");
         assert_eq!(
@@ -125,11 +131,11 @@ fn a_project_saved_through_the_exporter_reopens_the_same() {
         .map(|(index, decl)| (host_id(decl.key), (index as f64 * 0.37) % 1.0))
         .collect();
     let mut left = [0.0f32; 4];
-    assert!(host.process_in_place(&mut [&mut left], 4, &changes));
+    assert_eq!(host.process_in_place(&mut [&mut left], 4, &changes), Ok(()));
     let block = host.save().expect("a saved block");
 
     let reopened = TestHost::<ExampleEq>::new();
-    assert!(reopened.load(&block));
+    assert_eq!(reopened.load(&block), Ok(()));
     for decl in PARAMS {
         let id = host_id(decl.key);
         assert_eq!(reopened.normalized(id), host.normalized(id), "{}", decl.key);
