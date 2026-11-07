@@ -1,15 +1,22 @@
 //! The JUCE adapter's build settings for one plugin, as CMake.
 
 use std::fmt::Write as _;
+use std::ops::RangeInclusive;
 
 use crate::{Category, Plugin};
 
 /// The VST3 id JUCE's wrapper gives the bypass parameter it adds itself
 /// (`'byps'`), and the one it gives a program list (`'prst'`).
-const JUCE_RESERVED_IDS: [(u32, &str); 2] = [
-    (0x6279_7073, "JUCE's bypass"),
-    (0x7072_7374, "JUCE's program list"),
+const JUCE_RESERVED_IDS: [(RangeInclusive<u32>, &str); 2] = [
+    (0x6279_7073..=0x6279_7073, "JUCE's bypass"),
+    (0x7072_7374..=0x7072_7374, "JUCE's program list"),
 ];
+
+/// The VST3 ids of the parameters JUCE's wrapper adds for a plugin that
+/// takes MIDI input, one for each of 130 controllers (pressure and pitch
+/// bend among them) on each of 16 channels, from `'mcm\0'` on. JUCE adds
+/// them unless `JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS` is 0.
+const JUCE_MIDI_CONTROLLER_IDS: RangeInclusive<u32> = 0x6d63_6d00..=0x6d63_6d00 + 16 * 130 - 1;
 
 /// Returns the settings `seam_add_juce_plugin` (`adapters/juce/SeamJuce.cmake`)
 /// reads for `P`, everything JUCE must know at build time.
@@ -27,8 +34,9 @@ const JUCE_RESERVED_IDS: [(u32, &str); 2] = [
 /// # Panics
 ///
 /// When two of `P`'s keys share the VST3 id JUCE derives from them
-/// ([`juce_param_id`]), or one has the id JUCE's own bypass or program
-/// parameter takes. JUCE would list only one of them, silently in a release
+/// ([`juce_param_id`]), or one has an id JUCE gives a parameter of its own:
+/// its bypass, its program list, and for a plugin that takes MIDI input, its
+/// MIDI controllers. JUCE would list only one of them, silently in a release
 /// build.
 ///
 /// # Examples
@@ -42,7 +50,7 @@ const JUCE_RESERVED_IDS: [(u32, &str); 2] = [
 /// assert!(cmake.contains("set(SEAM_PLUGIN_CODE \"gain\")"));
 /// ```
 pub fn juce_settings<P: Plugin>(source: &str) -> String {
-    check_juce_ids(P::PARAMS.iter().map(|decl| decl.key));
+    check_juce_ids(P::PARAMS.iter().map(|decl| decl.key), P::INFO.midi_input);
     let info = &P::INFO;
     let mut out = String::new();
     let _ = writeln!(
@@ -108,15 +116,22 @@ pub fn juce_param_id(key: &str) -> u32 {
     }) & 0x7FFF_FFFF
 }
 
-/// Refuses keys whose JUCE ids collide, with each other or with JUCE's own.
-fn check_juce_ids<'a>(keys: impl Iterator<Item = &'a str>) {
-    let mut seen: Vec<(u32, &str)> = JUCE_RESERVED_IDS.to_vec();
+/// Refuses keys whose JUCE ids collide with each other or with JUCE's own.
+/// JUCE adds its MIDI controllers only for a plugin that takes MIDI input.
+fn check_juce_ids<'a>(keys: impl Iterator<Item = &'a str>, midi_input: bool) {
+    let mut taken: Vec<(RangeInclusive<u32>, &str)> = JUCE_RESERVED_IDS.to_vec();
+    if midi_input {
+        taken.push((
+            JUCE_MIDI_CONTROLLER_IDS,
+            "one of JUCE's MIDI controller parameters",
+        ));
+    }
     for key in keys {
         let id = juce_param_id(key);
-        if let Some((_, other)) = seen.iter().find(|(taken, _)| *taken == id) {
+        if let Some((_, other)) = taken.iter().find(|(ids, _)| ids.contains(&id)) {
             panic!("the key \"{key}\" has the JUCE id {id:#010x}, which {other} has too");
         }
-        seen.push((id, key));
+        taken.push((id..=id, key));
     }
 }
 
@@ -182,13 +197,36 @@ mod tests {
     #[test]
     fn colliding_juce_ids_are_refused() {
         // "Aa" and "BB" share Java's and JUCE's string hash.
-        let refused = std::panic::catch_unwind(|| check_juce_ids(["Aa", "BB"].into_iter()));
+        let refused = std::panic::catch_unwind(|| check_juce_ids(["Aa", "BB"].into_iter(), false));
         assert!(refused.is_err(), "two keys");
         // A key whose hash is 'byps', the bypass JUCE adds itself.
         let bypass = "\u{9711}\u{7f076}\u{12}\u{0}";
         assert_eq!(juce_param_id(bypass), 0x6279_7073);
-        let reserved = std::panic::catch_unwind(|| check_juce_ids(std::iter::once(bypass)));
+        let reserved = std::panic::catch_unwind(|| check_juce_ids(std::iter::once(bypass), false));
         assert!(reserved.is_err(), "JUCE's own");
-        check_juce_ids(["hp.on", "out.gain"].into_iter());
+        check_juce_ids(["hp.on", "out.gain"].into_iter(), false);
+    }
+
+    #[test]
+    fn a_midi_controllers_id_is_refused_when_juce_adds_them() {
+        // The first and last ids of JUCE's MIDI controller parameters, and
+        // the ids either side of them.
+        let (first, last) = ("cc.bfgmpdl", "cc.bfgmrin");
+        let (before, after) = ("cc.bfgmpdk", "cc.bfgmrio");
+        assert_eq!(juce_param_id(first), 0x6d63_6d00);
+        assert_eq!(juce_param_id(last), 0x6d63_6d00 + 16 * 130 - 1);
+        assert_eq!(juce_param_id(before) + 1, juce_param_id(first));
+        assert_eq!(juce_param_id(after), juce_param_id(last) + 1);
+        let midi_input = true;
+        for key in [first, last] {
+            let refused =
+                std::panic::catch_unwind(|| check_juce_ids(std::iter::once(key), midi_input));
+            assert!(
+                refused.is_err(),
+                "{key}, for a plugin that takes MIDI input"
+            );
+            check_juce_ids(std::iter::once(key), !midi_input);
+        }
+        check_juce_ids([before, after].into_iter(), midi_input);
     }
 }

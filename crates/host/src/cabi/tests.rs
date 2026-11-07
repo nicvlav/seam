@@ -1328,6 +1328,45 @@ fn the_juce_settings_refuse_keys_whose_juce_ids_collide() {
     assert!(message.contains("\"BB\""), "{message}");
 }
 
+#[test]
+fn the_juce_settings_refuse_a_midi_controllers_id_only_for_midi_input() {
+    // A key whose JUCE id is the first of the MIDI controller parameters
+    // JUCE adds for a plugin that takes MIDI input.
+    const CONTROLLER: &[ParamDecl] = &[ParamDecl::new(
+        "cc.bfgmpdl",
+        PARAMS[0].name,
+        PARAMS[0].kind,
+        PARAMS[0].default,
+    )];
+    struct Keyed<const MIDI_INPUT: bool>;
+    impl<const MIDI_INPUT: bool> Plugin for Keyed<MIDI_INPUT> {
+        const INFO: PluginInfo = PluginInfo {
+            midi_input: MIDI_INPUT,
+            ..Probe::INFO
+        };
+        const PARAMS: &'static [ParamDecl] = CONTROLLER;
+        type Processor = ProbeProcessor;
+        fn new() -> Self {
+            unreachable!("never created")
+        }
+        fn saved(&self) -> Arc<SavedState> {
+            unreachable!("never created")
+        }
+        fn activate(&mut self, _: &ProcessSetup) -> ProbeProcessor {
+            unreachable!("never created")
+        }
+    }
+    let settings = juce_settings::<Keyed<false>>("no MIDI input");
+    assert!(settings.contains("set(SEAM_PLUGIN_MIDI_INPUT FALSE)"));
+    let refused = std::panic::catch_unwind(|| juce_settings::<Keyed<true>>("MIDI input"));
+    let message = refused.expect_err("refused");
+    let message = message
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .unwrap_or_default();
+    assert!(message.contains("MIDI controller"), "{message}");
+}
+
 /// A plugin with no state but its saved block, whose processor passes audio
 /// through; `Send`, so its instance is lent to any thread.
 struct Mover(Arc<SavedState>);
