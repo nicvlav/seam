@@ -1,0 +1,37 @@
+[package]
+name = "xtask"
+description = "Seam's repository tasks: `cargo xtask gen` rewrites every generated file"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["xtask", "codegen", "build"]
+categories = ["development-tools::build-utils"]
+publish.workspace = true
+
+[features]
+default = ["generate"]
+# `gen` and its drift gate need the crates whose files they write. The
+# checks of Rust source (`scan`, `defs`, `wrap`) need none of them, so a lane
+# that only reads source builds xtask with `--no-default-features`.
+generate = ["dep:seam-bridge", "dep:seam-example-eq", "dep:seam-host", "dep:seam-params"]
+
+[dependencies]
+# `span-locations` gives every token its byte range, which is how the source
+# between two tokens (the comments) is found.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+syn = { version = "2", features = ["full", "visit"] }
+seam-bridge = { workspace = true, features = ["typescript"], optional = true }
+seam-example-eq = { path = "../examples/eq", default-features = false, optional = true }
+seam-host = { workspace = true, features = ["cabi"], optional = true }
+seam-params = { workspace = true, optional = true }
+
+[dev-dependencies]
+seam-testkit.workspace = true
+
+[lints]
+workspace = true

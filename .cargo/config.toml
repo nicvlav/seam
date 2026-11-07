@@ -1,0 +1,3 @@
+[alias]
+# Repository tasks (xtask/): `cargo xtask gen` rewrites every generated file.
+xtask = "run --package xtask --"

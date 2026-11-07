@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/*"]
+members = ["crates/*", "examples/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +28,7 @@ seam-session = { path = "crates/session" }
 seam-learn = { path = "crates/learn" }
 seam-ump = { path = "crates/ump" }
 seam-host = { path = "crates/host" }
+seam-bridge = { path = "crates/bridge" }
 # Tests only.
 seam-testkit = { path = "crates/testkit" }
 
