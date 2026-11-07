@@ -40,22 +40,13 @@ mod imp {
         HWND_MESSAGE, KillTimer, RegisterClassW, SetTimer, SetWindowLongPtrW, UnregisterClassW,
         WM_TIMER, WNDCLASSW,
     };
+    use windows_sys::core::PCWSTR;
 
     use crate::boundary::guard;
 
-    /// The window class, local to this module's DLL.
-    static CLASS: [u16; 10] = [
-        b'S' as u16,
-        b'e' as u16,
-        b'a' as u16,
-        b'm' as u16,
-        b'T' as u16,
-        b'i' as u16,
-        b'm' as u16,
-        b'e' as u16,
-        b'r' as u16,
-        0,
-    ];
+    /// The window class's name, a static UTF-16 string with its null. The
+    /// class is local to this module's DLL.
+    const CLASS: PCWSTR = windows_sys::w!("SeamTimer");
     static REGISTERED: AtomicBool = AtomicBool::new(false);
     const ID: usize = 1;
     const PERIOD_MS: u32 = 15;
@@ -97,7 +88,7 @@ mod imp {
             hCursor: std::ptr::null_mut(),
             hbrBackground: std::ptr::null_mut(),
             lpszMenuName: std::ptr::null(),
-            lpszClassName: CLASS.as_ptr(),
+            lpszClassName: CLASS,
         };
         // SAFETY: a filled class description whose strings are static.
         let registered = unsafe { RegisterClassW(&class) } != 0
@@ -116,7 +107,7 @@ mod imp {
             // While one is left, the call fails and unregisters nothing,
             // which is harmless: that window's module is pinned, so its class
             // and procedure stay mapped.
-            unsafe { UnregisterClassW(CLASS.as_ptr(), module()) };
+            unsafe { UnregisterClassW(CLASS, module()) };
         }
     }
 
@@ -207,7 +198,7 @@ mod imp {
             let window = unsafe {
                 CreateWindowExW(
                     0,
-                    CLASS.as_ptr(),
+                    CLASS,
                     std::ptr::null(),
                     0,
                     0,

@@ -3,6 +3,7 @@
 //! writes cannot disagree with the Rust it comes from.
 
 use std::ffi::{c_char, c_void};
+use std::marker::{PhantomData, PhantomPinned};
 
 /// A struct as the header declares it.
 #[derive(Debug)]
@@ -307,6 +308,10 @@ pub struct CChar(pub c_char);
 #[derive(Debug)]
 pub struct SeamInstance {
     _opaque: [u8; 0],
+    /// Not `Send`, `Sync` or `Unpin`, as the Rustonomicon spells an opaque C
+    /// type: which threads may use an instance is the header's rule, and an
+    /// instance never moves.
+    _marker: PhantomData<(*mut u8, PhantomPinned)>,
 }
 
 impl CType for SeamInstance {
