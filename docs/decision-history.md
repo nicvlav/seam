@@ -38,7 +38,8 @@ Worded after the 2026-11-05 audits, which found the second participant's case
 
 The first form booked `size_of` alone, so 800 edits of a 64 KiB value kept 46
 MiB under the default bound (the first audit's finding 5). Decided on
-2026-11-03; amended after the 2026-11-05 audits; to confirm.
+2026-11-03; amended after the 2026-11-05 audits; confirmed by the owner on
+2026-11-07.
 
 The byte cap that overrides the floor was a reviewer's suggestion in the second
 audit.
@@ -81,7 +82,8 @@ When this was decided, the example plugin was the plan's first bar.
 
 The first form kept the mark on the clock, so a worker's `Value::set` during a
 UI apply recorded nothing and took the restore's origin (ST-5). Decided on
-2026-11-03; amended after the 2026-11-05 audits; to confirm.
+2026-11-03; amended after the 2026-11-05 audits; confirmed by the owner on
+2026-11-07.
 
 Storing the applying thread's id in the clock was ST-5's suggestion.
 
@@ -96,7 +98,7 @@ Decided by the owner, the MIDI 2.0 pool included.
 [The decision](transfer-from-seam-juce.md#d30-an-nrpn-data-entry-with-only-its-high-byte)
 
 Decided on 2026-11-03; amended after the 2026-11-05 audits, which found a low
-byte sent first dropped (MD-5); to confirm.
+byte sent first dropped (MD-5); confirmed by the owner on 2026-11-07.
 
 ### D33. Undo during a user gesture
 
@@ -137,8 +139,9 @@ value for the life of the instance.
 [The decision](transfer-from-seam-juce.md#d38-the-origin-of-a-newest-write)
 
 Keeping the origin in one atomic word with the value was added on 2026-11-06,
-after a review showed the two stored apart could split; to confirm. Reading both
-through one `ParamSet::read` was added the same day; to confirm.
+after a review showed the two stored apart could split; confirmed by the owner
+on 2026-11-07. Reading both through one `ParamSet::read` was added the same day;
+confirmed by the owner on 2026-11-07.
 
 ### D39. A load between a replay's check and its write
 
@@ -154,13 +157,14 @@ still matched, and an undo wrote its pre-load value over the loaded one (a
 probe: a load began over 5, a user's write of 8 recorded, the load wrote 2,
 and an undo answered true and left 5). Since 2026-11-07 each load write moves
 the count under the hold a replay step checks it under. The implementer's
-choice; to confirm.
+choice; confirmed by the owner on 2026-11-07.
 
 ### D40. One undo history per UiParams
 
 [The decision](transfer-from-seam-juce.md#d40-one-undo-history-per-uiparams)
 
-Decided on 2026-11-03; amended after the 2026-11-05 audits; to confirm.
+Decided on 2026-11-03; amended after the 2026-11-05 audits; confirmed by the
+owner on 2026-11-07.
 
 The first form answered `None` to a second history.
 
@@ -201,7 +205,8 @@ The form before kept one flag for every held-up participant, which the outer
 tick cleared before it captured them, so a tick made inside a held-up capture
 ran its pass without capturing the others still held up, and a pass that ended
 one of their registrations lost its change. Since 2026-11-07 a tick reads which
-are held up from their entries. The implementer's choice; to confirm.
+are held up from their entries. The implementer's choice; confirmed by the owner
+on 2026-11-07.
 
 ### D45. Registrations when a SessionUi drops
 
@@ -236,7 +241,7 @@ as coarse before the block that held its low byte. A lone controller 32 to 63
 settled as itself the same way, before its high byte could arrive (D70). The
 review suggested a count of blocks begun; the implementer counts both ends of
 a block, since a poll can land after the next block began but before it offered
-the low byte. To confirm.
+the low byte. Confirmed by the owner on 2026-11-07.
 
 ### D48. A plain Value as a learn Target
 
@@ -263,7 +268,8 @@ Taken as the review recommended; confirmed by the owner.
 [The decision](transfer-from-seam-juce.md#d51-whether-a-plugin-must-be-send)
 
 Decided by the owner; amended after the 2026-11-05 audits, and on 2026-11-06 for
-the owner's rule that a `Send` plugin is never bound (D62); to confirm.
+the owner's rule that a `Send` plugin is never bound (D62); confirmed by the
+owner on 2026-11-07.
 
 ### D52. Who makes the RestoreClock
 
@@ -279,7 +285,8 @@ old one over it, breaking D20 and D39, and nothing failed.
 
 Decided by the owner; amended after the 2026-11-05 audits, which found that off
 Windows the VST3 exporter never ticked, so a host's load never reached a session
-participant (the first audit's finding 3, HB-3); to confirm.
+participant (the first audit's finding 3, HB-3); confirmed by the owner on
+2026-11-07.
 
 ### D54. Detaching a learn target
 
@@ -297,7 +304,7 @@ Decided by the owner.
 
 [The decision](transfer-from-seam-juce.md#d56-the-hash-that-names-a-parameter)
 
-The implementer's choice, to confirm.
+The implementer's choice, confirmed by the owner on 2026-11-07.
 
 ### D57. The lattice of a stepped range
 
@@ -321,7 +328,7 @@ The implementer's choice, confirmed by the owner; amended after the 2026-11-05
 audits, which found every call refused when a host creates the instance on one
 thread and initialises it on another (the first audit's finding 2, HB-1), no
 tick off Windows (finding 3), and the two exporters' engines drifting apart
-(finding 4, HB-11); to confirm.
+(finding 4, HB-11); confirmed by the owner on 2026-11-07.
 
 The owner decided on 2026-11-05 that one core lands before CLAP.
 
@@ -335,11 +342,11 @@ creates the instance.
 [The decision](transfer-from-seam-juce.md#d60-a-panic-inside-a-hosts-call)
 
 The implementer's choice, confirmed by the owner; amended after the 2026-11-05
-audits; to confirm. The first form counted per thread, which nothing outside a
-test read (HB-5), and the shared core's first form kept the mark on the
-instance, so a block that panicked while an activation replaced its processor
-marked the new one, which then played silence until the next activation (found
-by the real-time review of the audit fixes).
+audits; confirmed by the owner on 2026-11-07. The first form counted per thread,
+which nothing outside a test read (HB-5), and the shared core's first form kept
+the mark on the instance, so a block that panicked while an activation replaced
+its processor marked the new one, which then played silence until the next
+activation (found by the real-time review of the audit fixes).
 
 ### D61. Who flushes denormals
 
@@ -367,7 +374,7 @@ That an overlapping tick skips without a fault and any other overlapping call
 waits up to its bound is the owner's decision of the same day: under the form
 between, every overlapping call was refused and counted, so a host's ordinary
 prepareToPlay meeting the adapter's tick reported a fault, and failed when it
-came second. The rest is to confirm.
+came second. The rest was confirmed by the owner on 2026-11-07.
 
 Until 2026-11-06 a `destroy` waited for the loan as the other calls do, so one
 that met another thread's tick took the plugin as the tick let go and freed the
@@ -383,7 +390,7 @@ rule.
 [The decision](transfer-from-seam-juce.md#d63-keeping-the-c-header-true)
 
 The implementer's choice, amended after the step 4 review and again after the
-2026-11-05 audits; to confirm.
+2026-11-05 audits; confirmed by the owner on 2026-11-07.
 
 CI compiles the header as C and as C++ for x86_64 and AArch64 since HB-12, and
 `CChar` answers the first audit's finding 15.
@@ -393,7 +400,7 @@ CI compiles the header as C and as C++ for x86_64 and AArch64 since HB-12, and
 [The decision](transfer-from-seam-juce.md#d64-how-the-juce-adapter-builds-a-plugin)
 
 The implementer's choice, amended after the step 4 review and again after the
-2026-11-05 audits; to confirm.
+2026-11-05 audits; confirmed by the owner on 2026-11-07.
 
 The build once per architecture answers HB-4.
 
@@ -402,7 +409,7 @@ The build once per architecture answers HB-4.
 [The decision](transfer-from-seam-juce.md#d65-what-a-host-sees-through-juce)
 
 The implementer's choice, amended after the step 4 review and again after the
-2026-11-05 audits; to confirm.
+2026-11-05 audits; confirmed by the owner on 2026-11-07.
 
 The bypass delay answers HB-13. An earlier form of the adapter's constructor
 asserted that it ran on JUCE's message thread.
@@ -416,7 +423,7 @@ copied it into a `std::string` first, the same bytes. The adapter has cleared
 each block's MIDI buffer since then too: without it, a plugin that declares
 MIDI input and output sent its input back out. `juce_settings` has refused a
 key whose id lands in JUCE's MIDI-controller range since then as well. The
-implementer's choices; to confirm.
+implementer's choices; confirmed by the owner on 2026-11-07.
 
 ### D66. Bytes after the block, and a failed load
 
@@ -425,8 +432,8 @@ implementer's choices; to confirm.
 The first form refused any trailing byte and answered VST3 with success all the
 same (HB-8). Decided by the owner on 2026-11-05.
 
-That JSON whitespace around the object loads is the implementer's reading, to
-confirm.
+That JSON whitespace around the object loads is the implementer's reading,
+confirmed by the owner on 2026-11-07.
 
 ### D67. Checking the audio-thread locking rule
 
@@ -450,22 +457,24 @@ Decided by the owner on 2026-11-05.
 
 The first form had public fields checked only by the builder, so a range never
 built into a set could panic in `Kind::steps` (the first audit's finding 17).
-The implementer's choice; to confirm.
+The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D70. Learn's reading of MIDI 1.0 pairs
 
 [The decision](transfer-from-seam-juce.md#d70-learns-reading-of-midi-10-pairs)
 
-The implementer's choice; to confirm. Amended on 2026-11-06: the first form left
-96 and 97 plain controllers, as C++ did; it let only a 99 start an address, so
-an address sent 98 first, as JUCE sends every NRPN, selected nothing and its
-data entry was dropped; and it paired a low byte with a high byte captured any
-time earlier in the arm, so an independent knob 32 above learned the other one,
-while an arm that landed between a pair's halves learned the low byte at once.
+The implementer's choice; confirmed by the owner on 2026-11-07. Amended on
+2026-11-06: the first form left 96 and 97 plain controllers, as C++ did; it let
+only a 99 start an address, so an address sent 98 first, as JUCE sends every
+NRPN, selected nothing and its data entry was dropped; and it paired a low byte
+with a high byte captured any time earlier in the arm, so an independent knob 32
+above learned the other one, while an arm that landed between a pair's halves
+learned the low byte at once.
 
 The owner decided on 2026-11-06 that 14-bit controller playback stays open, to
 be built when an exporter delivers MIDI, and that capture waits a poll for a
-pair's high byte; the pairing window is the implementer's, to confirm.
+pair's high byte; the pairing window is the implementer's, confirmed by the
+owner on 2026-11-07.
 
 The null number answers the first audit's finding 18, the low byte that waits
 for its high byte MD-5, and the pair's high byte learned as a 7-bit controller
@@ -482,7 +491,8 @@ a lone NRPN high byte does, under D47's amended rule.
 [The decision](transfer-from-seam-juce.md#d71-learn-after-an-unreadable-midilearn-section)
 
 The first form failed before clearing, so the previous project's mappings went
-on routing MIDI (ST-6). The implementer's choice; to confirm.
+on routing MIDI (ST-6). The implementer's choice; confirmed by the owner on
+2026-11-07.
 
 Until 2026-11-07 learn closed the open bursts before it published the empty
 table (D82).
@@ -494,7 +504,8 @@ table (D82).
 The first form had none of the others: an endless stream or a block size near
 2^31 allocated until the host aborted (the first audit's finding 14), and a host
 that claimed 16 million queues, or millions of points it could not read, was
-walked on the audio thread. The implementer's choice; to confirm.
+walked on the audio thread. The implementer's choice; confirmed by the owner on
+2026-11-07.
 
 Until 2026-11-06 the walk was bounded by queue index, the unknown queues
 counting against the parameters, so such a host left the plugin's own unread;
@@ -515,7 +526,8 @@ The first forms differed: the VST3 exporter did nothing at an activation while
 active, so a processor that panicked stayed silent, where the C interface
 rebuilt (the first audit's finding 4, HB-11), and VST3 refused a setup with no
 block size and then activated at 44.1 kHz whatever the host's rate, mistuning
-every filter (HB-9). The implementer's choice; to confirm.
+every filter (HB-9). The implementer's choice; confirmed by the owner on
+2026-11-07.
 
 ### D74. What export_vst3! refuses to build
 
@@ -523,7 +535,8 @@ every filter (HB-9). The implementer's choice; to confirm.
 
 The first form accepted every layout, offered six channels as 5.1 and then
 refused the host's 5.1 (the first audit's finding 13), and built for macOS and
-Linux with no tick (finding 3). The implementer's choice; to confirm.
+Linux with no tick (finding 3). The implementer's choice; confirmed by the owner
+on 2026-11-07.
 
 The refusals of a plugin that declares no layout and of a crate built with
 `panic = "abort"` came before the 2026-11-05 audits.
@@ -534,7 +547,7 @@ The refusals of a plugin that declares no layout and of a crate built with
 
 The first form counted per thread, which nothing outside a test read, so a
 refused call in a real host looked exactly like a working mute (HB-5). The
-implementer's choice; to confirm.
+implementer's choice; confirmed by the owner on 2026-11-07.
 
 A wait that ran out has a kind of its own since 2026-11-06; it was counted as a
 call on the wrong thread before, which named a thread the instance does not
@@ -548,21 +561,21 @@ The throttled line per instance and kind was the second audit's suggestion.
 
 The first form cleared the flags before emitting, so a panic lost the
 parameter's events and stranded the later ones, though its doc said they waited
-(RT-3). The implementer's choice; to confirm.
+(RT-3). The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D77. How deep a session section may nest
 
 [The decision](transfer-from-seam-juce.md#d77-how-deep-a-session-section-may-nest)
 
 The first form saved any depth, and the load then refused the whole block, so
-the instance came back at its defaults (ST-1). The implementer's choice; to
-confirm.
+the instance came back at its defaults (ST-1). The implementer's choice;
+confirmed by the owner on 2026-11-07.
 
 The first form checked depth alone, so a participant's large capture made the
 plugin save a block its own load refused (a reviewer's probe: a 64 MiB string
 saved a block of 67,108,934 bytes, then `Err(TooLarge)`). Size is checked at
 capture since 2026-11-06, against a budget the saved state sets; the
-implementer's choice, to confirm.
+implementer's choice, confirmed by the owner on 2026-11-07.
 
 That form never refused a restore, so a block within the limit could save past
 it, and the same build then refused it whole (a reviewer's probes: a block of
@@ -573,7 +586,7 @@ first skipped it (a probe: a capture of `MAX_STATE_BYTES` bytes before
 `SavedState::new` saved 67,108,930 bytes, then `TooLarge`). Since 2026-11-07 a
 load is refused when its block would save back past the limit, and the budget
 starts at the limit and judges the held sections when it is lowered; the
-implementer's choice, to confirm.
+implementer's choice, confirmed by the owner on 2026-11-07.
 
 That judge dropped a section waiting for its apply but kept its restore, so the
 apply saved it back (a reviewer's probe: a section restored before the saved
@@ -591,7 +604,7 @@ stores its sections and budget under one lock.
 The first form answered with a snapshot of the native side's version and no
 parameters, which a newer page never got, since its `ready` failed to decode
 (the first audit's finding 6), and the version moved by hand alone (finding 11).
-The implementer's choice; to confirm.
+The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D79. The page client before the native side answers
 
@@ -599,7 +612,8 @@ The implementer's choice; to confirm.
 
 The first form sent `ready` once, so a page whose `ready` came before the native
 side listened waited forever (TL-13), and kept the old command's result, typed
-as the new one's (TL-4). The implementer's choice; to confirm.
+as the new one's (TL-4). The implementer's choice; confirmed by the owner on
+2026-11-07.
 
 The form before kept whether the client was answered as a flag of its own, set
 beside `ready` and the failure. Since 2026-11-07 it is read from those two,
@@ -613,13 +627,14 @@ The implementer's choice, but for the version a save writes, which the owner
 decided on 2026-11-06: the first form stamped the build's own version on every
 save, so a version 2 block that version 1 loaded and saved reached version 2
 again as a version 1 block, and its migration overwrote the kept key (a
-reviewer's probe: a gain of 6 saved by version 2 came back 0); to confirm.
+reviewer's probe: a gain of 6 saved by version 2 came back 0); confirmed by the
+owner on 2026-11-07.
 
 The form the owner decided kept unknown parameter keys but dropped unknown
 top-level keys, so a newer build's top-level content was lost under the version
 that promised it (a reviewer's probe: `"future"` gone after one load and save).
-Unknown top-level keys are kept since 2026-11-06, the implementer's choice; to
-confirm.
+Unknown top-level keys are kept since 2026-11-06, the implementer's choice;
+confirmed by the owner on 2026-11-07.
 
 The kept keys were not measured at load, so a block whose kept numbers grow as
 they are written again saved past the load limit (a reviewer's probe: 20 MiB of
@@ -641,7 +656,7 @@ The first form owed a pass whenever a pass or a late apply ended while its
 thread was unwinding, so a registration made from a destructor during an
 unrelated panic owed one, and the next tick cleared every undo history. Since
 2026-11-07 only a panic that began inside the pass or the late apply owes it.
-The implementer's choice; to confirm.
+The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D82. When learn runs a target's own code
 
@@ -655,14 +670,14 @@ still routed the old table (a probe: the gain mapped to controller 7 and a
 panicking target to 8, a burst open on 8, `restore(None)` caught unwinding,
 then controller 7 at 127 still set the gain to 1). Since 2026-11-07 every
 target's code runs after the table is published and the session told, in an
-unmap too. The implementer's choice; to confirm.
+unmap too. The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D83. A control's drag and one-shot set
 
 [The decision](transfer-from-seam-juce.md#d83-a-controls-drag-and-one-shot-set)
 
 The first form had two functions with the same body. They are one since
-2026-11-07, the implementer's choice; to confirm.
+2026-11-07, the implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D84. The saved block's two versions
 
@@ -676,7 +691,7 @@ it carried. That a save writes the plugin's version at 0 too, rather than
 leaving it out, is the implementer's choice within the decision, as the owner
 leaned to blocks that describe themselves. So is refusing a block whose plugin
 version is there but not a whole number, with a `LoadError` of its own, rather
-than reading it as 0.
+than reading it as 0. Confirmed by the owner on 2026-11-07.
 
 ### D85. A migration that cannot upgrade a block
 
@@ -686,6 +701,7 @@ Decided by the owner on 2026-11-07. The form before returned `bool`, and its
 false became `LoadError::MigrationFailed` with no reason. That the error is one
 boxed type, not a type the closure chooses, is the implementer's choice within
 the decision: a generic one could not be inferred from `Ok(())` or `?`.
+Confirmed by the owner on 2026-11-07.
 
 ### D86. The AU codes
 
@@ -694,7 +710,7 @@ the decision: a generic one could not be inferred from `Ok(())` or `?`.
 Decided by the owner on 2026-11-07. The form before was the pair
 `([u8; 4], [u8; 4])`, subtype first, which a plugin could swap silently. One
 struct as one field, rather than two fields, is the implementer's choice within
-the decision.
+the decision. Confirmed by the owner on 2026-11-07.
 
 ### D87. The main bus in `ProcessSetup`
 
