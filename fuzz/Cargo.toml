@@ -1,0 +1,58 @@
+[package]
+name = "seam-fuzz"
+description = "cargo-fuzz targets for every input boundary of Seam"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/nicvlav/seam"
+readme = "../README.md"
+keywords = ["fuzzing", "audio", "plugin", "midi"]
+categories = ["development-tools::testing"]
+publish = false
+
+# Outside the workspace: libFuzzer needs a nightly compiler and sanitiser
+# flags the rest of the build does not want.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[lib]
+name = "seam_fuzz"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+seam-ump = { path = "../crates/ump" }
+seam-bridge = { path = "../crates/bridge" }
+seam-host = { path = "../crates/host", features = ["cabi", "test-host"] }
+seam-params = { path = "../crates/params" }
+seam-session = { path = "../crates/session" }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+
+[[bin]]
+name = "ump_packets"
+path = "fuzz_targets/ump_packets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "page_message"
+path = "fuzz_targets/page_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "saved_block"
+path = "fuzz_targets/saved_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cabi_state"
+path = "fuzz_targets/cabi_state.rs"
+test = false
+doc = false
+bench = false
