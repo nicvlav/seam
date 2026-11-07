@@ -143,8 +143,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 - `undo` and `session` never depend on each other. Both take the same restore
   clock from the parameter set that owns it ([who makes the clock][clock]). A
   load moves the clock with every parameter it writes, under the lock a replay
-  step checks it under, so no step for a change made before a load replays
-  over it ([a load and a replay][load]).
+  step checks it under, so no step for a change finished before a load replays
+  over it ([a load and a replay][load]). A user's gesture still open when the
+  load lands, a lone write included, keeps its value from before the gesture,
+  and undoing it writes that value.
 - `unsafe` is denied workspace-wide. Only `host`'s `vst3` and `cabi` modules
   and the `boundary`, `engine` and `faults` modules they share allow it, with a
   `// SAFETY:` comment on every block.

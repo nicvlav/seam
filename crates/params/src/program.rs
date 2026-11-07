@@ -89,7 +89,9 @@ impl ProgramParams {
     ///
     /// An undo from then on replays nothing recorded before the load, and
     /// each write through the [`Load`] marks it again, so nothing recorded
-    /// between its writes replays over them either. [`Load`] shows one.
+    /// between its writes replays over a later one. A user's gesture open
+    /// across a write still records from its value before the gesture, as
+    /// [`Load`] says. [`Load`] shows one.
     pub fn load(&self) -> Load {
         let clock = self.set.clock().writer();
         clock.stored();
@@ -102,9 +104,9 @@ impl ProgramParams {
 
 /// A saved state being loaded, after the restore was marked stored. Each
 /// write through it marks the restore stored again, so no undo step for a
-/// change made before the write replays over it. A user's gesture open
-/// across the write still records at its close, from the value before the
-/// gesture, as it does across any restore.
+/// change finished before the write replays over it. A user's gesture open
+/// across the write, a lone write included, still records at its close, from
+/// the value before the gesture, and its undo writes that value.
 ///
 /// # Examples
 ///
