@@ -362,6 +362,10 @@ impl SessionUi {
     /// apply still registers. The capture comes first, so one that panics
     /// registers nothing.
     ///
+    /// Called from a destructor while a panic unwinds the thread, it still
+    /// captures and applies there, and a panic in that capture or apply
+    /// aborts the process, as any panic during unwinding does.
+    ///
     /// # Errors
     ///
     /// Changes nothing and returns the [`SessionError`] that says why.

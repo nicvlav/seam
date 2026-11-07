@@ -385,7 +385,6 @@ impl Learn {
     /// // The host reactivates the plugin: the new processor gets its own audio
     /// // side, which starts from the mappings made so far.
     /// let mut reactivated = learn.replace_audio();
-    /// assert_eq!(reactivated.refresh_slots(), 1);
     /// reactivated.process(&block(&[(7, 127)])); // controller 7 moves
     /// assert_eq!(set.value(gain), 1.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())

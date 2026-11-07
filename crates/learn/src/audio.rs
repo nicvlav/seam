@@ -106,6 +106,10 @@ impl LearnAudio {
     /// Moves to the newest table the UI side published, as
     /// [`process`](Self::process) does at each block, and returns how many
     /// slots it holds: one per mapped target.
+    ///
+    /// A hook for tests, which have no other way to see the table the audio
+    /// side holds.
+    #[doc(hidden)]
     pub fn refresh_slots(&mut self) -> usize {
         self.reader.read().len()
     }

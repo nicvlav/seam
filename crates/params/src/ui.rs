@@ -97,8 +97,9 @@ impl UiState {
         if writer == Writer::User {
             self.user_tokens
                 .set(self.user_tokens.get().saturating_add(1));
-            // A user's touch reaches the host when it opens, so Touch and
-            // Latch modes hold the value from then on.
+            // A user's touch is queued for the host when it opens, not at its
+            // first write, so Touch and Latch modes hold the value from then
+            // on.
             self.tell_host_begin(id);
         }
         Gesture {
@@ -341,9 +342,11 @@ impl UiParams {
 
     /// Opens a user gesture on the parameter, or joins the one open.
     ///
-    /// The host hears its begin now, at the touch, and one end when the last
-    /// token closes, however many gestures overlap. [`UiParams`] shows a
-    /// drag.
+    /// Its begin is queued now, at the touch, ahead of any value it writes;
+    /// the host hears it when the exporter next drains the queue
+    /// ([`HostEventDrain`](crate::HostEventDrain)), after the plugin's next
+    /// idle. One end follows when the last token closes, however many
+    /// gestures overlap. [`UiParams`] shows a drag.
     pub fn begin(&self, id: ParamId) -> Gesture {
         self.state.open(id, Writer::User)
     }
