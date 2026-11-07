@@ -283,7 +283,7 @@ impl<T> MainThread<T> {
     /// it on any thread is sound. Every part of it that is not `Send` is one
     /// that nothing ever touches, and that nothing outside it shares.
     #[cfg_attr(
-        not(test),
+        not(any(feature = "cabi", test)),
         expect(
             dead_code,
             reason = "only the C interface makes state bound to no thread"

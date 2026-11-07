@@ -12,7 +12,7 @@ mod automation;
 mod process;
 pub(crate) mod timer;
 
-#[cfg(all(test, feature = "vst3"))]
+#[cfg(all(test, any(feature = "vst3", feature = "cabi")))]
 mod tests;
 
 use std::cell::{Cell, RefCell};
@@ -21,8 +21,9 @@ use std::num::NonZeroUsize;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
-#[cfg(feature = "vst3")]
+#[cfg(any(feature = "vst3", feature = "cabi"))]
 use seam_params::ParamId;
 use seam_params::{AudioParams, HostEvent, HostEventDrain, ParamSet};
 
@@ -31,10 +32,12 @@ pub(crate) use automation::Points;
 #[cfg(all(test, feature = "vst3"))]
 pub(crate) use automation::{MAX_SKIPPED_QUEUES, Point};
 use process::Audio;
-#[cfg(feature = "vst3")]
+#[cfg(any(feature = "vst3", feature = "cabi"))]
 pub(crate) use process::Outcome;
 use timer::{Handle, Timer, abandon};
 
+#[cfg(feature = "cabi")]
+use crate::boundary::Patience;
 use crate::boundary::{AudioSlot, Lent, MainThread, Refused};
 use crate::faults::{Fault, Faults};
 use crate::{Layout, MAX_FRAMES, Plugin, SavedState, Tail};
@@ -49,6 +52,32 @@ pub(crate) const TAIL_INFINITE: u32 = u32::MAX;
 /// The most MIDI events one block carries each way, for a plugin that takes
 /// or sends MIDI.
 const MAX_EVENTS: usize = 2048;
+
+/// How long a main-thread call waits for a plugin bound to no thread that
+/// another thread's call has on loan, before it is refused.
+///
+/// A tick and a release never wait (the threading rule on [`Engine`]). The
+/// 50 ms wait is three frames of the 60 Hz tick, far longer than a tick
+/// takes, so a call that meets one waits its turn and goes on. The bound
+/// keeps a host that holds a lock of its own across both threads from
+/// deadlocking. Past it the waiting call is refused, the host's thread goes
+/// on, and the call that has the plugin can finish.
+///
+/// `SeamPlugin`'s doc, and so `seam.h`, states it for C users in
+/// milliseconds; a test keeps the two equal.
+///
+/// Open: these calls are never the audio thread's by contract. But JUCE's
+/// AAX wrapper calls prepareToPlay on the render thread when a longer block
+/// arrives. An activation that meets a tick then waits there, on the audio
+/// thread, for as long as the tick runs.
+#[cfg_attr(
+    not(feature = "cabi"),
+    expect(
+        dead_code,
+        reason = "only the C interface makes an engine bound to no thread"
+    )
+)]
+pub(crate) const LOAN_WAIT: Duration = Duration::from_millis(50);
 
 /// The last instance's number, for naming an instance in its reports.
 static INSTANCES: AtomicU64 = AtomicU64::new(0);
@@ -226,12 +255,14 @@ impl<P: Plugin, H> Main<P, H> {
 /// The rules every shell shares:
 ///
 /// - **Threads**, the threading rule in full ([`Plugin`] states it for plugin
-///   authors). A shell builds the engine bound to the calling thread
-///   ([`new`](Self::new)), as VST3 does at `initialize`, and a main-thread
-///   call on any other thread is refused. An engine whose main-thread state is
-///   [unbound](MainThread::unbound) lends the plugin instead, to one call at a
-///   time for its length, on whichever thread it arrives. One that meets
-///   another thread's loan waits as the state's patience says
+///   authors, and `seam.h` for C users, at `SeamPlugin`). A shell builds the
+///   engine bound to the calling thread ([`new`](Self::new)): VST3 at
+///   `initialize`, the C interface at `create` for a plugin that is not `Send`.
+///   A main-thread call on any other thread is refused. For a `Send` plugin,
+///   the C interface builds the engine bound to no thread, for good
+///   ([`new_unbound`](Self::new_unbound)). Each main-thread call then takes the
+///   plugin on loan for its length, on whichever thread it arrives. One that
+///   meets another thread's loan waits up to [`LOAN_WAIT`]
 ///   ([`main`](Self::main)) and is refused past it. A tick
 ///   ([`idle`](Self::idle)) skips instead, counting nothing, and a release
 ///   never waits (**Teardown**). A call nested inside another on the same
@@ -247,8 +278,8 @@ impl<P: Plugin, H> Main<P, H> {
 ///   controller lands too, except while the host says it is processing
 ///   (VST3's `setProcessing`). The host then sends the same value through
 ///   `process`, in order with its automation. Writing it here as well could
-///   land it after a newer one. A shell with no processing state never
-///   ignores one.
+///   land it after a newer one. A shell with no processing state (the C
+///   interface) never ignores one.
 /// - **Reset** may be asked for on any thread; the next block runs it first.
 /// - **Blocks.** A block that does not play (no processor, a processor that
 ///   panicked, or one an activation holds) is silence, which the shell
@@ -305,6 +336,31 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// exporter owns it.
     pub(crate) fn new(host: Option<H>) -> Box<Self> {
         Self::build(host, MainThread::bound)
+    }
+
+    /// Creates the plugin on the calling thread, linked to `host`, and binds it
+    /// to no thread, for good.
+    ///
+    /// [`main`](Self::main) then lends it to one main-thread call at a time, on
+    /// whichever thread it arrives. A call that meets another thread's loan
+    /// waits as `patience` says: a shell passes [`LOAN_WAIT`].
+    ///
+    /// # Panics
+    ///
+    /// As [`new`](Self::new).
+    #[cfg(feature = "cabi")]
+    pub(crate) fn new_unbound(host: Option<H>, patience: &'static dyn Patience) -> Box<Self>
+    where
+        P: Send,
+        H: Send,
+    {
+        // SAFETY: of the main-thread state, the plugin and the host link
+        // are `Send` (the bounds above). So are the event drain and the
+        // `Cell`s and `RefCell`s around them. The one part that is not, the
+        // timer slot, stays `None`: `start_timer` starts none for state no
+        // thread owns. The state goes from thread to thread one loan at a
+        // time, and drops wherever the engine does.
+        Self::build(host, |main| unsafe { MainThread::unbound(main, patience) })
     }
 
     fn build(
@@ -376,6 +432,13 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// [`TAIL_INFINITE`]. Any thread.
     pub(crate) fn tail(&self) -> u32 {
         self.answers.tail.load(Ordering::Acquire)
+    }
+
+    /// A host write that always lands: one the C interface's host makes, on
+    /// any thread.
+    #[cfg(feature = "cabi")]
+    pub(crate) fn host_write(&self, id: ParamId, normalized: f64) {
+        self.host.host_write(id, normalized);
     }
 
     /// A host write through a controller: ignored while the host is
@@ -661,7 +724,8 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// way a tick may call the host once more after the release, which only a
     /// host that breaks the threading rules meets; the engine leaks, so
     /// Seam's side stays memory-safe. A VST3 handler is held by the engine's
-    /// own reference.
+    /// own reference. The C interface's callbacks, though, are the host's,
+    /// which `seam.h` keeps valid only until `destroy` returns.
     pub(crate) fn release(&self) -> Release {
         self.guard(Release::Leak, || {
             let main = match self.main.lend() {

@@ -242,6 +242,79 @@ impl Shell for crate::vst3::TestHost<Probe> {
     }
 }
 
+#[cfg(feature = "cabi")]
+impl Shell for crate::cabi::TestHost<Probe> {
+    const HOLDS_WRITES_WHILE_PROCESSING: bool = false;
+
+    fn create() -> Self {
+        Self::new()
+    }
+
+    fn create_elsewhere() -> Self {
+        Self::created_elsewhere()
+    }
+
+    fn activate(&mut self) -> bool {
+        crate::cabi::TestHost::activate(self, 48_000.0, 64, Layout::STEREO)
+    }
+
+    fn deactivate(&mut self) {
+        crate::cabi::TestHost::deactivate(self);
+    }
+
+    fn start(&mut self) {}
+
+    fn ask_reset(&mut self) {
+        self.reset();
+    }
+
+    fn play(&mut self, input: f32) -> [f32; 8] {
+        let (mut left, mut right) = ([input; 8], [input; 8]);
+        self.process_in_place(&mut [&mut left, &mut right], 8);
+        left
+    }
+
+    fn play_elsewhere(&mut self, input: f32, panic: bool) -> ([f32; 8], Vec<String>) {
+        let side = self.audio_side();
+        on_another_thread(
+            move || {
+                let (mut left, mut right) = ([input; 8], [input; 8]);
+                side.process_in_place(&mut [&mut left, &mut right], 8);
+                left
+            },
+            panic,
+        )
+    }
+
+    fn write(&mut self, normalized: f64) {
+        self.set(0, normalized);
+    }
+
+    fn gain(&self) -> f64 {
+        self.get(0)
+    }
+
+    fn tick(&mut self) {
+        self.idle();
+    }
+
+    fn tail(&self) -> u32 {
+        crate::cabi::TestHost::tail(self)
+    }
+
+    fn save(&self) -> Vec<u8> {
+        crate::cabi::TestHost::save(self).expect("saved")
+    }
+
+    fn load(&mut self, block: &[u8]) -> bool {
+        crate::cabi::TestHost::load(self, block)
+    }
+
+    fn expect_faults(&self, count: u64) {
+        crate::cabi::TestHost::expect_faults(self, count);
+    }
+}
+
 /// Runs `block` on a thread of its own with its processor told to panic or
 /// not, and answers its result and what was written on that thread.
 fn on_another_thread(
@@ -270,6 +343,12 @@ macro_rules! through_every_shell {
                 #[test]
                 fn vst3() {
                     super::$body::<crate::vst3::TestHost<super::Probe>>();
+                }
+
+                #[cfg(feature = "cabi")]
+                #[test]
+                fn cabi() {
+                    super::$body::<crate::cabi::TestHost<super::Probe>>();
                 }
             }
         )*

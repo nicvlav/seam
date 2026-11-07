@@ -52,12 +52,12 @@ static REPORTED: AtomicU8 = AtomicU8::new(0);
 ///
 /// ```
 #[doc = include_str!("../doc/gain.rs")]
-/// // The VST3 exporter's test host, which needs the `vst3` and `test-host`
+/// // The C interface's test host, which needs the `cabi` and `test-host`
 /// // features.
-/// # #[cfg(all(feature = "vst3", feature = "test-host"))]
+/// # #[cfg(all(feature = "cabi", feature = "test-host"))]
 /// # {
 /// use seam_host::boundary_faults;
-/// use seam_host::vst3::TestHost;
+/// use seam_host::cabi::TestHost;
 ///
 /// // `Gain` is a plugin with one parameter, whose `idle` panics while the
 /// // static `BREAK` is set.
@@ -67,13 +67,13 @@ static REPORTED: AtomicU8 = AtomicU8::new(0);
 ///
 /// BREAK.store(true, Ordering::Relaxed); // the plugin's next tick panics
 /// host.expect_faults(1);
-/// host.tick(); // the exporter catches the panic and counts it
+/// host.idle(); // the interface catches the panic and counts it
 /// assert_eq!(boundary_faults(), before + 1);
 /// # }
 /// ```
-#[cfg_attr(docsrs, doc(cfg(feature = "vst3")))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "vst3", feature = "cabi"))))]
 #[cfg_attr(
-    not(feature = "vst3"),
+    not(any(feature = "vst3", feature = "cabi")),
     expect(unreachable_pub, reason = "an exporter re-exports it at the root")
 )]
 pub fn boundary_faults() -> u64 {
@@ -279,5 +279,5 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) use tests::thread_faults;
-#[cfg(all(test, feature = "vst3"))]
+#[cfg(all(test, any(feature = "vst3", feature = "cabi")))]
 pub(crate) use tests::written;

@@ -3,7 +3,8 @@
 //! A plugin implements [`Plugin`] once, with no knowledge of any format. An
 //! exporter, a module behind the cargo feature of its name, projects it into
 //! one format, as a thin shell over the core all exporters share: the `vst3`
-//! module natively.
+//! module natively, and the `cabi` module as a C ABI plus a generated header.
+//! One generic JUCE adapter turns that into AU, AUv3, AAX and hosting.
 //!
 //! The audio thread gets each block as a [`Block`] in [`Processor::process`]
 //! and reads its parameters from the [`ParamSet`](seam_params::ParamSet) that
@@ -27,8 +28,9 @@
 //! # Examples
 //!
 //! A plugin is one [`Plugin`] impl and one export macro at the root of its
-//! crate: `export_vst3!` for a VST3 module. [`Plugin::idle`]'s example adds
-//! undo, the session and MIDI learn.
+//! crate: `export_vst3!` for a VST3 module, or `export_cabi!` for the JUCE
+//! adapter's static library. [`Plugin::idle`]'s example adds undo, the
+//! session and MIDI learn.
 //!
 //! ```no_run
 //! use std::sync::Arc;
@@ -122,19 +124,23 @@ mod state;
 // does.
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
 #[cfg_attr(
-    not(any(feature = "vst3", test)),
+    not(any(feature = "vst3", feature = "cabi", test)),
     expect(dead_code, reason = "only an exporter drives the core")
 )]
 mod boundary;
+#[cfg(feature = "cabi")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cabi")))]
+#[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
+pub mod cabi;
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
 #[cfg_attr(
-    not(feature = "vst3"),
+    not(any(feature = "vst3", feature = "cabi")),
     expect(dead_code, reason = "only an exporter drives the engine")
 )]
 mod engine;
 #[allow(unsafe_code, reason = "a host boundary: every block says why it holds")]
 #[cfg_attr(
-    not(feature = "vst3"),
+    not(any(feature = "vst3", feature = "cabi")),
     expect(dead_code, reason = "only an exporter drives the core")
 )]
 mod faults;
@@ -147,7 +153,7 @@ pub mod vst3;
 // crate's, so a plugin needs no `seam_ump` import for its blocks.
 #[doc(inline)]
 pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
-#[cfg(feature = "vst3")]
+#[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
 pub use info::{Category, Feature, Layout, PluginInfo};
 pub use plugin::{Plugin, Processor, Tail};

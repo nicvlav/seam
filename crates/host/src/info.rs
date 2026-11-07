@@ -186,7 +186,7 @@ impl PluginInfo {
     /// Its VST3 subcategories, in the SDK's words: its category, then each
     /// feature ("Fx", "EQ"). The VST3 exporter joins them with `|`, and the
     /// JUCE adapter's build hands them to JUCE, which does the same.
-    #[cfg(feature = "vst3")]
+    #[cfg(any(feature = "vst3", feature = "cabi"))]
     pub(crate) fn vst3_categories(&self) -> Vec<&'static str> {
         let first = match self.category {
             Category::Effect => "Fx",
@@ -203,7 +203,7 @@ impl PluginInfo {
 }
 
 /// The VST3 subcategory of a feature, in a plugin of `category`.
-#[cfg(feature = "vst3")]
+#[cfg(any(feature = "vst3", feature = "cabi"))]
 fn vst3_subcategory(feature: Feature, category: Category) -> &'static str {
     match feature {
         Feature::Analyzer => "Analyzer",
@@ -228,7 +228,7 @@ fn vst3_subcategory(feature: Feature, category: Category) -> &'static str {
     }
 }
 
-#[cfg(all(test, feature = "vst3"))]
+#[cfg(all(test, any(feature = "vst3", feature = "cabi")))]
 mod tests {
     use super::*;
 

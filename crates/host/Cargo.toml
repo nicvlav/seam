@@ -1,6 +1,6 @@
 [package]
 name = "seam-host"
-description = "The format-agnostic plugin trait, and its VST3 exporter behind a feature"
+description = "The format-agnostic plugin trait, and its VST3 and C ABI exporters behind features"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-keywords = ["audio", "plugin", "vst3"]
+keywords = ["audio", "plugin", "vst3", "juce"]
 categories = ["multimedia::audio", "api-bindings"]
 publish.workspace = true
 
@@ -21,9 +21,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 # main-thread timer, for Windows and macOS. No MIDI reaches a plugin through
 # it yet.
 vst3 = ["dep:vst3", "dep:windows-sys"]
-# The test host, `vst3::TestHost`, which drives a plugin through the
-# exporter in tests: for a plugin crate's dev-dependencies, so a shipping
-# plugin carries none of it.
+# The C ABI and generated header the JUCE adapter (AU, AUv3, AAX, hosting)
+# is driven by.
+cabi = []
+# The test hosts, `vst3::TestHost` and `cabi::TestHost`, which drive a plugin
+# through an exporter in tests: for a plugin crate's dev-dependencies, so a
+# shipping plugin carries none of it.
 test-host = []
 
 [dependencies]
