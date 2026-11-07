@@ -23,10 +23,12 @@ And one reference build, for timing only:
 And three more for timing only, A-port, A-port-clang and C-clang, which take the
 gap between A-native and C apart one cause at a time ("The ladder" below).
 
-The first run is headless, on the bare EQ: parameters and saved state only, no
-editor. A second run opens each build's UI: Seam's page in B and C, JUCE's
-generic editor with native sliders in A. Those UIs differ, so that run sets a
-WebView page against a native UI, not like against like.
+The run is headless, on the bare EQ: parameters and saved state only, no
+editor. A second run, with each build's UI open, is planned for when a plugin
+window can show Seam's page, which nothing opens yet. It would set Seam's page
+in B and C against JUCE's generic editor with native sliders in A. Those UIs
+differ, so that run would set a WebView page against a native UI, not like
+against like.
 
 ## What has to match first
 
@@ -163,7 +165,11 @@ It writes `report.md` and `report.json` into `bench/build/compare/`: the output
 match, time per block (median and 99th percentile), the whole process's CPU and
 the main and other threads' shares, the first block's time, load time, the
 memory the plugin adds, binary size and lines of plugin code. Reports kept from
-past runs are in `reports/`, each with its `report.json`.
+past runs are in `reports/`, each with its `report.json`. They name Seam
+revisions of an earlier history of this repository, which no longer resolve;
+the EQ and the bench they measured are in the commits that add the example EQ
+(`9264dbe`) and the bench (`d727aec`), reworked since but playing the same
+output, as the EQ's parity golden file shows. Their numbers are as measured.
 
 ## The rules the console host follows
 
