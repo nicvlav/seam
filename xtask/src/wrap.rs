@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::scan::{CommentKind, scan};
 
 /// The width in columns: 80, which rustfmt uses for comments (its
-/// `comment_width`). 79 of the 118 files under `crates/` keep every prose line
-/// within it, and the lines of the other 39 past it are mostly one to nine
-/// columns over; 90 would leave 21 lines, 100 one.
+/// `comment_width`). The repository keeps every prose line within it.
 pub const DEFAULT_MAX: usize = 80;
 
 /// The directories, from the repository root, whose Rust comments the width
@@ -260,25 +258,24 @@ fn package_of(shown: &str) -> String {
     }
 }
 
-/// Prints each hit, then a count per group, and returns whether none was
-/// found.
-fn report(counts: &BTreeMap<String, usize>, max: usize) -> bool {
+/// Prints each hit, then a count per group, and returns the total.
+fn report(counts: &BTreeMap<String, usize>, max: usize) -> usize {
     let total: usize = counts.values().sum();
     for (name, count) in counts {
         println!("{name}: {count} line(s) over {max} columns");
     }
     println!("total: {total}");
-    total == 0
+    total
 }
 
 /// Runs the task over the Rust comments of [`RUST_DIRS`]: prints each
-/// overlong line and a count per package. Returns whether none was found.
+/// overlong line and a count per package. Returns how many lines it found.
 ///
 /// # Errors
 ///
 /// Returns the error that stopped a file from being read, or a directory
 /// with no Rust file in it.
-pub fn run(root: &Path, max: usize) -> Result<bool, String> {
+pub fn run(root: &Path, max: usize) -> Result<usize, String> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for dir in RUST_DIRS {
         let path = root.join(dir);
@@ -302,13 +299,13 @@ pub fn run(root: &Path, max: usize) -> Result<bool, String> {
 }
 
 /// Runs the Markdown mode over [`markdown_files`]: prints each overlong
-/// prose line and a count per file. Returns whether none was found. The
+/// prose line and a count per file. Returns how many lines it found. The
 /// decision index's list lines are left out, since its check reads each whole.
 ///
 /// # Errors
 ///
 /// Returns the error that stopped a file from being read.
-pub fn run_markdown(root: &Path, max: usize) -> Result<bool, String> {
+pub fn run_markdown(root: &Path, max: usize) -> Result<usize, String> {
     let files = markdown_files(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for path in files {

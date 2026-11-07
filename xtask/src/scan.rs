@@ -544,7 +544,7 @@ pub fn escape(text: &str) -> String {
     out
 }
 
-/// Prints `scan`'s facts for `path`'s `source` in the task's line format.
+/// Returns `scan`'s facts for `path`'s `source` in the task's line format.
 ///
 /// # Errors
 ///
@@ -564,7 +564,7 @@ pub fn scan_report(path: &str, source: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Prints `defs`' names for `path`'s `source` in the task's line format.
+/// Returns `defs`' names for `path`'s `source` in the task's line format.
 ///
 /// # Errors
 ///

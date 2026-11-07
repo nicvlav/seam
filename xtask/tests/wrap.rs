@@ -77,8 +77,8 @@ fn run_walks_the_crates_examples_and_xtask_and_fails_on_a_long_line() {
     let root = xtask::root();
     // A width no line reaches passes; a width of one fails for the many prose
     // lines.
-    assert!(xtask::wrap::run(&root, 100_000).expect("the Rust reads"));
-    assert!(!xtask::wrap::run(&root, 1).expect("the Rust reads"));
+    assert_eq!(xtask::wrap::run(&root, 100_000), Ok(0));
+    assert!(xtask::wrap::run(&root, 1).expect("the Rust reads") > 0);
 }
 
 fn markdown(source: &str, max: usize) -> Vec<usize> {
@@ -173,7 +173,7 @@ impl Drop for Root {
 fn run_reads_the_comments_of_every_rust_directory() {
     for dir in xtask::wrap::RUST_DIRS {
         let root = Root::rust(dir);
-        assert!(!xtask::wrap::run(&root.0, 20).expect("reads"), "{dir}");
+        assert!(xtask::wrap::run(&root.0, 20).expect("reads") > 0, "{dir}");
     }
     assert_eq!(xtask::wrap::RUST_DIRS, ["crates", "examples", "xtask"]);
 }
@@ -204,9 +204,39 @@ impl Drop for Docs {
 fn run_markdown_reads_the_docs_and_leaves_the_decision_indexs_site_lines_whole() {
     let site = "- `crates/host/src/state.rs`: `SavedState::save`, `SavedState::load`\n";
     let docs = Docs::new("index", site, "short\n");
-    assert!(xtask::wrap::run_markdown(&docs.0, 30).expect("reads"));
+    assert_eq!(xtask::wrap::run_markdown(&docs.0, 30), Ok(0));
     let docs = Docs::new("other", "short\n", site);
-    assert!(!xtask::wrap::run_markdown(&docs.0, 30).expect("reads"));
+    // The one site line past 30 columns is the one finding.
+    assert_eq!(xtask::wrap::run_markdown(&docs.0, 30), Ok(1));
+}
+
+#[test]
+fn the_usage_lists_gen_only_when_the_build_has_it() {
+    let usage = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .output()
+        .expect("xtask runs");
+    assert_eq!(usage.status.code(), Some(2));
+    let usage = String::from_utf8(usage.stderr).expect("UTF-8");
+    assert!(usage.contains("  scan "), "{usage}");
+    assert_eq!(
+        usage.contains("  gen "),
+        cfg!(feature = "generate"),
+        "{usage}"
+    );
+}
+
+#[test]
+fn the_task_exits_1_on_a_finding_and_0_on_none() {
+    let status = |max: &str| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .args(["wrap", "--max", max])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("xtask runs")
+            .code()
+    };
+    assert_eq!(status("100000"), Some(0));
+    assert_eq!(status("1"), Some(1));
 }
 
 #[test]
@@ -214,6 +244,6 @@ fn run_markdown_walks_the_repositorys_docs() {
     let root = xtask::root();
     // A width no line reaches passes; one of 40 fails for the many prose
     // lines whose words each fit it.
-    assert!(xtask::wrap::run_markdown(&root, 100_000).expect("the docs read"));
-    assert!(!xtask::wrap::run_markdown(&root, 40).expect("the docs read"));
+    assert_eq!(xtask::wrap::run_markdown(&root, 100_000), Ok(0));
+    assert!(xtask::wrap::run_markdown(&root, 40).expect("the docs read") > 0);
 }

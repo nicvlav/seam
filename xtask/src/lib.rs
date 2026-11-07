@@ -2,8 +2,8 @@
 //!
 //! `gen` rewrites every file the repository commits that Rust generates:
 //! the page's protocol types and its test parameter map, the C header the
-//! JUCE adapter builds against, and each plugin's JUCE build settings. Each
-//! has a drift gate (`tests/drift.rs`), so a stale one fails CI.
+//! JUCE adapter builds against, and the example EQ's JUCE build settings.
+//! Each has a drift gate (`tests/drift.rs`), so a stale one fails CI.
 //!
 //! Three tasks read Rust source exactly, with `syn` and `proc-macro2`, for the
 //! repository's check scripts and for the style gate:
