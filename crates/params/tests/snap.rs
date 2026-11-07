@@ -245,6 +245,10 @@ fn range_and_value() -> impl Strategy<Value = (Decimal, f32)> {
 /// A range written in decimals: a start and a step with up to three places,
 /// and its end `steps` steps on. Returns the range, the start and step in
 /// units of the finer place, and that place.
+///
+/// A whole start 32,768 or more from zero and a span of a few thousandths
+/// round to one `f32` at both ends, which `Range::new` refuses: those draws
+/// are skipped.
 fn decimal_range() -> impl Strategy<Value = (Range, i64, i64, u32, i64)> {
     (
         -100_000_i64..100_000,
@@ -253,7 +257,8 @@ fn decimal_range() -> impl Strategy<Value = (Range, i64, i64, u32, i64)> {
         0_u32..=3,
         1_i64..500,
     )
-        .prop_map(
+        .prop_filter_map(
+            "a range f32 can tell apart",
             |(start_units, start_places, step_units, step_places, steps)| {
                 let places = start_places.max(step_places);
                 let s = start_units * 10_i64.pow(places - start_places);
@@ -264,8 +269,8 @@ fn decimal_range() -> impl Strategy<Value = (Range, i64, i64, u32, i64)> {
                     decimal(t, places),
                     None,
                 )
-                .expect("a valid range");
-                (range, s, t, places, steps)
+                .ok()?;
+                Some((range, s, t, places, steps))
             },
         )
 }
