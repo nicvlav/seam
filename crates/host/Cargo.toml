@@ -1,0 +1,30 @@
+[package]
+name = "seam-host"
+description = "The format-agnostic plugin trait, its saved block, and the core every format exporter shares"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin"]
+categories = ["multimedia::audio"]
+publish.workspace = true
+
+[dependencies]
+seam-params.workspace = true
+seam-session.workspace = true
+seam-ump.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[dev-dependencies]
+seam-learn.workspace = true
+seam-testkit.workspace = true
+seam-undo.workspace = true
+
+[lints]
+workspace = true

@@ -395,6 +395,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "seam-host"
+version = "0.1.0"
+dependencies = [
+ "loom",
+ "seam-learn",
+ "seam-params",
+ "seam-session",
+ "seam-testkit",
+ "seam-ump",
+ "seam-undo",
+ "serde_json",
+]
+
+[[package]]
 name = "seam-learn"
 version = "0.1.0"
 dependencies = [
