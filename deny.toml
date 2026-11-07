@@ -1,0 +1,44 @@
+# cargo-deny: what the dependency tree may contain. CI runs
+# `cargo deny check` (.github/workflows/ci.yml).
+
+[graph]
+all-features = true
+
+[licenses]
+# Exactly the licences the tree has today. A new one fails the check until
+# someone reads it and adds it here; THIRD-PARTY-NOTICES carries the texts the
+# licences below require a distribution to keep.
+allow = [
+    "Apache-2.0",
+    "BSD-1-Clause",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.93
+# Seam's own crates are not published and name no licence.
+private = { ignore = true }
+
+[advisories]
+# Known vulnerabilities, unmaintained crates and yanked releases fail.
+unmaintained = "all"
+yanked = "deny"
+# Both reach the tree only through iai-callgrind, the benchmark harness
+# (a dev-dependency of four crates), and neither ships in a plugin.
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "bincode, in the benchmark harness only" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2, in the benchmark harness's macros only" },
+]
+
+[bans]
+# Two versions of one crate (syn 2 and 3 today) are reported, not refused.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

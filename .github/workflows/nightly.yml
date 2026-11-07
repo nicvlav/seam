@@ -1,0 +1,170 @@
+name: Nightly
+
+# The long lanes: miri over the core and the host crate, the fuzz targets, the
+# real-time sanitizer over the allocation gates and the gate matrix, and a
+# 30-minute soak of the example EQ through both exporters.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  # A change to this file runs it, since a dispatch is possible only for a
+  # workflow already on the default branch.
+  push:
+    paths: [.github/workflows/nightly.yml]
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: Seconds each fuzz target runs
+        default: "600"
+      soak_seconds:
+        description: Seconds the soak runs
+        default: "1800"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Miri and the fuzzers need a nightly compiler; this one is pinned so a
+  # lane does not break overnight. The pinned stable toolchain builds the rest.
+  NIGHTLY: nightly-2026-11-04
+
+jobs:
+  miri:
+    name: miri (${{ matrix.borrows }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - borrows: stacked borrows
+            flags: ""
+          - borrows: tree borrows
+            flags: -Zmiri-tree-borrows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal --component miri,rust-src
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The host crate's own tests drive its VST3 and C exporters. Six of
+      # them are ignored under miri: five need a system timer and one reads
+      # 64 MiB. A test leaks an instance on purpose, hence -Zmiri-ignore-leaks.
+      - name: seam-host
+        run: cargo +"$NIGHTLY" miri test -p seam-host --features vst3,cabi,test-host --lib --locked
+        env:
+          MIRIFLAGS: -Zmiri-ignore-leaks ${{ matrix.flags }}
+      # The core crates' unit tests, and the integration tests of the UMP crate
+      # and of seam-learn. Learn's take about 20 seconds in all under either
+      # model (measured on Windows); its ceiling test, which maps 4,096
+      # sources, did not finish in 25 minutes, so it is skipped. Learn's
+      # allocation gate is not run: it fails on Windows under both models
+      # inside std's allocator (docs/testing.md), and Linux has not run it
+      # yet. The other crates' integration tests are not run here either:
+      # seam-undo's does not finish in an hour under the interpreter.
+      - name: The core crates
+        run: |
+          cargo +"$NIGHTLY" miri test --workspace --exclude seam-host --exclude seam-example-eq --exclude seam-example-gain --exclude seam-testkit --exclude xtask --lib --locked
+          cargo +"$NIGHTLY" miri test -p seam-ump --tests --locked
+          cargo +"$NIGHTLY" miri test -p seam-learn --test capture --test dispatch --test saved --test targets --locked -- --skip the_table_at_the_ceiling
+        env:
+          MIRIFLAGS: -Zmiri-ignore-leaks -Zmiri-disable-isolation ${{ matrix.flags }}
+          PROPTEST_CASES: "4"
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ump_packets, page_message, saved_block, cabi_state]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: fuzz
+      - name: cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      # The corpus grows as the fuzzer finds inputs; keep it between nights.
+      # The committed seeds (fuzz/corpus) are the start of every run.
+      - name: Corpus from earlier nights
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      # cargo-fuzz has no --locked of its own, so this fails when the
+      # lockfile would change before it builds.
+      - name: Lockfile is current
+        run: cargo +"$NIGHTLY" metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
+      # The fuzz crate is outside the workspace, so its own unit test runs in
+      # no other lane. Each leg runs it; it takes seconds.
+      - name: The fuzz crate's unit test
+        run: cargo +"$NIGHTLY" test --locked --manifest-path fuzz/Cargo.toml --lib
+      - name: Fuzz
+        run: cargo +"$NIGHTLY" fuzz run ${{ matrix.target }} -- -max_total_time=${{ inputs.fuzz_seconds || '600' }}
+      - name: Keep the crash
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+
+  # RealtimeSanitizer aborts a test when a function marked nonblocking
+  # allocates, locks or makes a blocking system call (docs/testing.md,
+  # "Real-time sanitizer"). It sees only what the tests execute, and only below
+  # a function that carries the mark, which crates/ adds under the cfg
+  # `seam_rtsan`. A canary that allocates inside a marked call must abort, so
+  # the lane cannot pass while checking nothing. The lane has not run yet; the
+  # first run settles whether the nightly ships the runtime for this target.
+  rtsan:
+    name: realtime sanitizer
+    runs-on: ubuntu-24.04
+    env:
+      # `--target` keeps the flags off build scripts and proc macros.
+      RUSTFLAGS: -Zsanitizer=realtime --cfg seam_rtsan
+      RTSAN_OPTIONS: halt_on_error=true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Built in a step of its own, so a canary that fails to build fails the
+      # lane rather than pass for an abort.
+      - name: Canary builds
+        run: cargo +"$NIGHTLY" test -p seam-host --no-default-features --features cabi,test-host --release --test rtsan_canary --target x86_64-unknown-linux-gnu --locked --no-run
+      - name: Canary aborts
+        run: |
+          if cargo +"$NIGHTLY" test -p seam-host --no-default-features --features cabi,test-host --release --test rtsan_canary --target x86_64-unknown-linux-gnu --locked > canary.log 2>&1; then
+            cat canary.log
+            echo "::error::the canary passed: the sanitizer checks nothing"
+            exit 1
+          fi
+          cat canary.log
+          grep -q RealtimeSanitizer canary.log
+      - name: Allocation gates (release)
+        run: cargo +"$NIGHTLY" test --workspace --no-default-features --features seam-host/cabi,seam-host/test-host,seam-example-eq/cabi,seam-bridge/typescript --release --test alloc_gate --target x86_64-unknown-linux-gnu --locked
+      - name: Gate matrix (release)
+        run: cargo +"$NIGHTLY" test -p seam-example-eq --no-default-features --features cabi --release --test matrix --test overflow --target x86_64-unknown-linux-gnu --locked
+
+  soak:
+    name: soak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Soak
+        shell: bash
+        run: cargo test -p seam-example-eq --no-default-features --features cabi --release --test matrix --locked -- --ignored soak --nocapture
+        env:
+          SEAM_SOAK_SECONDS: ${{ inputs.soak_seconds || '1800' }}

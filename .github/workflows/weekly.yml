@@ -1,0 +1,45 @@
+name: Weekly
+
+# The 3-hour soak of the example EQ through both exporters, with randomised
+# parameter moves, checked for allocation, faults, NaN or denormal output and
+# drift from the processor driven directly.
+on:
+  schedule:
+    - cron: "23 4 * * 0"
+  # A push that changes this file runs a 5-minute soak, since a dispatch is
+  # possible only for a workflow already on the default branch.
+  push:
+    paths: [.github/workflows/weekly.yml]
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: Seconds the soak runs
+        default: "10800"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  soak:
+    name: soak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Soak
+        shell: bash
+        run: cargo test -p seam-example-eq --no-default-features --features cabi --release --test matrix --locked -- --ignored soak --nocapture
+        env:
+          SEAM_SOAK_SECONDS: ${{ inputs.soak_seconds || (github.event_name == 'push' && '300' || '10800') }}

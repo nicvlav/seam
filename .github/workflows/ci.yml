@@ -1,0 +1,431 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      bench_base:
+        description: A revision the benchmarks are compared against (a pull request uses its base)
+        default: ""
+
+permissions:
+  contents: read
+
+# Supersede runs on a branch, but let every push to main finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # rust-toolchain.toml pins the compiler. `rustup show` no longer
+      # installs it, so install it explicitly (no argument: the pinned one).
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --all --check
+      # Every step that resolves dependencies runs --locked, so a lockfile out
+      # of step with the manifests fails.
+      - name: Clippy (default features)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (all features)
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      # Includes the drift gates for generated files (xtask's drift test,
+      # seam-bridge's typescript_drift) and the allocation gates in debug.
+      - name: Test
+        run: cargo test --workspace --all-features --locked
+        # Property tests: proptest's default 256 cases on pull requests,
+        # sixteen times as many on pushes to main.
+        env:
+          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+      # A failing property test writes the case it found next to its test;
+      # keep it, so the failure can be replayed and committed.
+      - name: Keep the property tests' failing cases
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proptest-regressions-${{ matrix.os }}
+          path: "**/*.proptest-regressions"
+          if-no-files-found: ignore
+      # The allocation gates again on optimised code, which is what a host
+      # runs.
+      - name: Allocation gates (release)
+        run: cargo test --workspace --all-features --release --test alloc_gate --locked
+      # The example EQ through both exporters across block sizes, rates and
+      # layouts, under the allocation gate, on optimised code.
+      - name: Gate matrix (release)
+        run: cargo test -p seam-example-eq --release --test matrix --test overflow --locked
+      - name: Docs
+        run: cargo doc --workspace --all-features --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Nightly rustdoc counts the public types, traits, functions and macros that
+  # should carry an example and the ones that do. The count is unstable, so
+  # this lane pins the nightly the scheduled lanes use; the stable toolchain
+  # runs the examples themselves in the Test step above. Windows, because that
+  # leg builds the VST3 exporter.
+  examples:
+    name: doc examples
+    runs-on: windows-2025
+    env:
+      NIGHTLY: nightly-2026-11-04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup toolchain install $env:NIGHTLY --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Every public type, trait, function and macro has an example
+        run: python scripts/check-example-coverage.py
+
+  core-alone:
+    name: core builds alone
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Fails if a core crate or the bridge would link a window, WebView, UI
+      # toolkit or plugin-format crate on any platform, with any features.
+      - name: No window, WebView or host dependency
+        run: python3 scripts/check-core-deps.py
+      # The two checks below read Rust through `cargo xtask scan` and `defs`
+      # (proc-macro2 and syn). Built without the generators, so the lane needs
+      # no crate of the workspace. The reader's own tests run first.
+      - name: The Rust reader's tests
+        run: cargo test -p xtask --no-default-features --locked
+      - name: Build the Rust reader
+        run: cargo build -p xtask --no-default-features --locked
+      # Prose in the comments of crates/, examples/ and xtask/ wraps at 80
+      # columns, as rustfmt wraps their code.
+      - name: Comments wrap at 80 columns
+        run: target/debug/xtask wrap --max 80
+      # So does the prose of README.md, ARCHITECTURE.md, CHANGELOG.md and
+      # docs/; tables, code and unbreakable links are exempt.
+      - name: Docs wrap at 80 columns
+        run: target/debug/xtask wrap --markdown --max 80
+      # Comments and docs give their reason in words, never a decision id;
+      # the script's docstring states what it scans.
+      - name: No decision ids in comments or docs
+        run: python3 scripts/check-comment-tags.py
+        env:
+          SEAM_XTASK: target/debug/xtask
+      # The decision index still names files and items that exist, and every
+      # id the decision record has.
+      - name: The decision index matches the record and the code
+        run: python3 scripts/check-decision-index.py
+        env:
+          SEAM_XTASK: target/debug/xtask
+      # The check scripts refuse the bad input they exist for.
+      - name: The check scripts' own tests
+        run: python3 scripts/test-checks.py
+        env:
+          SEAM_XTASK: target/debug/xtask
+      # And they build on a runner with no WebView or GTK development
+      # libraries installed. Every workspace crate is built but the ones that
+      # may need them (the host, the example EQ), the test tools and xtask, so
+      # a new crate is built here until it is excluded.
+      - name: Build the core alone
+        run: cargo build --workspace --exclude seam-host --exclude seam-example-eq --exclude seam-example-gain --exclude seam-testkit --exclude xtask --locked
+
+  loom:
+    name: loom models
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The model checks of the lock-free hand-offs in params, learn and
+      # host; docs/testing.md lists what each checks. --cfg loom swaps their
+      # atomics for loom's, which work only inside a model, so only the
+      # models run. The script counts the models in the source and fails
+      # unless each one ran.
+      - name: loom
+        run: python3 scripts/run-loom.py
+
+  # The protocol's shape file only gains lines; the Rust test reads just its
+  # last line, so this compares the whole file with the pull request's base.
+  protocol-shape:
+    name: protocol shape history
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: The shape file only gains lines
+        run: python3 scripts/check-shape-append-only.py "${BASE}"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+
+  page:
+    name: page
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: page
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: page/package-lock.json
+      - run: npm ci
+      # Type-checks the page against the committed generated contract; the
+      # rust job checks that contract against the Rust types.
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+
+  # Everything Seam supports on Linux: the core, the bridge, the C interface
+  # and the example EQ through it. The VST3 exporter refuses to build here by
+  # design (it has no main-thread timer), and a check proves the refusal.
+  linux:
+    name: linux
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGES: --workspace
+      FEATURES: --no-default-features --features seam-host/cabi,seam-host/test-host,seam-example-eq/cabi,seam-bridge/typescript,xtask/generate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Clippy
+        run: cargo clippy $PACKAGES $FEATURES --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test $PACKAGES $FEATURES --locked
+        env:
+          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+      - name: Allocation gates (release)
+        run: cargo test $PACKAGES $FEATURES --release --test alloc_gate --locked
+      - name: Gate matrix (release)
+        run: cargo test -p seam-example-eq --no-default-features --features cabi --release --test matrix --test overflow --locked
+      - name: The VST3 module refuses to build
+        run: |
+          if cargo check -p seam-example-eq --locked 2> refusal.txt; then
+            echo "the VST3 module built on Linux"
+            exit 1
+          fi
+          cat refusal.txt
+          grep -q "the VST3 exporter builds for Windows and macOS only" refusal.txt
+
+  # seam.h compiles as C11 and C++11 for both architectures, so its size and
+  # offset assertions run: they fail when the header's layout disagrees with
+  # the compiler's. -ffreestanding takes clang's own stdint.h, so no
+  # cross-compilation sysroot is needed to check a target's layout.
+  header:
+    name: seam.h
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compile
+        run: |
+          clang --version
+          for target in x86_64-linux-gnu aarch64-linux-gnu; do
+            for language in "c -std=c11" "c++ -std=c++11"; do
+              echo "== $target, $language"
+              clang --target=$target -ffreestanding -fsyntax-only -Wall -Wextra -Werror -x $language crates/host/include/seam.h
+            done
+          done
+
+  # The core and the C interface type-check for the 64-bit ARM targets the
+  # adapter ships for: Linux hosts and Android.
+  cross-check:
+    name: cross check (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-unknown-linux-gnu, aarch64-linux-android]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Core and bridge
+        run: cargo check --locked --target ${{ matrix.target }} --workspace --exclude seam-host --exclude seam-example-eq --exclude seam-example-gain --exclude seam-testkit --exclude xtask
+      - name: C interface and example EQ
+        run: cargo check --locked --target ${{ matrix.target }} -p seam-host -p seam-example-eq --no-default-features --features seam-host/cabi,seam-example-eq/cabi
+      - name: C interface alone
+        run: cargo check --locked --target ${{ matrix.target }} -p seam-host --features cabi
+
+  # Licences, advisories, bans and sources, by deny.toml.
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny --locked check
+
+  # Line coverage of the code Linux builds, failing below the kept threshold.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-24.04
+    env:
+      PACKAGES: --workspace --exclude seam-testkit --exclude xtask
+      FEATURES: --no-default-features --features seam-host/cabi,seam-host/test-host,seam-example-eq/cabi
+      EXCLUDE: '(/tests/|/benches/|/testkit/|test_host\.rs|tests\.rs)'
+      # Measured line coverage minus one point (docs/testing.md).
+      COVERAGE_LINES: "92"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup component add llvm-tools
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-llvm-cov@0.8.5
+      - name: Measure
+        run: cargo llvm-cov $PACKAGES $FEATURES --locked --ignore-filename-regex "$EXCLUDE" --fail-under-lines "$COVERAGE_LINES" --lcov --output-path lcov.info
+      - name: Summary
+        if: always()
+        run: cargo llvm-cov report --ignore-filename-regex "$EXCLUDE" | tail -40
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: ignore
+
+  # The example EQ's VST3 bundle, laid out by hand, through pluginval.
+  pluginval:
+    name: pluginval (windows)
+    runs-on: windows-2025
+    env:
+      PLUGINVAL_VERSION: v1.0.4
+      PLUGINVAL_SHA256: c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab
+      # The highest strictness the module passes today; docs/testing.md says
+      # what it covers.
+      PLUGINVAL_STRICTNESS: "5"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build -p seam-example-eq --release --locked
+      - name: Lay out the bundle
+        shell: bash
+        run: |
+          bundle="bundle/Seam Example EQ.vst3"
+          mkdir -p "$bundle/Contents/x86_64-win"
+          cp target/release/seam_example_eq.dll "$bundle/Contents/x86_64-win/Seam Example EQ.vst3"
+      - name: Download pluginval
+        shell: bash
+        run: |
+          curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_Windows.zip"
+          echo "${PLUGINVAL_SHA256}  pluginval.zip" | sha256sum -c -
+          unzip -q pluginval.zip
+      - name: pluginval
+        shell: bash
+        run: ./pluginval.exe --strictness-level "${PLUGINVAL_STRICTNESS}" --validate-in-process --skip-gui-tests --output-dir pluginval-logs "bundle/Seam Example EQ.vst3"
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pluginval-logs
+          path: pluginval-logs
+          if-no-files-found: ignore
+
+  # Instruction counts of the EQ's block, a host write, learn's dispatch and
+  # UMP decoding; on a pull request, compared with its base.
+  bench:
+    name: benchmarks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: valgrind and the iai-callgrind runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          cargo install iai-callgrind-runner --version 0.16.1 --locked
+      - name: Benchmarks
+        run: scripts/run-benches.sh "${BASE}"
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.bench_base || '' }}
+
+  # The same bundle through the Steinberg validator, built from the VST3 SDK
+  # at a pinned commit.
+  vst3-validator:
+    name: vst3 validator (windows)
+    runs-on: windows-2025
+    env:
+      VST3_SDK_TAG: v3.8.1_build_84
+      VST3_SDK_COMMIT: 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build -p seam-example-eq --release --locked
+      - name: Lay out the bundle
+        shell: bash
+        run: |
+          bundle="bundle/Seam Example EQ.vst3"
+          mkdir -p "$bundle/Contents/x86_64-win"
+          cp target/release/seam_example_eq.dll "$bundle/Contents/x86_64-win/Seam Example EQ.vst3"
+      - name: The validator, if built before
+        id: cached
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vst3sdk-build/bin/Release
+          key: vst3-validator-${{ env.VST3_SDK_COMMIT }}
+      - name: Build the validator
+        if: steps.cached.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$VST3_SDK_TAG" --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+          test "$(git -C vst3sdk rev-parse HEAD)" = "$VST3_SDK_COMMIT"
+          cmake -S vst3sdk -B vst3sdk-build -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
+          cmake --build vst3sdk-build --config Release --target validator --parallel 4
+      - name: Validate
+        shell: bash
+        run: vst3sdk-build/bin/Release/validator.exe "bundle/Seam Example EQ.vst3"

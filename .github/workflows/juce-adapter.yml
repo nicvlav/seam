@@ -1,0 +1,73 @@
+name: JUCE adapter
+
+# The example EQ built through adapters/juce for arm64 and x86_64, at the JUCE
+# commit bench/ pins. Runs when the adapter or the host crate changes, every
+# night, and on demand.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - adapters/**
+      - crates/host/**
+      - examples/eq/**
+      - .github/juce-adapter/**
+      - .github/workflows/juce-adapter.yml
+  pull_request:
+    paths: *paths
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  universal:
+    name: universal build (macos-15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: JUCE commit
+        run: |
+          commit="$(grep -oE 'GIT_TAG [0-9a-f]{40}' bench/CMakeLists.txt | head -1 | cut -d' ' -f2)"
+          test -n "$commit"
+          echo "JUCE_COMMIT=$commit" >> "$GITHUB_ENV"
+      - name: Configure
+        run: >
+          cmake -S .github/juce-adapter -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          -DSEAM_CHECK_JUCE_COMMIT="$JUCE_COMMIT"
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Both architectures
+        run: |
+          status=0
+          vst3="$(find build -path '*.vst3/Contents/MacOS/*' -type f)"
+          component="$(find build -path '*.component/Contents/MacOS/*' -type f)"
+          # The library alone would keep the list non-empty, and one format
+          # built would hide the other missing.
+          test -n "$vst3" || { echo "no VST3 binary was built"; exit 1; }
+          test -n "$component" || { echo "no AU binary was built"; exit 1; }
+          plugins="$(printf '%s\n%s' "$vst3" "$component")"
+          binaries="$(ls build/seam-cargo/universal/*.a; echo "$plugins")"
+          echo "$binaries"
+          while IFS= read -r binary; do
+            info="$(lipo -info "$binary")"
+            echo "$info"
+            case "$info" in
+              *arm64*x86_64*|*x86_64*arm64*) ;;
+              *) echo "not universal: $binary"; status=1 ;;
+            esac
+          done <<< "$binaries"
+          test "$status" = 0
