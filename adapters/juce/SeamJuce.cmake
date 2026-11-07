@@ -163,8 +163,7 @@ function(seam_add_juce_plugin target)
     target_compile_definitions(${target} PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_DISPLAY_SPLASH_SCREEN=0)
+        JUCE_VST3_CAN_REPLACE_VST2=0)
     target_link_libraries(${target}
         PRIVATE ${target}_seam juce::juce_audio_processors
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags
