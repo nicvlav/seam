@@ -47,8 +47,7 @@ target_sources(BenchJuceEq PRIVATE juce-eq/PluginProcessor.cpp)
 target_compile_definitions(BenchJuceEq PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(BenchJuceEq
     PRIVATE juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags
@@ -75,8 +74,7 @@ target_compile_definitions(BenchJuceEqNative PUBLIC
     BENCH_JUCE_NATIVE_RANGES=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(BenchJuceEqNative
     PRIVATE juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags
@@ -111,8 +109,7 @@ target_compile_definitions(BenchJuceEqPort PUBLIC
     BENCH_PORTED_DSP=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(BenchJuceEqPort
     PRIVATE juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags
