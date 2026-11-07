@@ -44,7 +44,10 @@
     { "name": "position missing", "text": "{\"type\":\"set\",\"param\":\"a\"}" },
     { "name": "position above 1", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":2.5}" },
     { "name": "position below 0", "text": "{\"type\":\"set\",\"param\":\"a\",\"normalized\":-0.25}" },
-    { "name": "parameter missing", "text": "{\"type\":\"gestureBegin\"}" }
+    { "name": "parameter missing", "text": "{\"type\":\"gestureBegin\"}" },
+    { "name": "parameter named twice", "text": "{\"type\":\"set\",\"param\":\"a\",\"param\":\"b\",\"normalized\":0.5}" },
+    { "name": "type named twice, the last a ready", "text": "{\"type\":\"gestureEnd\",\"param\":\"a\",\"type\":\"ready\",\"protocol\":2}" },
+    { "name": "version named twice in a ready", "text": "{\"type\":\"ready\",\"protocol\":2,\"protocol\":3}" }
   ],
   "refusedAsNative": [
     { "name": "unknown field in a param message", "text": "{\"type\":\"param\",\"state\":{\"param\":\"gain\",\"normalized\":0.5,\"text\":\"\"},\"x\":0}" },

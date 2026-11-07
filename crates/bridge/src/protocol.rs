@@ -232,7 +232,8 @@ pub enum CallResult {
     },
 }
 
-/// A message that could not be decoded.
+/// A message that could not be decoded. Its text says why, so it reports no
+/// separate [`source`](std::error::Error::source).
 ///
 /// # Examples
 ///
@@ -251,11 +252,7 @@ impl std::fmt::Display for DecodeError {
     }
 }
 
-impl std::error::Error for DecodeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
-    }
-}
+impl std::error::Error for DecodeError {}
 
 /// A parameter's position from 0 to 1, as a page sets it and the native side
 /// reports it.
@@ -309,10 +306,10 @@ impl PageMessage {
     /// # Errors
     ///
     /// Returns [`DecodeError`] for text that is not JSON or names an unknown
-    /// `type`. The same error covers an unknown or missing field, a number of
-    /// the wrong type or range, and a position outside 0 to 1. A `ready` may
-    /// carry unknown fields, so a newer page can always say which version it
-    /// speaks.
+    /// `type`. The same error covers an unknown, missing or repeated field, a
+    /// number of the wrong type or range, and a position outside 0 to 1. A
+    /// `ready` may carry unknown fields, so a newer page can always say which
+    /// version it speaks.
     ///
     /// # Examples
     ///
@@ -320,26 +317,34 @@ impl PageMessage {
     /// use seam_bridge::{PageMessage, Position};
     ///
     /// let message = PageMessage::decode(r#"{"type":"set","param":"mix","normalized":0.25}"#)?;
-    /// let normalized = Position::new(0.25).expect("in range");
+    /// let normalized = Position::new(0.25).ok_or("in range")?;
     /// assert_eq!(message, PageMessage::Set { param: "mix".into(), normalized });
     ///
     /// // A fractional call id is rejected, not truncated.
     /// let text = r#"{"type":"invoke","call":3.7,"command":"undo"}"#;
     /// assert!(PageMessage::decode(text).is_err());
-    /// # Ok::<(), seam_bridge::DecodeError>(())
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn decode(text: &str) -> Result<Self, DecodeError> {
-        /// What a `ready` must hold; whatever else it carries is ignored.
+        /// What a `ready` must hold; whatever else it carries is ignored. A
+        /// field named twice is still refused.
         #[derive(Deserialize)]
-        struct Ready {
-            protocol: u32,
+        #[serde(tag = "type")]
+        enum Lenient {
+            #[serde(rename = "ready")]
+            Ready { protocol: u32 },
+            #[serde(other)]
+            Other,
         }
-        let value: serde_json::Value = serde_json::from_str(text).map_err(DecodeError)?;
-        if value.get("type").and_then(serde_json::Value::as_str) == Some("ready") {
-            let Ready { protocol } = serde_json::from_value(value).map_err(DecodeError)?;
-            return Ok(PageMessage::Ready { protocol });
+        let strict = match serde_json::from_str(text) {
+            Ok(message) => return Ok(message),
+            Err(error) => error,
+        };
+        match serde_json::from_str(text) {
+            Ok(Lenient::Ready { protocol }) => Ok(PageMessage::Ready { protocol }),
+            Ok(Lenient::Other) => Err(DecodeError(strict)),
+            Err(error) => Err(DecodeError(error)),
         }
-        serde_json::from_value(value).map_err(DecodeError)
     }
 }
 
@@ -441,6 +446,26 @@ mod tests {
     }
 
     #[test]
+    fn a_field_named_twice_is_refused_not_resolved_to_the_last() {
+        for text in [
+            r#"{"type":"set","param":"a","param":"b","normalized":0.5}"#,
+            r#"{"type":"set","param":"a","normalized":0.5,"normalized":0.25}"#,
+            r#"{"type":"gestureEnd","param":"a","type":"ready","protocol":2}"#,
+            r#"{"type":"ready","protocol":2,"type":"ready"}"#,
+            r#"{"type":"ready","protocol":2,"protocol":3}"#,
+            r#"{"type":"ready","protocol":2,"extra":1,"protocol":3}"#,
+        ] {
+            assert!(PageMessage::decode(text).is_err(), "{text}");
+        }
+        // A repeated unknown field of a ready is ignored like any other.
+        let text = r#"{"type":"ready","protocol":2,"extra":1,"extra":2}"#;
+        assert_eq!(
+            PageMessage::decode(text).unwrap(),
+            PageMessage::Ready { protocol: 2 }
+        );
+    }
+
+    #[test]
     fn a_ready_of_a_newer_page_decodes_whatever_else_it_says() {
         let text = r#"{"type":"ready","protocol":99,"features":[],"nested":{"a":[1]}}"#;
         assert_eq!(
@@ -457,6 +482,14 @@ mod tests {
         ] {
             assert!(PageMessage::decode(text).is_err(), "{text}");
         }
+    }
+
+    #[test]
+    fn a_decode_error_shows_its_cause_once() {
+        use std::error::Error as _;
+        let error = PageMessage::decode(r#"{"type":"teleport"}"#).unwrap_err();
+        assert!(error.to_string().contains("teleport"), "{error}");
+        assert!(error.source().is_none(), "the cause shows in a chain twice");
     }
 
     #[test]
