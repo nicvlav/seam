@@ -1,12 +1,16 @@
 # Testing
 
 Every behaviour change carries a test. A bug fix starts with a test that fails
-for the bug, seen failing before the fix and passing after it. Each command
-below is marked with where CI runs it ([CI lanes](#ci-lanes)).
+for the bug, seen failing before the fix and passing after it. Every test file
+starts with a `//!` line that says what it tests: a test crate is a crate, and
+`missing_docs` fails one without that line under CI's `-D warnings`. Each
+command below is marked with where CI runs it ([CI lanes](#ci-lanes)).
 
 ```sh
 cargo test --workspace --all-features                                # pull request: everything, debug
 cargo test --workspace --all-features --release --test alloc_gate   # pull request: allocation gates, optimised
+cargo test --workspace --all-features --release                      # pull request: everything, optimised, doc tests included
+cargo clippy --workspace --all-targets --all-features --release -- -D warnings   # pull request: with debug assertions off
 python3 scripts/check-core-deps.py   # pull request; `python` on Windows, where python3 is the Store stub
 cargo test -p xtask --no-default-features   # pull request: the Rust reader the next two checks use
 python3 scripts/check-comment-tags.py                                # pull request
@@ -38,14 +42,16 @@ file runs it.
 | `rust` (Windows, macOS): Format | The code is formatted. |
 | `rust`: Clippy, default features and all features | No warning, including the workspace's doc and panic lints, with each feature set. |
 | `rust`: Test | Every test passes in debug, where contract assertions fire: the drift gates, the allocation gates and the example EQ's golden-file parity test included. |
+| `rust`: Clippy (release) | No warning with debug assertions off, where the code under `cfg(debug_assertions)` drops out. |
+| `rust`: Test (release) | Every test and doc test passes in optimised code with no debug assertions, which is what a host runs: the audio-thread mark's release half and the doc examples that read it included. |
 | `rust`: Allocation gates (release) | The audio path still does not allocate in optimised code, which is what a host runs. |
 | `rust`: Gate matrix (release) | The example EQ through both exporters allocates nothing and equals the processor driven directly, across block sizes, sample rates and layouts (section 2). |
 | `rust`: Docs | Every doc builds with no warning, broken link included. |
-| `doc examples` (Windows, pinned nightly) | Every struct, enum, trait, function and macro a user can reach has a Rust example, in every library crate (see [Doc examples](#doc-examples)). |
+| `doc examples` (Windows, pinned nightly) | Every struct, enum, trait, function and macro a user can reach has a Rust example, in every library crate under `crates/` (see [Doc examples](#doc-examples)). |
 | `linux` | The core, the bridge, the C interface and the example EQ through it build, pass clippy and pass their tests, gates and matrix on Linux, and the VST3 module refuses to compile there, with its message. |
 | `seam.h` | The header compiles as C11 and C++11 for x86_64 and aarch64, so its size and offset assertions hold for both. |
 | `cross check` (aarch64 Linux, aarch64 Android) | The core, the bridge and the C interface type-check for those targets. Nothing is linked or run. |
-| `cargo deny` | Every dependency's licence is one `deny.toml` lists, no advisory applies (two, in the benchmark harness, are named there), no source is outside crates.io. |
+| `cargo deny` | Every dependency of the workspace has a licence `deny.toml` lists, no advisory applies (two, in the benchmark harness, are named there), no source is outside crates.io. It does not read `fuzz/`, which is outside the workspace and whose libFuzzer is under NCSA. |
 | `coverage` | Line coverage of the code Linux builds is at least 92 % (see [Coverage](#coverage)). |
 | `pluginval (windows)` | pluginval 1.0.4, pinned by hash, passes the example EQ's VST3 bundle at strictness level 5 without a GUI, run in the validator's own process. It does not show what a real host does with it. |
 | `vst3 validator (windows)` | The Steinberg validator, built from the VST3 SDK at a pinned commit, passes the same bundle. |
@@ -62,6 +68,7 @@ file runs it.
 | `loom models` | The lock-free hand-offs are correct under every interleaving their atomics allow, and `scripts/run-loom.py` fails unless every model ran (section 3). |
 | `page`: Typecheck, Test | The page compiles against the committed generated types, and its tests pass. |
 | `JUCE adapter` (macOS, on a change to `adapters/`, `crates/host/` or `examples/eq/`, nightly, on dispatch) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
+| `JUCE adapter` (Windows) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `vst3 validator (windows)` lane passes Seam's own. |
 | Nightly: `miri` | `seam-host`'s tests, the core crates' unit tests and some integration tests find no undefined behaviour under Stacked Borrows and Tree Borrows (see [Miri](#miri)). |
 | Nightly: `rtsan` (Linux) | A canary that allocates inside a marked call aborts, and the allocation gates and the gate matrix pass under RealtimeSanitizer. Not run yet; see [Real-time sanitizer](#real-time-sanitizer). |
 | Nightly: `fuzz` | Each of four `cargo-fuzz` targets ran ten minutes with no crash, no panic and no broken fixpoint (see [Fuzzing](#fuzzing)). |
@@ -121,7 +128,9 @@ Every buffer it touches has a fixed capacity, sized when the plugin is activated
 on the main thread and never grown.
 
 Allocation is checked by test. Each crate with audio-thread code has a test
-target named `alloc_gate` (`tests/alloc_gate.rs`) that:
+target named `alloc_gate` (`tests/alloc_gate.rs`): `seam-host`, `seam-learn`,
+`seam-params`, `seam-ump`, and the example EQ and gain. `seam-testkit` has one
+too, which checks the gate itself. Each:
 
 1. installs the counting allocator once: `seam_testkit::install_alloc_gate!();`
 2. builds and activates what it tests outside the gate, where allocating is
@@ -154,9 +163,11 @@ An exporter holds the guard around everything its process call runs. So every
 test that drives the plugin through an exporter fails at the first lock on the
 audio path. This proves only what the tests execute. It cannot see a lock on a
 path no test reaches, a lock taken inside a dependency, or a system call. In a
-release build there is no mark and no check (`tests/audio_thread.rs` pins both).
-No CI lane has yet checked system calls mechanically; the nightly `rtsan` lane
-is written to (see [Real-time sanitizer](#real-time-sanitizer)).
+release build there is no mark and no check:
+`crates/params/tests/audio_thread.rs` pins both, and `rust`: Test (release)
+runs it there. No CI lane has yet checked system calls mechanically; the
+nightly `rtsan` lane is written to (see [Real-time
+sanitizer](#real-time-sanitizer)).
 
 The audio-path modules also refuse some clippy restriction lints, by `deny`
 attributes on the module or the function. The lints are `indexing_slicing`,
@@ -239,10 +250,11 @@ The parameter store's audio-side reads and writes (`crates/params/src/set.rs`,
 `host_events.rs`), learn's audio side (`crates/learn/src/audio.rs`) and the UMP
 crate's event list and readers (`crates/ump/src/lib.rs`, `packets.rs`,
 `voice.rs`) carry marks of their own. The lane runs every crate's allocation
-gate, so those crates' own gates are checked under the sanitizer too, as well as
-through the exporters. The plugin's processor runs below the exporters' marks in
-the lane's tests. A processor's `process` is a trait method, so a plugin would
-mark its own impl, as the example EQ's block could.
+gate, so the gates of the parameters, learn and UMP crates check those marks
+under the sanitizer too, as well as through the exporters. The plugin's
+processor runs below the exporters' marks in the lane's tests. A processor's
+`process` is a trait method, so a plugin would mark its own impl, as the
+example EQ's block could.
 
 A panic on the audio path allocates its payload, and std's hook writes it to
 stderr, inside a marked call, so the sanitizer reports it. It happens only
@@ -260,13 +272,27 @@ condition with `wait_until`. A fixed sleep never stands in for an ordering.
 Timeouts (`PATIENCE`, ten seconds) only bound a hang; running out fails the
 test.
 
-One test sleeps, `a_load_waits_while_a_replay_holds_loads_off`
-(`crates/undo/tests/restore.rs`): it waits 20 ms to check that a load has not
-yet written while a replay holds loads off. What it checks is that something
-does not happen, so there is nothing to wait for. The check is bounded, so a
-slow machine can only make it pass wrongly, never fail wrongly. The
-deterministic pin of that side is the unit test in
-`crates/undo/src/history/tests.rs`.
+A test waits a fixed time only where there is nothing to wait for: it checks
+that something does not happen, or it runs a real timer.
+
+- `a_load_waits_while_a_replay_holds_loads_off`
+  (`crates/undo/tests/restore.rs`) waits 20 ms to check that a load has not yet
+  written while a replay holds loads off. The deterministic pin of that side is
+  the unit test in `crates/undo/src/history/tests.rs`.
+- The timer's own tests (`crates/host/src/engine/timer/tests.rs`) and the VST3
+  exporter's timer tests (`crates/host/src/vst3/tests.rs`) run the thread's
+  message loop or run loop for a set time (`pump`), so a real timer ticks, and
+  then check that no tick comes after it stops. On Windows, `stopped`
+  (`engine/timer.rs`) waits four timer periods before it asks whether a
+  message is due.
+- `a_host_on_three_threads_with_real_ticks_and_points_at_offsets`
+  (`crates/host/src/vst3/tests.rs`) paces its audio thread's blocks 250 µs
+  apart while it waits, ten seconds at most, for one to hear the main thread's
+  tick.
+
+Every wait is bounded. A slow machine can only make a check that something does
+not happen pass wrongly, never fail wrongly; the one test that counts ticks
+asks for 5 in 400 ms, where about 25 are due.
 
 The exporters' test hosts drive an instance as impolitely as real hosts do:
 
@@ -290,8 +316,10 @@ Two tools cover what real threads cannot make happen on demand:
   thread, with no timing.
 - **A model checker.** A lock-free protocol gets a `loom` model that explores
   every interleaving its atomics allow. `scripts/run-loom.py` finds the models
-  in the source and counts them, by crate, module and name, and fails unless
-  each one ran. This list says what each checks, and a new model adds a line:
+  in every Rust file of the repository and counts them, by crate, module and
+  name, and fails unless each one ran. A model outside the `src/` of the
+  lane's crates (params, learn and host) fails it too, since the lane would
+  never run it. This list says what each checks, and a new model adds a line:
   - learn's staging slot: the newest staged value is the last one taken
     (`crates/learn/src/target.rs`);
   - learn's capture staging: a poll racing two blocks, an NRPN high byte and
@@ -419,7 +447,8 @@ checks listed here fail when they find nothing to check, and when their input is
 not in the format they parse:
 
 - `run-loom.py` fails when it finds no model, when a model lacks the `loom_`
-  prefix its filter needs, and when a model in the source did not run;
+  prefix its filter needs, when a model lies where the lane does not run it,
+  and when a model in the source did not run;
 - `check-comment-tags.py` and `check-decision-index.py` fail when the decision
   record yields no ids, and the index when it has no heading;
   `check-comment-tags.py` also when no tracked Rust file reaches the Rust
@@ -429,7 +458,7 @@ not in the format they parse:
   and when rustdoc's JSON is a format version it was not written for;
 - `cargo xtask wrap` fails when `crates/`, `examples/` or `xtask/` holds no
   Rust file;
-- `check-core-deps.py` fails on a workspace crate it has no tier for, and on a
+- `check-core-deps.py` fails on a workspace crate it has no layer for, and on a
   table entry that is no crate;
 - `check-shape-append-only.py` fails on a shape file with no version line, in
   either revision;
@@ -523,13 +552,13 @@ fails on.
 ## Doc examples
 
 `scripts/check-example-coverage.py` reads nightly rustdoc's JSON for every
-library crate (`seam-host` with its `vst3`, `cabi` and `test-host` features,
-`seam-bridge` with `typescript`), walks it from the crate root through
-public modules and re-exports as a user's `use` does, and fails below 100 % in
-any crate. Every struct, enum, trait, function and macro a user can reach has a
-Rust code block that is not marked `ignore`, `text` or `compile_fail`.
-`#[doc(hidden)]` items are skipped. The examples themselves run in `rust`: Test,
-as doc tests.
+library crate under `crates/` (`seam-host` with its `vst3`, `cabi` and
+`test-host` features, `seam-bridge` with `typescript`), walks it from the crate
+root through public modules and re-exports as a user's `use` does, and fails
+below 100 % in any crate. Every struct, enum, trait, function and macro a user
+can reach has a Rust code block that is not marked `ignore`, `text` or
+`compile_fail`. `#[doc(hidden)]` items are skipped. The examples themselves run
+in `rust`: Test, as doc tests.
 
 The same script also reports, and does not gate, how many public methods each
 crate has with an example and without. A method is a public function in an
