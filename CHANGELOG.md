@@ -1,0 +1,90 @@
+# Changelog
+
+All notable changes to Seam are recorded here. The format follows [Keep a
+Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic
+Versioning](https://semver.org/spec/v2.0.0.html): before 1.0, a minor version
+may break the API.
+
+## [Unreleased]
+
+Nothing is released yet. Not built: the CLAP exporter, the native side that
+answers the page, the glue that opens the page in a plugin window, and MIDI
+delivered to a plugin through an exporter.
+
+### Added
+
+- `seam-params`: parameters declared once and checked by a builder, with one
+  atomic store per parameter in real units. Every write snaps to the parameter's
+  kind, never stores a non-finite value, and names its origin, which alone
+  decides whether the host is told, a gesture opens, undo records and surfaces
+  show it. Gestures nest and count, a program write is an edit or a sync, and
+  change counters, watches and the host event drain carry changes. A parameter's
+  value and origin share one atomic word, and `ParamSet::read` and
+  `Value::read` return a `Reading`: the count, the value and the origin taken
+  together, as `AudioParams` does on the audio thread. Plain values and lists
+  hold state that is not a parameter.
+- `seam-undo`: an undo history that polls once per tick. One gesture is one
+  step, transactions group steps, and host automation, restores and learned
+  writes never record. A restore clears the history, and the history is bounded
+  by the bytes its steps keep alive. `undo`, `redo` and `jump` return false
+  when there is nothing to replay, or when a restore stops the walk, which
+  clears the history. Enrolling a value or a list does not tick, unlike
+  enrolling a parameter, so another value's writes on either side of it
+  coalesce into one step.
+- `seam-session`: saved state beyond parameters, one keyed section per
+  participant. A restore stores every section at once and applies on a later
+  tick; a participant whose apply fails or panics keeps its saved section, and
+  sections no participant claims are saved back. A participant held up by its
+  own borrow is captured at the next tick, and one whose apply panicked is
+  faulted until an apply succeeds. A capture nested too deep, or too large for
+  the saved block to load back, is refused and the previous one kept, whether
+  the participant registered before the saved state was made or after.
+- `seam-learn`: MIDI learn over MIDI 1.0 and 2.0 packets. Arm a target, move a
+  controller, and the mapping drives the target from the audio thread through a
+  published snapshot that never waits, locks or frees. Notes, NRPNs, 14-bit
+  controller pairs, curves, reservations and a saved `midiLearn` section. Half
+  of a 14-bit pair waits at least a UI tick and a whole audio block for its
+  other half. `Mapping` and `Config` are `non_exhaustive`, built with
+  `Mapping::new`, `with_curve` and `as_coarse`.
+- `seam-ump`: Universal MIDI Packets: a fixed-capacity event list per block, and
+  the channel voice messages read from it and written back.
+- `seam-host`: the `Plugin` and `Processor` traits and `PluginInfo`, and
+  `SavedState`, the saved block as JSON. A load keeps unknown parameter ids and
+  top-level keys, migrates an older block, and refuses what is past fixed
+  limits, a block that would save back past the size limit included; a setup
+  past the block size limit is built for the limit. A plugin
+  that is `Send` is lent to each main-thread call in turn, and a call that meets
+  another thread's loan waits a bounded time before it is refused.
+- The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
+  main-thread timer.
+- The C interface (`export_cabi!`) and its generated header, `include/seam.h`,
+  which asserts every struct's layout as Rust laid it out.
+- One exporter core under both. The core catches every panic at the boundary,
+  counts and reports faults, and flushes denormals around each block. It stages
+  each piece of a block's channels in place, and a model of every way a host may
+  hand its buffers checks that. Test hosts drive a plugin through either
+  exporter.
+- `seam-bridge`: the page protocol, versioned, with its TypeScript generated
+  from the Rust types and a check that the version moves when a message's shape
+  does. Decoding refuses a position outside 0 to 1, from either side.
+- `page`: React hooks (`useParam`, `useEvent`, `useCommand`) over a pluggable
+  transport. A held queue keeps the writes made before the native side answers
+  and sends them in the order the page made them. A native message of the wrong
+  shape fails the client visibly.
+- `adapters/juce`: a generic JUCE adapter that builds any Seam plugin as a JUCE
+  plugin, through `seam.h` and `seam_add_juce_plugin`, for the formats JUCE
+  builds. Checked as VST3 on Windows; CI builds VST3 and AU on macOS.
+- `examples/gain`: a gain in dB with a bypass, a mode of three names, an
+  undoable label saved with the plugin, and a gain MIDI learn can drive, as a
+  VST3 module. [docs/first-plugin.md](docs/first-plugin.md) walks through it.
+- `examples/eq`: an EQ of six biquad bands and an output gain, as a VST3 module
+  or a static library for the adapter.
+- `xtask`: `cargo xtask gen` writes every generated file, and CI fails when one
+  drifts. `cargo xtask wrap` holds comments and docs to 80 columns.
+- `bench`: the comparison of the example EQ against the same EQ in plain JUCE,
+  with its reports in `bench/reports`.
+- Guarantees the tests keep: the audio path never allocates (allocation gates),
+  the lock-free hand-offs pass `loom` models, `unsafe` lives only in the
+  exporters' boundary modules, the core crates build with no window, WebView or
+  plugin-format dependency, and fuzz targets cover the UMP reader, the page
+  messages, the saved block and the C interface's state.

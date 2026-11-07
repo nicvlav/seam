@@ -12,8 +12,8 @@ repository = "https://github.com/nicvlav/seam"
 readme = "README.md"
 publish = false
 
-# Three tiers (core, projections, shells) as seven layers, each crate
-# depending only on lower ones:
+# ARCHITECTURE.md's three tiers (core, projections, shells), as seven layers,
+# each crate depending only on lower ones:
 #   0  seam-testkit (test tools)
 #   1  seam-params, seam-ump
 #   2  seam-undo, seam-session
