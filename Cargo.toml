@@ -22,6 +22,7 @@ publish = false
 #   5  seam-example-eq and seam-example-gain, plugins; 6 xtask
 # The core (layers 1 to 3) builds with no window, WebView or host dependency.
 [workspace.dependencies]
+seam-params = { path = "crates/params" }
 # Tests only.
 seam-testkit = { path = "crates/testkit" }
 

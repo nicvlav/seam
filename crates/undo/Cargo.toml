@@ -1,0 +1,23 @@
+[package]
+name = "seam-undo"
+description = "Undo history over parameters and plain values: one step per gesture, host automation never recorded"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["undo", "redo", "history", "audio", "plugin"]
+categories = ["multimedia::audio", "data-structures"]
+publish.workspace = true
+
+[dependencies]
+seam-params.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+seam-testkit.workspace = true
+
+[lints]
+workspace = true
