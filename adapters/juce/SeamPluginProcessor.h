@@ -68,11 +68,12 @@ public:
     bool isMidiEffect() const override { return JucePlugin_IsMidiEffect != 0; }
     double getTailLengthSeconds() const override;
 
-    // One program, none offered to choose.
+    // One program, none offered to choose. It takes the plugin's name, since
+    // a VST3 host lists programs by name.
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    const juce::String getProgramName (int) override { return JucePlugin_Name; }
     void changeProgramName (int, const juce::String&) override {}
 
     // Any thread but audio.
