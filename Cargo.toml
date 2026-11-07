@@ -26,6 +26,9 @@ seam-params = { path = "crates/params" }
 # Tests only.
 seam-testkit = { path = "crates/testkit" }
 
+# `float_roundtrip` parses every f64 to the nearest value, so a save, a load
+# and a save write the same digits; without it about one in ten drifts a bit.
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 # Tests only: property tests. CI raises the case count on pushes to main
 # (PROPTEST_CASES). No forking or timeouts, which need extra crates.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

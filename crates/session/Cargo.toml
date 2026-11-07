@@ -1,0 +1,23 @@
+[package]
+name = "seam-session"
+description = "Saved state beyond parameters: keyed sections, restore now and apply later, late participants and the stale-apply stamp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "state", "persistence", "preset"]
+categories = ["multimedia::audio", "encoding"]
+publish.workspace = true
+
+[dependencies]
+seam-params.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+seam-testkit.workspace = true
+
+[lints]
+workspace = true

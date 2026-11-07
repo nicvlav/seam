@@ -388,6 +388,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "seam-session"
+version = "0.1.0"
+dependencies = [
+ "seam-params",
+ "seam-testkit",
+ "serde_json",
+]
+
+[[package]]
 name = "seam-testkit"
 version = "0.1.0"
 dependencies = [
