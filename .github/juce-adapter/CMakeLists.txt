@@ -1,7 +1,11 @@
 # What the JUCE adapter workflow builds: the example EQ through
 # adapters/juce, as the formats the adapter ships on macOS, for both Apple
-# architectures.
+# architectures, and as a VST3 on Windows.
 cmake_minimum_required(VERSION 3.25)
+
+# The same C runtime as Rust's MSVC builds: the dynamic one.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
 project(seam_adapter_check VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,7 +24,12 @@ FetchContent_Declare(juce
 FetchContent_MakeAvailable(juce)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../../adapters/juce/SeamJuce.cmake)
+if(APPLE)
+    set(formats VST3 AU)
+else()
+    set(formats VST3)
+endif()
 seam_add_juce_plugin(SeamAdapterCheck
     PACKAGE seam-example-eq
     SETTINGS "${CMAKE_CURRENT_LIST_DIR}/../../examples/eq/seam-juce.cmake"
-    FORMATS VST3 AU)
+    FORMATS ${formats})

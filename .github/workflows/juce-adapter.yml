@@ -1,8 +1,8 @@
 name: JUCE adapter
 
 # The example EQ built through adapters/juce for arm64 and x86_64, at the JUCE
-# commit bench/ pins. Runs when the adapter or the host crate changes, every
-# night, and on demand.
+# commit bench/ pins, and its Windows VST3 through the Steinberg validator.
+# Runs when the adapter or the host crate changes, every night, and on demand.
 on:
   push:
     branches: [main]
@@ -71,3 +71,51 @@ jobs:
             esac
           done <<< "$binaries"
           test "$status" = 0
+
+  # The adapter's Windows VST3 through the same validator, at the same pinned
+  # SDK commit, as ci.yml's `vst3-validator` lane. Keep the two pins and the
+  # cache key in step: the lanes share one built validator.
+  vst3-validator:
+    name: vst3 validator (windows)
+    runs-on: windows-2025
+    env:
+      VST3_SDK_TAG: v3.8.1_build_84
+      VST3_SDK_COMMIT: 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: JUCE commit
+        shell: bash
+        run: |
+          commit="$(grep -oE 'GIT_TAG [0-9a-f]{40}' bench/CMakeLists.txt | head -1 | cut -d' ' -f2)"
+          test -n "$commit"
+          echo "JUCE_COMMIT=$commit" >> "$GITHUB_ENV"
+      - name: Configure
+        run: cmake -S .github/juce-adapter -B build "-DSEAM_CHECK_JUCE_COMMIT=$env:JUCE_COMMIT"
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: The validator, if built before
+        id: cached
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vst3sdk-build/bin/Release
+          key: vst3-validator-${{ env.VST3_SDK_COMMIT }}
+      - name: Build the validator
+        if: steps.cached.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$VST3_SDK_TAG" --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+          test "$(git -C vst3sdk rev-parse HEAD)" = "$VST3_SDK_COMMIT"
+          cmake -S vst3sdk -B vst3sdk-build -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
+          cmake --build vst3sdk-build --config Release --target validator --parallel 4
+      - name: Validate
+        shell: bash
+        run: |
+          bundle="$(find build -type d -path '*_artefacts*' -name '*.vst3' | head -1)"
+          test -n "$bundle" || { echo "no VST3 bundle was built"; exit 1; }
+          echo "$bundle"
+          vst3sdk-build/bin/Release/validator.exe "$bundle"
