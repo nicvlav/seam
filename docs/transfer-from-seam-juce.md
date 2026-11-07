@@ -72,12 +72,12 @@ that.
 | D36 | [In what order does one undo tick record the changes it sees? (U5, U14)](#d36-the-order-one-undo-tick-records) | In the order they happened: every gesture record, plain value commit and list verb takes a number from one sequence on the `RestoreClock`, and the tick records by it. | decided |
 | D37 | [Does the history keep enrolled values and lists alive? (U13)](#d37-whether-the-history-keeps-enrolled-values-alive) | No. A tracker holds its value or list by a `Weak` handle, so dropping the last handle frees it, and the history forgets the enrollment at its next tick. | decided |
 | D38 | [Do parameters and lists carry the origin of their newest write? (U10)](#d38-the-origin-of-a-newest-write) | Yes, beside the change counter, as a plain value does. A value derived from a parameter or list passes the origin on, and a derived change records nothing. | to confirm |
-| D39 | [What stops a load on another thread landing between a replay's check of the restore clock and its write? (U16, H3)](#d39-a-load-between-a-replays-check-and-its-write) | A lock in the `RestoreClock`. A `Load` takes it for each parameter write, and each replay step that writes parameters holds it across its check of the stored count and its write. | decided |
+| D39 | [What stops a load on another thread landing between a replay's check of the restore clock and its write? (U16, H3)](#d39-a-load-between-a-replays-check-and-its-write) | A lock in the `RestoreClock`. A `Load` takes it for each parameter write and moves the stored count under it, and each replay step that writes parameters holds it across its check of the stored count and its write, so an undo never writes over a loaded value. | to confirm |
 | D40 | [How many undo histories may one `UiParams` have? (U1)](#d40-one-undo-history-per-uiparams) | One. A second history over the same handle is refused with `HistoryError::HistoryExists`. | to confirm |
 | D41 | [A list step replays while a verb from another thread waits for the tick: what then? (U17)](#d41-a-list-step-replaying-against-a-waiting-verb) | The step drops the waiting verb, which then records nothing, and moves the list's generation, so every step recorded before replays as nothing. | decided |
 | D42 | [Does a change another thread makes while a tick runs keep its order? (D36, U14)](#d42-order-across-ticks) | Yes. The tick takes a number from the sequence as it starts and records only changes numbered before it; later ones wait for the next tick, in order. | decided |
 | D43 | [Does a change derived from a recorded change record a step of its own? (U10, D38)](#d43-a-derived-change-records-nothing) | No. `Value::set_from` and `List::derived` never record, whatever origin they pass on, so one user action stays one step. | decided |
-| D44 | [A participant tells the session it changed from its own method, while its owner holds it mutably: what then? (S4)](#d44-a-participant-that-changes-while-its-owner-holds-it) | `Registration::changed` marks the registration held up, and the next `SessionUi::tick` captures it; a save shows the change one tick later. | decided |
+| D44 | [A participant tells the session it changed from its own method, while its owner holds it mutably: what then? (S4)](#d44-a-participant-that-changes-while-its-owner-holds-it) | `Registration::changed` marks the registration held up, and the next `SessionUi::tick` captures it before its apply pass, a tick made inside a held-up capture included; a save shows the change one tick later. | to confirm |
 | D45 | [What happens to registrations when the `SessionUi` they were made through drops? (S2)](#d45-registrations-when-a-sessionui-drops) | They end, as if each `Registration` had dropped: their sections stay in every save, their keys are free for a later handle, and `connected` turns false. | decided |
 | D46 | [What does a derived write do to a plain value's open gesture? (D43, U15, U16)](#d46-a-derived-write-and-a-plain-values-open-gesture) | By its origin. A restore or a replay rebases the gesture; a write derived from a user's or the plugin's own change joins it; one derived from a host or learned change leaves it alone. | decided |
 | D47 | [When does a lone NRPN high byte settle as coarse? (L3, D30)](#d47-when-a-lone-nrpn-high-byte-settles-as-coarse) | When a learn poll finds the same unsettled capture an earlier poll found, and a whole audio block after the one that staged it has ended. A second high byte with no low byte between still settles it at once on the audio thread. | to confirm |
@@ -98,13 +98,13 @@ that.
 | D62 | [What shape is the C interface the JUCE adapter is driven by? (H5, D51, D60)](#d62-the-c-interface-for-the-juce-adapter) | One exported symbol, `seam_plugin`, answering a table of function pointers, as CLAP's entry point does: the plugin's layouts and every call into an instance, each with the thread it may run on. No MIDI passes yet; it arrives as UMP both ways with the exporters' MIDI input. | to confirm |
 | D63 | [How is the C header kept true to the Rust side? (D27)](#d63-keeping-the-c-header-true) | Seam's own generator writes `crates/host/include/seam.h` from the Rust declarations, and the header asserts every struct's size and every field's offset as Rust laid them out. | to confirm |
 | D64 | [How does the JUCE adapter build a plugin? (H5, D18)](#d64-how-the-juce-adapter-builds-a-plugin) | It links the plugin crate as a static library built with only its `cabi` feature. `cargo xtask gen` writes a `seam-juce.cmake` per plugin, and `seam_add_juce_plugin` runs cargo and adds the adapter's one processor class. | to confirm |
-| D65 | [What does a host see of a plugin through JUCE? (D31, D53, D58, C4)](#d65-what-a-host-sees-through-juce) | What JUCE 9 makes of it, as of the JUCE EQ; checked with VST3 on Windows. Parameter ids are JUCE's hash of the key, not D31's. | to confirm |
+| D65 | [What does a host see of a plugin through JUCE? (D31, D53, D58, C4)](#d65-what-a-host-sees-through-juce) | What JUCE 9 makes of it, as of the JUCE EQ; checked with VST3 on Windows. Parameter ids are JUCE's hash of the key, not D31's, and the one program has the plugin's name. | to confirm |
 | D66 | [What does a load do with bytes after the block, and is the host told that a load failed? (H2)](#d66-bytes-after-the-block-and-a-failed-load) | Trailing NUL bytes are trimmed and the block loads, and JSON whitespace around the object loads too; any other byte after the object makes the block unrecognised. A load that fails is answered as failed, except through JUCE, whose `setStateInformation` answers nothing, so the adapter cannot tell its host. | to confirm |
 | D67 | [How are the rules checked that keep locking types off the audio thread? (P6, D39)](#d67-checking-the-audio-thread-locking-rule) | By a debug-build mark, `seam_params::audio_thread`: a per-thread depth an exporter raises around everything its `process` call runs, and every call that locks asserts the mark is absent. | decided |
 | D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, the native side of the page protocol, automation smoothing and splitting, a derive that declares each parameter once, and semver checks. | decided |
 | D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. | to confirm |
 | D70 | [How does learn read MIDI 1.0's paired controllers and parameter numbers where MIDI 1.0 leaves room? (L2, L3, D30)](#d70-learns-reading-of-midi-10-pairs) | Per group and channel, the two NRPN address bytes pair in either order, 127 with 127 selects nothing, and data increment and decrement are never learned. A controller 32 to 63 right after the controller 32 below it learns that one as a 7-bit controller. A learned pair plays at 7 bits: 14-bit controller playback is open, to be built when an exporter delivers MIDI. | to confirm |
-| D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn clears every mapping and held entry, ends the arm, closes open bursts and publishes the empty table, then fails the apply, so the session keeps the section. | to confirm |
+| D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn ends the arm, clears every mapping and held entry and publishes the empty table, then closes open bursts (D82) and fails the apply, so the session keeps the section. | to confirm |
 | D72 | [How much may a host ask of an instance? (H2, D59, D62)](#d72-how-much-a-host-may-ask) | Fixed limits: a processor is built for at most 65,536 frames a block, a setup that promises more being built for that many, a saved block is at most 64 MiB, and a block's automation has room for 8 points per parameter on average, shared by its queues. | to confirm |
 | D73 | [What does an activation make of what the host's setup leaves open? (D58, D59, D62)](#d73-what-an-activation-makes-of-an-open-setup) | An activation while active builds a fresh processor and hands the old one back to the plugin, in both exporters. A setup whose block size is 0, or negative in VST3, takes 1,024 frames. | to confirm |
 | D74 | [Which plugins and platforms does `export_vst3!` refuse to build? (D53, D58)](#d74-what-export_vst3-refuses-to-build) | A main bus wider than stereo, any platform but Windows and macOS, a plugin that declares no layout, and a crate built with `panic = "abort"`. | to confirm |
@@ -114,6 +114,9 @@ that.
 | D78 | [How do a page and a native side of different protocol versions find out? (B1, B4)](#d78-protocol-versions) | The native side answers every `ready`: with a snapshot when it speaks the page's version, and otherwise with a `reject` carrying its own version and a reason, which fails the page. No native side exists yet; the decoding and the page's half are built. | to confirm |
 | D79 | [What does the page client do while the native side has not answered, and when a hook's command changes? (B1, B5)](#d79-the-page-client-before-the-native-side-answers) | The client sends `ready` again every second until a snapshot or a reject arrives, it fails, or it is disposed. `useCommand` keys its pending count and its last result and error by the command's name. The page holds its writes until it is answered, so each `ready` may start a new page session. | to confirm |
 | D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | `SavedState::with_migration(version, migrate)`: a block of an older version is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads. A save keeps the unknown parameter and top-level keys the older build does not read. | to confirm |
+| D81 | [Does a late apply made while a panic unwinds leave the session owing a pass? (S6, S10, D55)](#d81-a-registration-made-while-a-panic-unwinds) | No. Only a panic that began inside a pass or a late apply leaves the pass owed, for the next tick to run again; a registration made from a destructor during another panic owes none, so it clears no undo history. | to confirm |
+| D82 | [When do a restore and an unmap run a learn target's own code? (L8, L9, D54, D71)](#d82-when-learn-runs-a-targets-own-code) | Last: after learn has settled its table, published it and told the session, so a target whose `end` panics leaves no earlier mapping routing, in learn or on the audio side, and learn usable. | to confirm |
+| D83 | [Do a page control's `onDrag` and `setValue` differ? (B2)](#d83-a-controls-drag-and-one-shot-set) | Only in the gesture `onDragStart` and `onDragEnd` put around a drag: they are one function, so a `setValue` during a drag joins it. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -463,7 +466,8 @@ frame count, the events in, and an events-out list whose capacity
 `ProcessSetup::max_out_events` fixes at activation (past it, dropped and
 counted). A sidechain or transport joins `Block` later without changing the
 trait. `PluginInfo::midi_output` declares the output to the host. Parameter
-changes still reach the host through the exporter, never this list.
+changes still reach the host through the exporter, never this list. No exporter
+sends the list's events yet, as none delivers MIDI in (D59, D62).
 
 ### D24. Answering MIDI-CI
 
@@ -690,11 +694,13 @@ replay's check of the restore clock and its write? (U16, H3) Not checked against
 C++.
 
 **Rust.** A lock in the `RestoreClock`. A `Load` takes it for each parameter
-write, and each replay step that writes parameters holds it across its check of
-the stored count and its write. So either the replay's write lands before the
-load's, or the replay sees the load's store and stops, and the walk clears the
-history. Without it, an undo could store one pre-load value over a loaded one,
-and nothing re-applies parameters after a load (S13).
+write and moves the clock's stored count under it, and each replay step that
+writes parameters holds it across its check of the stored count and its write.
+So either the replay's write lands before the load's, or the replay sees the
+load's write and stops, and the walk clears the history. That holds for a step
+recorded after the load began, too. Without it, an undo could store one
+pre-load value over a loaded one, and nothing re-applies parameters after a
+load (S13).
 
 Only parameter steps hold it: a load writes only parameters, and a parameter
 write takes no other lock, so it is a leaf lock.
@@ -766,7 +772,10 @@ re-captured at once, on the message thread (`ZoomPanel::setZoom` calls
 
 **Rust.** `Registration::changed` cannot borrow the participant then, so it
 marks the registration held up and the next `SessionUi::tick` captures it; a
-save shows the change one tick later.
+save shows the change one tick later. A tick captures every participant held up
+before it runs an apply pass, and so does a tick made from inside one of their
+captures, so a pass that ends a held-up registration keeps its change under its
+key.
 
 **Alternatives.** The alternative was to return whether it captured and require
 callers to call it after the borrow ends.
@@ -1053,8 +1062,9 @@ activation's included), and `deactivate`, which takes the processor back on the
 main thread so what it holds is never freed on the audio thread; only a host
 that releases an instance on another thread gets it dropped there instead (D59).
 
-`Processor::process` returns a `Status`, CLAP's process status, which VST3
-ignores. What every exporter does without being asked: a declared bypass
+`Processor::process` returns a `Status`, the process status a CLAP exporter
+is to read once one is built (D68); no built exporter acts on it, and VST3
+ignores it. What every exporter does without being asked: a declared bypass
 parameter is the host's bypass and no exporter adds a hidden one (JUCE's VST3
 wrapper did); one program, none offered to choose; 32-bit float only. Deferred:
 whether the host is rendering offline or in real time. `ProcessSetup` has no
@@ -1371,11 +1381,13 @@ those, to check with AU in Logic and Pro Tools (C4).
 
 The host's state is Seam's block followed by JUCE's own trailer, so a state
 saved through JUCE does not load into Seam's native build (H2). A text that
-means no value answers the current one, since JUCE has no way to say none. The
-adapter ticks the plugin from a `juce::Timer` at 60 Hz, editor open or not
-(D53), on JUCE's message thread, where a plugin that is `Send` is lent to each
-tick as on any other thread (D62); its constructor does not assert that it runs
-there.
+means no value answers the current one, since JUCE has no way to say none. A
+host's text reaches the plugin's parser as the UTF-8 JUCE holds, read in place
+up to its first NUL. The one program a plugin declares (H5) has the plugin's
+name, as the Steinberg validator requires of a program list. The adapter ticks
+the plugin from a `juce::Timer` at 60 Hz, editor open or not (D53), on JUCE's
+message thread, where a plugin that is `Send` is lent to each tick as on any
+other thread (D62); its constructor does not assert that it runs there.
 
 Through JUCE's VST3 hosting (`bench/scripts/hosted.py`), the adapter's EQ plays
 the parity script bit for bit against the Rust EQ driven directly, at 44.1, 48
@@ -1520,11 +1532,11 @@ bytes; and a Reset All Controllers that only deselects, keeping the bytes.
 **Question and C++ Seam.** What does learn route after a restore whose
 `midiLearn` section it cannot read? (L9, D14, H2) Cleared the table (L9).
 
-**Rust.** Nothing from before it. Learn clears every mapping and held entry,
-ends the arm, closes open bursts and publishes the empty table, then fails the
-apply, so the session keeps the section for a build that reads it (D14), and the
-same block always gives the same routing (H2). Learn is the one participant that
-changes its state before failing an apply.
+**Rust.** Nothing from before it. Learn ends the arm, clears every mapping and
+held entry and publishes the empty table, then closes open bursts (D82) and
+fails the apply, so the session keeps the section for a build that reads it
+(D14), and the same block always gives the same routing (H2). Learn is the one
+participant that changes its state before failing an apply.
 
 **Alternatives.** The alternative was to keep the routing, as D14 reads for any
 other participant.
@@ -1755,7 +1767,9 @@ reject arrives, it fails, or it is disposed, since the native side may not be
 listening yet; the native side answers a repeat as it answers the first.
 `useCommand` keys its pending count and its last result and error by the
 command's name, so a change of name starts clean and a late reply to the old
-name never shows as the new one's.
+name never shows as the new one's. The client is answered once it is ready or
+has failed, so the repeats start only when neither came during the first
+`ready`'s send.
 
 The page holds every write and call until it is answered, so no write comes
 before a repeated `ready`. The native side, when built (D68), may therefore
@@ -1797,6 +1811,61 @@ carries its own schema (L9).
 section, or none until a plugin needs one.
 
 [History](decision-history.md#d80-upgrading-an-older-saved-block)
+
+### D81. A registration made while a panic unwinds
+
+**Question and C++ Seam.** Does a late apply made while a panic unwinds leave
+the session owing a pass? (S6, S10, D55) Not applicable: C++ had no panics.
+
+**Rust.** No. A pass or a late apply that a panic unwinds did not finish, so the
+session owes the pass again and the next tick runs it, which keeps a later
+restore from being stuck. Only a panic that began inside it counts. A
+registration made from a destructor while another panic unwinds runs its late
+apply there and owes nothing, since a pass owed for nothing would mark a
+restore completed that never came and clear every undo history (S10). A panic
+inside that late apply aborts, as any panic does while another unwinds.
+
+**Alternatives.** The alternative was to owe a pass whenever one ended during a
+panic, which clears every history after such a registration.
+
+[History](decision-history.md#d81-a-registration-made-while-a-panic-unwinds)
+
+### D82. When learn runs a target's own code
+
+**Question and C++ Seam.** When do a restore and an unmap run a learn target's
+own code? (L8, L9, D54, D71) Not checked against C++.
+
+**Rust.** Last. A restore ends the arm, clears every mapping and held entry,
+empties each target's staging without calling it, then decodes and inserts the
+section's mappings, publishes the table and tells the session. Only then does
+it close each open burst, which runs the target's `end`. An unmap removes the
+mapping, empties its staging, publishes and tells the session before it closes
+the burst, and closing a burst does not depend on the staging. So a target
+whose `end` panics leaves no earlier mapping routing, in learn or on the audio
+side, and learn stays usable.
+
+**Alternatives.** The alternatives were to close the bursts first, which a
+panicking `end` stops with the previous project's mappings in place, or to
+clear first and close before publishing, which leaves the audio side routing a
+table learn no longer lists.
+
+[History](decision-history.md#d82-when-learn-runs-a-targets-own-code)
+
+### D83. A control's drag and one-shot set
+
+**Question and C++ Seam.** Do a page control's `onDrag` and `setValue` differ?
+(B2) Not checked against C++.
+
+**Rust.** Only in the gesture around them. `useParam` returns one function as
+both: it limits the position to 0 to 1, shows it and sends a `set`.
+`onDragStart` and `onDragEnd` put a drag's gesture around the sets made between
+them, so a `setValue` during a drag joins the drag, and one outside a drag is a
+one-shot set, whose gesture the native side is to open (B2).
+
+**Alternatives.** The alternative was two functions, which their names would let
+drift apart.
+
+[History](decision-history.md#d83-a-controls-drag-and-one-shot-set)
 
 ## How to read this
 
@@ -3325,9 +3394,10 @@ last value back over the restored one as one extra host gesture
 (`seam_UndoRecorder.h:834`, `:172`); unenrolled, the restored value stood.
 
 **Rust.** The load bumps the `RestoreClock`'s stored count before its first
-parameter write, so an undo between the parameter writes and the session's store
-replays nothing from before the load (D20). The session's store bumps it again;
-one load moving it twice is harmless, since undo clears on any move.
+parameter write and again with each one (D39), so an undo between the parameter
+writes and the session's store replays nothing from before the load (D20). The
+session's store bumps it again; one load moving it many times is harmless, since
+undo clears on any move.
 
 Pinned by: `state_persistence_test` "a mid-gesture restore: the drag wins, and
 its close may fire one host gesture (enrolled) or none (not enrolled)" (the C++

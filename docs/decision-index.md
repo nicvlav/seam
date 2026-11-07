@@ -667,8 +667,8 @@ move its line here; when a decision gains code, add one.
 [Record section](transfer-from-seam-juce.md#d65-what-a-host-sees-through-juce)
 
 - `.github/workflows/juce-adapter.yml`: module
-- `adapters/juce/SeamPluginProcessor.cpp`: `PluginProcessor::processBlockBypassed`, `PluginProcessor::reportLatency`, `PluginProcessor::timerCallback`
-- `adapters/juce/SeamPluginProcessor.h`: module
+- `adapters/juce/SeamPluginProcessor.cpp`: `PluginProcessor::processBlockBypassed`, `PluginProcessor::reportLatency`, `PluginProcessor::timerCallback`, `getValueForText`
+- `adapters/juce/SeamPluginProcessor.h`: module, `getProgramName`
 - `crates/host/src/cabi/juce.rs`: `juce_param_id`
 - `crates/host/src/plugin.rs`: `Plugin`
 
@@ -836,6 +836,28 @@ move its line here; when a decision gains code, add one.
 
 - `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::version`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
 - test `crates/host/tests/state.rs`: `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `a_newer_builds_block_keeps_its_version_and_values_through_an_older_builds_save`, `a_fresh_state_and_one_that_loaded_an_older_block_save_their_own_version`, `unknown_top_level_keys_are_kept_saved_after_extra_in_key_order_and_replaced_by_the_next_load`, `a_block_within_the_limit_that_would_save_back_past_it_is_refused_and_changes_nothing`
+
+### D81. A registration made while a panic unwinds
+
+[Record section](transfer-from-seam-juce.md#d81-a-registration-made-while-a-panic-unwinds)
+
+- `crates/session/src/ui.rs`: `Passing`, `Passing::new`, `Passing::drop`, `SessionUi::register`, `SessionUi::tick`
+- test `crates/session/tests/session.rs`: `a_pass_a_panic_escapes_is_owed_again_and_later_restores_still_apply`, `a_registration_made_while_unwinding_owes_no_pass`
+
+### D82. When learn runs a target's own code
+
+[Record section](transfer-from-seam-juce.md#d82-when-learn-runs-a-targets-own-code)
+
+- `crates/learn/src/mappings.rs`: `Learn::unmap`
+- `crates/learn/src/mappings/session.rs`: `Learn::restore`
+- test `crates/learn/tests/targets.rs`: `a_target_panicking_as_a_restore_closes_its_burst_leaves_learn_usable`
+
+### D83. A control's drag and one-shot set
+
+[Record section](transfer-from-seam-juce.md#d83-a-controls-drag-and-one-shot-set)
+
+- `page/src/hooks.ts`: `useParam`, `onDrag`, `setValue`
+- test `page/test/useParam.test.ts`: `brackets one drag into begin, set..., end in order`, `setValue outside a drag sends only a set`
 
 ## Parameters
 

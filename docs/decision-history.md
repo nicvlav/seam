@@ -148,6 +148,14 @@ The first form held it for every step, so a list step took the list's lock
 inside it while a thread loading inside `List::with` took them the other way
 round, a deadlock a review found.
 
+The form before moved the stored count only as a load began, so a step
+recorded after that and before one of the load's writes kept a stamp the walk
+still matched, and an undo wrote its pre-load value over the loaded one (a
+probe: a load began over 5, a user's write of 8 recorded, the load wrote 2,
+and an undo answered true and left 5). Since 2026-11-07 each load write moves
+the count under the hold a replay step checks it under. The implementer's
+choice; to confirm.
+
 ### D40. One undo history per UiParams
 
 [The decision](transfer-from-seam-juce.md#d40-one-undo-history-per-uiparams)
@@ -188,6 +196,12 @@ derived from a sync wiped the redo.
 Taken as the review recommended; confirmed by the owner. The first form did
 nothing, so a mapping learned through `Learn::map` would have been lost from
 every save.
+
+The form before kept one flag for every held-up participant, which the outer
+tick cleared before it captured them, so a tick made inside a held-up capture
+ran its pass without capturing the others still held up, and a pass that ended
+one of their registrations lost its change. Since 2026-11-07 a tick reads which
+are held up from their entries. The implementer's choice; to confirm.
 
 ### D45. Registrations when a SessionUi drops
 
@@ -393,6 +407,14 @@ The implementer's choice, amended after the step 4 review and again after the
 The bypass delay answers HB-13. An earlier form of the adapter's constructor
 asserted that it ran on JUCE's message thread.
 
+The program had no name until 2026-11-07, so the Steinberg validator failed the
+adapter's VST3 build ("Programlist000-Program000: has no name", 39 of 40). It
+has the plugin's name since, which leaves VST3's saved state as it was and
+gives AU's preset name metadata the name, for display only. Since the same day
+`getValueForText` hands the parser the text's UTF-8 in place; the first form
+copied it into a `std::string` first, the same bytes. The implementer's
+choice; to confirm.
+
 ### D66. Bytes after the block, and a failed load
 
 [The decision](transfer-from-seam-juce.md#d66-bytes-after-the-block-and-a-failed-load)
@@ -458,6 +480,9 @@ a lone NRPN high byte does, under D47's amended rule.
 
 The first form failed before clearing, so the previous project's mappings went
 on routing MIDI (ST-6). The implementer's choice; to confirm.
+
+Until 2026-11-07 learn closed the open bursts before it published the empty
+table (D82).
 
 ### D72. How much a host may ask
 
@@ -573,6 +598,10 @@ The first form sent `ready` once, so a page whose `ready` came before the native
 side listened waited forever (TL-13), and kept the old command's result, typed
 as the new one's (TL-4). The implementer's choice; to confirm.
 
+The form before kept whether the client was answered as a flag of its own, set
+beside `ready` and the failure. Since 2026-11-07 it is read from those two,
+with the same effect.
+
 ### D80. Upgrading an older saved block
 
 [The decision](transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block)
@@ -595,6 +624,37 @@ they are written again saved past the load limit (a reviewer's probe: 20 MiB of
 (D77).
 
 A version and a hook per session section was the first audit's plan.
+
+### D81. A registration made while a panic unwinds
+
+[The decision](transfer-from-seam-juce.md#d81-a-registration-made-while-a-panic-unwinds)
+
+The first form owed a pass whenever a pass or a late apply ended while its
+thread was unwinding, so a registration made from a destructor during an
+unrelated panic owed one, and the next tick cleared every undo history. Since
+2026-11-07 only a panic that began inside the pass or the late apply owes it.
+The implementer's choice; to confirm.
+
+### D82. When learn runs a target's own code
+
+[The decision](transfer-from-seam-juce.md#d82-when-learn-runs-a-targets-own-code)
+
+The first form closed each target's burst before it cleared the table, so a
+target whose `end` panicked inside a restore left the previous project's
+mappings in place. The form between cleared first but closed before it
+published, so after such a panic learn listed no mapping while the audio side
+still routed the old table (a probe: the gain mapped to controller 7 and a
+panicking target to 8, a burst open on 8, `restore(None)` caught unwinding,
+then controller 7 at 127 still set the gain to 1). Since 2026-11-07 every
+target's code runs after the table is published and the session told, in an
+unmap too. The implementer's choice; to confirm.
+
+### D83. A control's drag and one-shot set
+
+[The decision](transfer-from-seam-juce.md#d83-a-controls-drag-and-one-shot-set)
+
+The first form had two functions with the same body. They are one since
+2026-11-07, the implementer's choice; to confirm.
 
 ## Rules
 
