@@ -735,7 +735,7 @@ move its line here; when a decision gains code, add one.
 [Record section](transfer-from-seam-juce.md#d71-learn-after-an-unreadable-midilearn-section)
 
 - `crates/learn/src/mappings/session.rs`: `Learn::restore`
-- test `crates/learn/tests/saved.rs`: `a_section_of_another_schema_is_refused_and_clears_the_routing`, `a_session_restore_of_another_schema_stops_the_old_routing_and_keeps_the_section`
+- test `crates/learn/tests/saved.rs`: `a_section_of_another_schema_is_refused_and_clears_the_routing`, `a_session_restore_of_another_schema_stops_the_old_routing_and_keeps_the_section`, `a_refused_section_reports_no_change_to_the_session`
 - test `crates/learn/tests/targets.rs`: `a_target_panicking_as_a_restore_closes_its_burst_leaves_learn_usable`
 
 ### D72. How much a host may ask

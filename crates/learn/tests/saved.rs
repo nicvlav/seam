@@ -275,6 +275,28 @@ fn a_session_restore_of_another_schema_stops_the_old_routing_and_keeps_the_secti
     );
 }
 
+#[test]
+fn a_refused_section_reports_no_change_to_the_session() {
+    let set = set();
+    let session = Session::new(&set);
+    let ui = session.take_ui().expect("the first UI handle");
+    let (learn, _audio) = Learn::new(&set, Config::default());
+    let learn = Rc::new(RefCell::new(learn));
+    Learn::attach(&learn, &ui).expect("free");
+    learn
+        .borrow_mut()
+        .map(id(&set, "gain"), Mapping::new(Source::any(Control::Cc(7))))
+        .expect("legal");
+    ui.tick();
+    let saved = session.save();
+
+    let newer = json!({"schema": 2, "mappings": []});
+    assert!(learn.borrow_mut().restore(Some(&newer)).is_err());
+    ui.tick();
+    assert!(learn.borrow().is_empty());
+    assert_eq!(session.save(), saved, "nothing new to save");
+}
+
 struct Logged {
     log: Rc<RefCell<Vec<&'static str>>>,
 }
