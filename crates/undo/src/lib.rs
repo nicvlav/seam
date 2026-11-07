@@ -15,9 +15,10 @@
 //! from another, which its source's step covers.
 //!
 //! A restore clears the history, and a replay stops before its next write
-//! once a restore is stored, so an undo never overwrites a loaded value. The
-//! history is bounded by the bytes its steps keep alive ([`Bound`]), and a
-//! write that changes nothing keeps the redo ([`UndoEq`]).
+//! once a restore is stored, which every load write marks, so an undo never
+//! overwrites a loaded value. The history is bounded by the bytes its steps
+//! keep alive ([`Bound`]), and a write that changes nothing keeps the redo
+//! ([`UndoEq`]).
 //!
 //! The crate has no window, WebView or host dependency.
 //!

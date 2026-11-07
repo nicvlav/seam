@@ -98,6 +98,22 @@ fn an_undo_between_a_loads_writes_and_its_store_replays_nothing() {
 }
 
 #[test]
+fn a_step_recorded_after_a_load_began_never_replays_over_its_write() {
+    // The user's write lands after the load marked its restore stored, a
+    // tick records it, and only then does the load reach the parameter.
+    // That write marks the restore stored again, so the undo replays
+    // nothing.
+    let rig = rig();
+    let load = rig.set.program().load();
+    assert!(rig.ui.write(rig.p, 8.0));
+    rig.history.tick();
+    assert_eq!(rig.history.len(), 1, "recorded after the load began");
+    load.restore(rig.p, 2.0);
+    assert_eq!(rig.history.undo(), Ok(false));
+    assert_eq!(rig.set.value(rig.p), 2.0, "the loaded value stands");
+}
+
+#[test]
 fn steps_recorded_between_a_store_and_its_apply_are_dropped_at_completion() {
     // The pending restore outranks live edits.
     let rig = rig();
@@ -359,7 +375,8 @@ fn a_transaction_open_across_a_clear_or_a_restore_starts_a_new_entry() {
 #[test]
 fn a_load_waits_while_a_replay_holds_loads_off() {
     // The hold a replay step takes keeps a load's write out until the
-    // step has written.
+    // step has written, and the write's mark of the restore with it, so
+    // the step's check under the hold never misses a write that landed.
     let rig = rig();
     let held = rig.clock.hold_loads();
     let set = Arc::clone(&rig.set);
@@ -373,9 +390,15 @@ fn a_load_waits_while_a_replay_holds_loads_off() {
     // side is the unit test in crates/undo/src/history/tests.rs.
     std::thread::sleep(Duration::from_millis(20));
     assert_eq!(rig.set.value(rig.p), 5.0, "the load waits");
+    assert_eq!(
+        rig.clock.stamp().stored(),
+        1,
+        "only the load's start marked"
+    );
     drop(held);
     loader.join().expect("the loading thread");
     assert_eq!(rig.set.value(rig.p), 2.0);
+    assert_eq!(rig.clock.stamp().stored(), 2, "and then its write");
 }
 
 #[test]

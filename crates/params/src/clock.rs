@@ -180,8 +180,11 @@ impl RestoreReader {
         Arc::ptr_eq(&self.clock, &other.clock)
     }
 
-    /// Holds off every [`Load`](crate::Load)'s writes until it drops, so an
-    /// undo never overwrites a loaded value.
+    /// Holds off every [`Load`](crate::Load)'s writes until it drops.
+    ///
+    /// Each load write marks a restore stored under this hold, so a replay
+    /// step that checks the stored count under it and writes only while the
+    /// count is unmoved never overwrites a loaded value.
     ///
     /// Hold it only around parameter writes. They take no other lock, so this
     /// stays a leaf lock; holding it around anything else can deadlock with a

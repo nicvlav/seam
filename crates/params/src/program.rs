@@ -87,8 +87,9 @@ impl ProgramParams {
 
     /// Starts loading a saved state, marking the restore as stored first.
     ///
-    /// An undo between the load's writes and the session's store therefore
-    /// replays nothing from before the load. [`Load`] shows one.
+    /// An undo from then on replays nothing recorded before the load, and
+    /// each write through the [`Load`] marks it again, so nothing recorded
+    /// between its writes replays over them either. [`Load`] shows one.
     pub fn load(&self) -> Load {
         let clock = self.set.clock().writer();
         clock.stored();
@@ -99,9 +100,9 @@ impl ProgramParams {
     }
 }
 
-/// A saved state being loaded, after the restore was marked stored. Make
-/// one per saved state: the stored count moves only when it is made, so
-/// writes through a kept one are not seen as a restore.
+/// A saved state being loaded, after the restore was marked stored. Each
+/// write through it marks the restore stored again, so an undo never writes
+/// over a loaded value.
 ///
 /// # Examples
 ///
@@ -129,8 +130,9 @@ impl Load {
     /// it.
     ///
     /// Every call stores and publishes, with no equality check. It waits
-    /// while an undo replay is writing, so the replay's write never lands
-    /// after it.
+    /// while an undo replay is writing, then marks the restore stored
+    /// before it stores, so the replay's write never lands after it and the
+    /// replay stops before its next one.
     ///
     /// Thread: any but audio.
     ///
@@ -160,6 +162,9 @@ impl Load {
         audio_thread::assert_not_here("Load::restore");
         let value = self.set.decl(id).restore_value(value);
         let _held = self.clock.hold_loads();
+        // Under the hold a replay step checks the count under, so the step
+        // either wrote before this or sees the count moved and writes nothing.
+        self.clock.stored();
         self.set.store(id, value, Origin::Restore);
     }
 }

@@ -402,16 +402,19 @@ fn a_saved_state_refuses_a_session_made_from_another_set() {
 
 #[test]
 fn a_load_marks_the_clock_every_history_of_the_set_reads() {
-    // The stored count moves on the set's own clock.
+    // The stored count moves on the set's own clock: as the load starts, at
+    // each parameter it writes, the ones the block leaves out included, so
+    // no undo replays over one, and at the session's store.
     let rig = rig();
     assert!(rig.session.uses(&rig.set));
     let before = rig.clock.stamp().stored();
     let block = json!({"seamStateVersion": 1, "parameters": {"gain": 1}});
     assert!(rig.state.load(block.to_string().as_bytes()).is_ok());
+    let writes = rig.set.len() as u64;
     assert_eq!(
         rig.clock.stamp().stored(),
-        before + 2,
-        "the load, then the session's store"
+        before + 1 + writes + 1,
+        "the load, each parameter write, then the session's store"
     );
 }
 
