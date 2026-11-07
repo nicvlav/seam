@@ -8,7 +8,7 @@ const TASKS: &str = "  scan              read Rust file paths from stdin, print 
   defs              read Rust file paths from stdin, print the names each defines
   wrap [--max N]    list the comment lines of crates/, examples/ and xtask/ longer than N columns (default 80)
   wrap --markdown [--max N]
-                    list the prose lines of README.md, ARCHITECTURE.md, CHANGELOG.md and docs/*.md longer than N columns";
+                    list the prose lines of README.md, ARCHITECTURE.md, CHANGELOG.md, bench/README.md, page/README.md and docs/*.md longer than N columns";
 
 fn usage() -> String {
     let gen_task = if cfg!(feature = "generate") {

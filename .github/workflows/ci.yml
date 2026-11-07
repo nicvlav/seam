@@ -132,8 +132,9 @@ jobs:
       # columns, as rustfmt wraps their code.
       - name: Comments wrap at 80 columns
         run: target/debug/xtask wrap --max 80
-      # So does the prose of README.md, ARCHITECTURE.md, CHANGELOG.md and
-      # docs/; tables, code and unbreakable links are exempt.
+      # So does the prose of README.md, ARCHITECTURE.md, CHANGELOG.md, the
+      # bench and page READMEs and docs/; tables, code and unbreakable links
+      # are exempt.
       - name: Docs wrap at 80 columns
         run: target/debug/xtask wrap --markdown --max 80
       # Comments and docs give their reason in words, never a decision id;

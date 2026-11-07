@@ -94,7 +94,7 @@ pub enum DeclError {
     },
     /// Another parameter is already the bypass.
     SecondBypass(&'static str),
-    /// The bypass is not a bool: VST3 and CLAP drive it as a toggle.
+    /// The bypass is not a bool: VST3 drives it as a toggle.
     BypassNotBool(&'static str),
     /// The key's host id falls in the range the VST3 exporter keeps for its
     /// own proxy parameters. Rename the key.
