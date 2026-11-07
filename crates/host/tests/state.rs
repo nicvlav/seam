@@ -368,15 +368,18 @@ fn parameters_land_before_a_participant_applies_while_the_ui_thread_ticks() {
         let block = json!({"seamStateVersion": 1, "parameters": parameters,
                            "extra": {"sees": round}})
         .to_string();
-        let done = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
-            scope.spawn(|| {
-                assert!(state.load(block.as_bytes()).is_ok());
-                done.store(true, std::sync::atomic::Ordering::Release);
-            });
-            while !done.load(std::sync::atomic::Ordering::Acquire) {
+            let loading = scope.spawn(|| state.load(block.as_bytes()));
+            let start = std::time::Instant::now();
+            while !loading.is_finished() {
+                assert!(
+                    start.elapsed() < seam_testkit::sync::PATIENCE,
+                    "round {round}: stuck"
+                );
                 ui.tick();
             }
+            let loaded = loading.join().expect("the load did not panic");
+            assert!(loaded.is_ok(), "round {round}: {loaded:?}");
         });
         ui.tick();
         for seen in saw.borrow_mut().drain(..) {
@@ -1036,7 +1039,7 @@ fn hostile_blocks_through_a_migration_keep_every_promise() {
     let state = SavedState::new(&set, &session).with_migration(2, migrate);
     let gain = set.id("gain").expect("declared");
     set.program().load().restore(gain, 7.0);
-    let before = (set.value(gain), state.save());
+    let now = || (set.value(gain), state.save(), set.clock().reader().stamp());
     let kind = |error: &LoadError| std::mem::discriminant(error);
     for (block, refused) in [
         (
@@ -1089,6 +1092,7 @@ fn hostile_blocks_through_a_migration_keep_every_promise() {
             Some(LoadError::MigrationFailed(Reason::from("refused"))),
         ),
     ] {
+        let before = now();
         let result = state.load(block.as_bytes());
         assert_eq!(
             result.as_ref().err().map(kind),
@@ -1096,7 +1100,7 @@ fn hostile_blocks_through_a_migration_keep_every_promise() {
             "{block}: {result:?}"
         );
         if refused.is_some() {
-            assert_eq!((set.value(gain), state.save()), before, "{block}: changed");
+            assert_eq!(now(), before, "{block}: changed");
             continue;
         }
         let saved = state.save();
@@ -1331,7 +1335,7 @@ fn a_migrations_error_fails_the_load_with_its_reason_and_changes_nothing() {
     });
     let gain = set.id("gain").expect("declared");
     set.program().load().restore(gain, 7.0);
-    let before = state.save();
+    let before = (7.0, state.save(), set.clock().reader().stamp());
 
     let result = state.load(br#"{"seamStateVersion": 1, "parameters": {"gain": 1}}"#);
     let Err(LoadError::MigrationFailed(reason)) = result else {
@@ -1354,8 +1358,8 @@ fn a_migrations_error_fails_the_load_with_its_reason_and_changes_nothing() {
         "{source}"
     );
     assert_eq!(
-        (set.value(gain), state.save()),
-        (7.0, before),
+        (set.value(gain), state.save(), set.clock().reader().stamp()),
+        before,
         "and nothing changed"
     );
 }

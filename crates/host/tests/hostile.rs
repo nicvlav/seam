@@ -83,8 +83,9 @@ struct Plugin {
     _anything: (Rc<RefCell<Anything>>, Registration),
 }
 
-/// A plugin whose state before the load differs with `prior`.
-fn plugin(prior: u32) -> Plugin {
+/// A plugin whose state before the load differs with `prior`, at plugin
+/// state `version` with a migration that changes nothing, or with none at 0.
+fn plugin(prior: u32, version: u64) -> Plugin {
     let set = set();
     let session = Session::new(&set);
     let ui = session.take_ui().expect("the first UI handle");
@@ -92,7 +93,10 @@ fn plugin(prior: u32) -> Plugin {
     let notes_registration = ui.register("notes", &notes).expect("free");
     let anything = Rc::new(RefCell::new(Anything(Section::Null)));
     let anything_registration = ui.register("anything", &anything).expect("free");
-    let state = SavedState::new(&set, &session);
+    let mut state = SavedState::new(&set, &session);
+    if version > 0 {
+        state = state.with_migration(version, |_, _| Ok(()));
+    }
     if prior > 0 {
         let load = set.program().load();
         for (index, id) in set.ids().enumerate() {
@@ -122,9 +126,10 @@ impl Plugin {
     }
 }
 
-/// Every promise a load makes, for one block; whether it was recognised.
-fn check(block: &[u8], case: &str) -> bool {
-    let (a, b) = (plugin(0), plugin(3));
+/// Every promise a load makes, for one block, to plugins at plugin state
+/// `version`; whether it was recognised.
+fn check(block: &[u8], version: u64, case: &str) -> bool {
+    let (a, b) = (plugin(0, version), plugin(3, version));
     let before = (b.values(), b.state.save(), b.set.clock().reader().stamp());
     let (took_a, took_b) = (a.state.load(block), b.state.load(block));
     let refusal = |took: &Result<(), LoadError>| took.as_ref().err().map(std::mem::discriminant);
@@ -147,7 +152,7 @@ fn check(block: &[u8], case: &str) -> bool {
     b.ui.tick();
     let saved = a.state.save();
     assert_eq!(saved, b.state.save(), "{case}: the same block once applied");
-    let c = plugin(7);
+    let c = plugin(7, version);
     assert!(c.state.load(&saved).is_ok(), "{case}: a saved block loads");
     c.ui.tick();
     assert_eq!(c.state.save(), saved, "{case}: and saves back to itself");
@@ -284,16 +289,22 @@ fn cases() -> u64 {
 
 #[test]
 fn structured_blocks_keep_every_promise() {
-    let recognised = (0..cases())
-        .filter(|&case| {
-            let text = block(&mut Random::new(case));
-            check(text.as_bytes(), &format!("structured case {case}: {text}"))
-        })
-        .count() as u64;
-    assert!(
-        recognised * 4 > cases(),
-        "{recognised} recognised: too few to test"
-    );
+    // Against a plugin with no migration, and one at plugin state version 2,
+    // so the random plugin versions reach the migration and the save's
+    // higher-version rule too.
+    for version in [0, 2] {
+        let recognised = (0..cases())
+            .filter(|&case| {
+                let text = block(&mut Random::new(case));
+                let case = format!("structured case {case}, plugin at {version}: {text}");
+                check(text.as_bytes(), version, &case)
+            })
+            .count() as u64;
+        assert!(
+            recognised * 4 > cases(),
+            "plugin at {version}: {recognised} recognised: too few to test"
+        );
+    }
 }
 
 #[test]
@@ -303,7 +314,7 @@ fn random_bytes_never_panic_and_keep_every_promise() {
         let bytes: Vec<u8> = (0..random.below(200))
             .map(|_| random.next() as u8)
             .collect();
-        check(&bytes, &format!("random case {case}: {bytes:?}"));
+        check(&bytes, 0, &format!("random case {case}: {bytes:?}"));
     }
 }
 
@@ -313,16 +324,16 @@ fn cut_flipped_and_padded_blocks_keep_every_promise() {
         let mut random = Random::new(case ^ 0xF11B);
         let text = block(&mut random).into_bytes();
         let cut = &text[..random.below(text.len() + 1)];
-        check(cut, &format!("cut case {case}: {cut:?}"));
+        check(cut, 0, &format!("cut case {case}: {cut:?}"));
         let mut flipped = text.clone();
         let at = random.below(flipped.len());
         flipped[at] ^= random.next() as u8 | 1;
-        check(&flipped, &format!("flipped case {case}: {flipped:?}"));
+        check(&flipped, 0, &format!("flipped case {case}: {flipped:?}"));
         let mut padded = text.clone();
         padded.extend(std::iter::repeat_n(0, random.below(64)));
         if random.below(2) == 0 {
             padded.extend_from_slice(b" {}");
         }
-        check(&padded, &format!("padded case {case}: {padded:?}"));
+        check(&padded, 0, &format!("padded case {case}: {padded:?}"));
     }
 }
