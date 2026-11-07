@@ -262,21 +262,27 @@ impl<T: Clone> Value<T> {
         let (origin, recorded) = author.resolve(self.shared.clock.applying());
         let stamp = self.shared.clock.stamp();
         let mut state = self.shared.lock();
-        state.value = value.clone();
+        // What the write replaces drops after the unlock, since a `T`'s
+        // `Drop` may call this value.
+        let old = std::mem::replace(&mut state.value, value.clone());
         state.origin = origin;
-        if origin == Origin::Replay {
+        let stale = if origin == Origin::Replay {
             // A replay writes over whatever another thread wrote since the
             // tick began; those commits would record on top of it and drop
             // the redo, so they go.
-            state.commits.clear();
-        }
+            std::mem::take(&mut state.commits)
+        } else {
+            VecDeque::new()
+        };
+        let mut gesture = (None, None);
+        let mut coalesced = None;
         if state.gestures > 0 && recorded {
-            state.after = Some(value);
+            gesture.1 = state.after.replace(value);
         } else if state.gestures > 0 && matches!(origin, Origin::User | Origin::Program) {
             // Derived from the user's or the plugin's own change: part of the
             // gesture, its newest after-value, so a linked value echoing the
             // drag back keeps the drag.
-            state.after = Some(value);
+            gesture.1 = state.after.replace(value);
         } else {
             if state.gestures > 0 && matches!(origin, Origin::Restore | Origin::Replay) {
                 // A restore or a replay during a gesture: the gesture
@@ -284,8 +290,7 @@ impl<T: Clone> Value<T> {
                 // below moves the baseline even if the gesture writes
                 // nothing more. Host and learned writes leave the gesture's
                 // before and after alone.
-                state.before = Some(value.clone());
-                state.after = None;
+                gesture = (state.before.replace(value.clone()), state.after.take());
             }
             if state.tracked {
                 let sequence = self.shared.clock.sequence();
@@ -299,7 +304,7 @@ impl<T: Clone> Value<T> {
                                 recorded: was,
                             },
                     }) if *was == recorded && *then == stamp => {
-                        *last = value;
+                        coalesced = Some(std::mem::replace(last, value));
                         *at = sequence;
                     }
                     _ => state.commits.push_back(Stamped {
@@ -312,6 +317,7 @@ impl<T: Clone> Value<T> {
         }
         drop(state);
         self.shared.changes.fetch_add(1, Ordering::Release);
+        drop((old, stale, gesture, coalesced));
     }
 
     fn close(&self) {
@@ -327,14 +333,21 @@ impl<T: Clone> Value<T> {
         // restore or any other write that landed during the gesture
         // included. Enrolling the value in undo therefore never changes how it
         // behaves.
-        let (before, after) = (state.before.take(), state.after.take());
-        if let (Some(before), Some(after), true) = (before, after, state.tracked) {
-            state.commits.push_back(Stamped {
-                stamp: self.shared.clock.stamp(),
-                sequence: self.shared.clock.sequence(),
-                commit: Commit::Gesture { before, after },
-            });
-        }
+        let gesture = (state.before.take(), state.after.take());
+        let unrecorded = match gesture {
+            (Some(before), Some(after)) if state.tracked => {
+                state.commits.push_back(Stamped {
+                    stamp: self.shared.clock.stamp(),
+                    sequence: self.shared.clock.sequence(),
+                    commit: Commit::Gesture { before, after },
+                });
+                None
+            }
+            unrecorded => Some(unrecorded),
+        };
+        drop(state);
+        // After the unlock, since a `T`'s `Drop` may call this value.
+        drop(unrecorded);
     }
 }
 
@@ -446,9 +459,11 @@ impl<T> Drop for Tracker<T> {
         };
         let mut state = shared.lock();
         state.tracked = false;
-        state.commits.clear();
+        let stale = std::mem::take(&mut state.commits);
         drop(state);
         shared.generation.fetch_add(1, Ordering::AcqRel);
+        // After the unlock, since a `T`'s `Drop` may call this value.
+        drop(stale);
     }
 }
 

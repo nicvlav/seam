@@ -161,7 +161,7 @@ impl<T> List<T> {
     /// another [`List`]: two threads each reading one list from inside a read
     /// of the other would deadlock. A [`Value`](crate::Value) may be called,
     /// since it runs none of its caller's code under its lock, only its type's
-    /// `Clone` and `Drop`. [`List`] shows a read.
+    /// `Clone`. [`List`] shows a read.
     pub fn with<R>(&self, read: impl FnOnce(&[T]) -> R) -> R {
         read(&self.shared.lock().items)
     }
@@ -336,13 +336,14 @@ impl<T> List<T> {
     /// ```
     pub fn reset(&self, items: Vec<T>) {
         let mut state = self.shared.lock();
-        state.commits.clear();
+        let stale = std::mem::take(&mut state.commits);
         state.generation += 1;
         state.origin = Origin::Restore;
         let old = std::mem::replace(&mut state.items, items);
         self.shared.publish(state);
-        // The old elements drop outside the lock.
-        drop(old);
+        // The old elements, and the verbs that held any, drop outside the
+        // lock, since an element's `Drop` may call this list.
+        drop((old, stale));
     }
 
     /// Starts handing verbs to a tracker: undo's enrollment. `None` when one
@@ -410,8 +411,7 @@ impl<T> Derived<'_, T> {
             return Err(element);
         }
         state.items.insert(index, element);
-        self.commit(&mut state, ListCommit::Insert { index });
-        shared.publish(state);
+        self.commit(state, ListCommit::Insert { index });
         Ok(())
     }
 
@@ -422,8 +422,7 @@ impl<T> Derived<'_, T> {
         let mut state = shared.lock();
         let index = state.items.len();
         state.items.push(element);
-        self.commit(&mut state, ListCommit::Insert { index });
-        shared.publish(state);
+        self.commit(state, ListCommit::Insert { index });
     }
 
     /// Removes the element at `index`, as [`List::remove`] does, but derived.
@@ -435,8 +434,7 @@ impl<T> Derived<'_, T> {
             return false;
         }
         let element = state.items.remove(index);
-        self.commit(&mut state, ListCommit::Remove { index, element });
-        shared.publish(state);
+        self.commit(state, ListCommit::Remove { index, element });
         true
     }
 
@@ -451,8 +449,7 @@ impl<T> Derived<'_, T> {
         }
         let element = state.items.remove(from);
         state.items.insert(to, element);
-        self.commit(&mut state, ListCommit::Move { from, to });
-        shared.publish(state);
+        self.commit(state, ListCommit::Move { from, to });
         true
     }
 
@@ -465,27 +462,34 @@ impl<T> Derived<'_, T> {
             return false;
         }
         let elements = std::mem::take(&mut state.items);
-        self.commit(&mut state, ListCommit::Clear { elements });
-        shared.publish(state);
+        self.commit(state, ListCommit::Clear { elements });
         true
     }
 
     /// Queues `commit` for the tracker, or, for a verb that records nothing,
-    /// drops it and makes earlier steps stale.
-    fn commit(&self, state: &mut State<T>, commit: ListCommit<T>) {
-        let clock = &self.list.shared.clock;
-        let (origin, recorded) = self.author.resolve(clock.applying());
+    /// drops it and makes earlier steps stale; then publishes.
+    ///
+    /// What it does not queue drops after the unlock, since an element's
+    /// `Drop` may call this list.
+    fn commit(&self, mut state: MutexGuard<'_, State<T>>, commit: ListCommit<T>) {
+        let shared = &self.list.shared;
+        let (origin, recorded) = self.author.resolve(shared.clock.applying());
         state.origin = origin;
-        if !recorded {
-            state.commits.clear();
+        let dropped = if !recorded {
             state.generation += 1;
+            (std::mem::take(&mut state.commits), Some(commit))
         } else if state.tracked {
             state.commits.push_back(Stamped {
-                stamp: clock.stamp(),
-                sequence: clock.sequence(),
+                stamp: shared.clock.stamp(),
+                sequence: shared.clock.sequence(),
                 commit,
             });
-        }
+            (VecDeque::new(), None)
+        } else {
+            (VecDeque::new(), Some(commit))
+        };
+        shared.publish(state);
+        drop(dropped);
     }
 }
 
@@ -547,8 +551,11 @@ impl<T> Drop for ListTracker<T> {
         };
         let mut state = shared.lock();
         state.tracked = false;
-        state.commits.clear();
+        let stale = std::mem::take(&mut state.commits);
         state.generation += 1;
+        drop(state);
+        // After the unlock, since an element's `Drop` may call this list.
+        drop(stale);
     }
 }
 
@@ -582,19 +589,24 @@ impl<T> Clone for TrackedList<T> {
 }
 
 impl<T> TrackedList<T> {
-    /// Whether the step may change the list now. Checked under the list's
-    /// lock, so nothing changes it between the check and the step. A
-    /// waiting verb makes the list's steps stale for good.
-    fn current(&self, state: &mut State<T>) -> bool {
+    /// Hands the lock back when the step may change the list now. Checked
+    /// under the list's lock, so nothing changes it between the check and
+    /// the step.
+    ///
+    /// A waiting verb makes the list's steps stale for good. It drops after
+    /// the unlock, since an element's `Drop` may call this list.
+    fn current<'a>(&self, mut state: MutexGuard<'a, State<T>>) -> Option<MutexGuard<'a, State<T>>> {
         if state.generation != self.generation {
-            return false;
+            return None;
         }
         if !state.commits.is_empty() {
-            state.commits.clear();
+            let waiting = std::mem::take(&mut state.commits);
             state.generation += 1;
-            return false;
+            drop(state);
+            drop(waiting);
+            return None;
         }
-        true
+        Some(state)
     }
 
     /// Puts `element` back at `index`.
@@ -607,8 +619,10 @@ impl<T> TrackedList<T> {
         let Some(shared) = self.shared.upgrade() else {
             return Err(element);
         };
-        let mut state = shared.lock();
-        if !self.current(&mut state) || index > state.items.len() {
+        let Some(mut state) = self.current(shared.lock()) else {
+            return Err(element);
+        };
+        if index > state.items.len() {
             return Err(element);
         }
         state.items.insert(index, element);
@@ -620,8 +634,8 @@ impl<T> TrackedList<T> {
     /// Takes the element at `index` out, or nothing when the step is stale.
     pub fn remove(&self, index: usize) -> Option<T> {
         let shared = self.shared.upgrade()?;
-        let mut state = shared.lock();
-        if !self.current(&mut state) || index >= state.items.len() {
+        let mut state = self.current(shared.lock())?;
+        if index >= state.items.len() {
             return None;
         }
         let element = state.items.remove(index);
@@ -635,9 +649,11 @@ impl<T> TrackedList<T> {
         let Some(shared) = self.shared.upgrade() else {
             return false;
         };
-        let mut state = shared.lock();
+        let Some(mut state) = self.current(shared.lock()) else {
+            return false;
+        };
         let len = state.items.len();
-        if !self.current(&mut state) || from >= len || to >= len {
+        if from >= len || to >= len {
             return false;
         }
         let element = state.items.remove(from);
@@ -657,8 +673,10 @@ impl<T> TrackedList<T> {
         let Some(shared) = self.shared.upgrade() else {
             return Err(elements);
         };
-        let mut state = shared.lock();
-        if !self.current(&mut state) || !state.items.is_empty() {
+        let Some(mut state) = self.current(shared.lock()) else {
+            return Err(elements);
+        };
+        if !state.items.is_empty() {
             return Err(elements);
         }
         state.items = elements;
@@ -670,10 +688,7 @@ impl<T> TrackedList<T> {
     /// Takes every element out, or nothing when the step is stale.
     pub fn take_all(&self) -> Option<Vec<T>> {
         let shared = self.shared.upgrade()?;
-        let mut state = shared.lock();
-        if !self.current(&mut state) {
-            return None;
-        }
+        let mut state = self.current(shared.lock())?;
         let elements = std::mem::take(&mut state.items);
         state.origin = Origin::Replay;
         shared.publish(state);
