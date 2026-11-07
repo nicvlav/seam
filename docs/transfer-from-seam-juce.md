@@ -1357,7 +1357,9 @@ Windows. Parameter ids are JUCE's hash of the key (its Studio One-compatible
 form, `seam_host::cabi::juce_param_id`), the ids the JUCE EQ has, not D31's:
 JUCE offers no way to set them, and its legacy ids are indices. JUCE's VST3
 wrapper adds its own bypass parameter when the plugin declares none, so the EQ
-lists 26 there, as A does.
+lists 26 there, as A does. For a plugin that takes MIDI input it also adds an
+id for each MIDI controller, so `juce_settings` refuses a key whose id lands
+there.
 
 A host's bypass through it reaches the adapter's `processBlockBypassed`, which
 delays the input by the latency the last `prepareToPlay` reported, from a delay
@@ -1384,7 +1386,9 @@ saved through JUCE does not load into Seam's native build (H2). A text that
 means no value answers the current one, since JUCE has no way to say none. A
 host's text reaches the plugin's parser as the UTF-8 JUCE holds, read in place
 up to its first NUL. The one program a plugin declares (H5) has the plugin's
-name, as the Steinberg validator requires of a program list. The adapter ticks
+name, as the Steinberg validator requires of a program list. The adapter
+clears each block's MIDI buffer before it processes, since JUCE's wrappers send
+on what the buffer holds when a plugin produces MIDI. The adapter ticks
 the plugin from a `juce::Timer` at 60 Hz, editor open or not (D53), on JUCE's
 message thread, where a plugin that is `Send` is lent to each tick as on any
 other thread (D62); its constructor does not assert that it runs there.

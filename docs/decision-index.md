@@ -407,7 +407,7 @@ move its line here; when a decision gains code, add one.
 - `crates/undo/src/lib.rs`: module
 - test `crates/undo/src/enroll.rs`: `a_parameter_step_holds_loads_off_and_a_value_step_does_not`
 - test `crates/undo/src/history/tests.rs`: `a_step_that_writes_parameters_holds_loads_off_and_no_other_does`
-- test `crates/undo/tests/restore.rs`: module, `a_load_waits_while_a_replay_holds_loads_off`, `a_load_racing_an_undo_always_ends_on_the_loaded_value`
+- test `crates/undo/tests/restore.rs`: module, `a_load_waits_while_a_replay_holds_loads_off`, `a_load_racing_an_undo_always_ends_on_the_loaded_value`, `a_step_recorded_after_a_load_began_never_replays_over_its_write`
 
 ### D40. One undo history per UiParams
 
@@ -850,7 +850,7 @@ move its line here; when a decision gains code, add one.
 
 - `crates/learn/src/mappings.rs`: `Learn::unmap`
 - `crates/learn/src/mappings/session.rs`: `Learn::restore`
-- test `crates/learn/tests/targets.rs`: `a_target_panicking_as_a_restore_closes_its_burst_leaves_learn_usable`
+- test `crates/learn/tests/targets.rs`: `a_target_panicking_as_a_restore_closes_its_burst_leaves_learn_usable`, `a_target_panicking_as_a_restore_leaves_the_audio_side_on_the_new_table`, `a_target_panicking_as_it_unmaps_leaves_the_table_published_and_saved`
 
 ### D83. A control's drag and one-shot set
 

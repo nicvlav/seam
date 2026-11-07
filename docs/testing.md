@@ -96,7 +96,10 @@ What keeps that true:
 
 - **No detached threads.** A test runs its threads in `std::thread::scope` or
   joins them, so their panics reach it. Library code never detaches a thread
-  either. A panic nobody joins is a failure nobody sees.
+  either. A panic nobody joins is a failure nobody sees. One test leaves a
+  thread behind, and only when it fails: `crates/params/tests/drops.rs` runs
+  each drop on a worker it gives up on after a bound, since the regression it
+  pins is a deadlock.
 - **A deliberate violation is declared.** A test that breaks a contract on
   purpose wraps the call in
   `seam_testkit::contract::expect_contract_panic(expected, f)`. That fails when
@@ -344,6 +347,9 @@ Two tools cover what real threads cannot make happen on demand:
     processor. A panicking block racing one marks only its own processor
     (`crates/host/src/boundary/loom_models.rs`,
     `crates/host/src/engine/process.rs`);
+  - the exporters' reset request: a reset asked once a block ran on the
+    processor an activation installs is kept, since the activation clears the
+    old request while it holds the slot (`crates/host/src/engine/process.rs`);
   - the exporters' main-thread state bound to no thread: a tick that tries once
     and a call that waits by trying again never touch it at once. The call
     borrows it a second time inside its loan and lets the outer loan go first.

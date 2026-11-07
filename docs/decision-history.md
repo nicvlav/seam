@@ -412,8 +412,11 @@ adapter's VST3 build ("Programlist000-Program000: has no name", 39 of 40). It
 has the plugin's name since, which leaves VST3's saved state as it was and
 gives AU's preset name metadata the name, for display only. Since the same day
 `getValueForText` hands the parser the text's UTF-8 in place; the first form
-copied it into a `std::string` first, the same bytes. The implementer's
-choice; to confirm.
+copied it into a `std::string` first, the same bytes. The adapter has cleared
+each block's MIDI buffer since then too: without it, a plugin that declares
+MIDI input and output sent its input back out. `juce_settings` has refused a
+key whose id lands in JUCE's MIDI-controller range since then as well. The
+implementer's choices; to confirm.
 
 ### D66. Bytes after the block, and a failed load
 
