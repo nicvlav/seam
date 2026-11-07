@@ -59,7 +59,7 @@ file runs it.
 | `core builds alone`: No window, WebView or host dependency | No core crate or `seam-bridge` links a window, WebView, UI toolkit or plugin-format crate, and no crate depends on one of its own layer or above (see [Repository checks](#repository-checks)). |
 | `core builds alone`: The Rust reader's tests | `cargo xtask scan`, `defs` and `wrap` read comments, string literals, `fn` names and item definitions as the language does (see [Repository checks](#repository-checks)). |
 | `core builds alone`: Comments wrap at 80 columns | No `///`, `//!` or `//` prose line of `crates/`, `examples/` or `xtask/` passes 80 columns (see [Repository checks](#repository-checks)). |
-| `core builds alone`: Docs wrap at 80 columns | No prose line of README.md, ARCHITECTURE.md, CHANGELOG.md or `docs/*.md` passes 80 columns (see [Repository checks](#repository-checks)). |
+| `core builds alone`: Docs wrap at 80 columns | No prose line of README.md, ARCHITECTURE.md, CHANGELOG.md, `bench/README.md`, `page/README.md` or `docs/*.md` passes 80 columns (see [Repository checks](#repository-checks)). |
 | `core builds alone`: No decision ids in comments or docs | No comment or doc in a tracked file cites a decision id, an audit finding id or a stage, and no code comment points at the record (see [Repository checks](#repository-checks)). |
 | `core builds alone`: The decision index matches the record and the code | Every file and item `docs/decision-index.md` lists exists, and it has a heading for every id in the decision record. |
 | `core builds alone`: The check scripts' own tests | Each check script refuses the bad input it exists for (see [Repository checks](#repository-checks)). |
@@ -516,10 +516,11 @@ fails on.
   `examples/` and `xtask/` longer than N columns (80 by default, which rustfmt
   also uses for comments) and a count per package. Code in a fenced or indented
   example, table rows and lines holding a URL are exempt. `--markdown` lists
-  the prose lines of README.md, ARCHITECTURE.md, CHANGELOG.md and `docs/*.md`
-  past N columns instead; fenced code, headings, tables, link definitions, a
-  line holding a word or link too long for a line of its own, and the decision
-  index's site lines are exempt. CI runs both with `--max 80` in `core builds
+  the prose lines of README.md, ARCHITECTURE.md, CHANGELOG.md,
+  `bench/README.md`, `page/README.md` and `docs/*.md` past N columns instead;
+  fenced code, headings, tables, link definitions, a line holding a word or
+  link too long for a line of its own, and the decision index's site lines are
+  exempt. CI runs both with `--max 80` in `core builds
   alone`. Open: an example that pulls in a fragment through `#[doc =
   include_str!(..)]` reads as prose after that line, so its code is held to the
   width too.

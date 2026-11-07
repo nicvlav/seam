@@ -186,7 +186,9 @@ impl Docs {
         let root = std::env::temp_dir().join(format!("seam-wrap-{name}-{}", std::process::id()));
         std::fs::create_dir_all(root.join("docs")).expect("a temporary directory");
         for file in xtask::wrap::MARKDOWN_FILES {
-            std::fs::write(root.join(file), "short\n").expect("written");
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().expect("a folder")).expect("a folder");
+            std::fs::write(path, "short\n").expect("written");
         }
         std::fs::write(root.join("docs/decision-index.md"), index).expect("written");
         std::fs::write(root.join("docs/other.md"), other).expect("written");

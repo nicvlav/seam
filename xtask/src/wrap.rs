@@ -22,7 +22,13 @@ pub const RUST_DIRS: [&str; 3] = ["crates", "examples", "xtask"];
 
 /// The Markdown files, from the repository root, the Markdown mode covers,
 /// besides every `.md` file directly in `docs/`.
-pub const MARKDOWN_FILES: [&str; 3] = ["README.md", "ARCHITECTURE.md", "CHANGELOG.md"];
+pub const MARKDOWN_FILES: [&str; 5] = [
+    "README.md",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "bench/README.md",
+    "page/README.md",
+];
 
 /// The doc whose list lines a script reads whole, so they do not wrap.
 const READ_WHOLE: &str = "docs/decision-index.md";
