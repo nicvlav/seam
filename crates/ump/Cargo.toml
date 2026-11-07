@@ -1,0 +1,24 @@
+[package]
+name = "seam-ump"
+description = "Universal MIDI Packets: the event list every Seam crate passes MIDI in, and the channel voice messages read from it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["midi", "midi2", "ump", "audio", "plugin"]
+categories = ["multimedia::audio", "encoding"]
+publish.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+iai-callgrind.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "iai"
+harness = false

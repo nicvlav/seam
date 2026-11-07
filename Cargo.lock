@@ -395,6 +395,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seam-ump"
+version = "0.1.0"
+dependencies = [
+ "iai-callgrind",
+ "proptest",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
