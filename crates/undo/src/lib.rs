@@ -166,7 +166,9 @@ impl Default for Bound {
 /// Why a history operation was refused.
 ///
 /// A refused operation changed nothing, though a jump out of range first
-/// records what changed since the last tick.
+/// records what changed since the last tick, and so does an
+/// [`enroll_param`](History::enroll_param) refused because a destructor its
+/// tick ran enrolled the same parameter.
 ///
 /// # Examples
 ///

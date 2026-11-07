@@ -217,7 +217,7 @@ impl History {
     /// # Errors
     ///
     /// Returns [`HistoryError::AlreadyEnrolled`] when the parameter is enrolled
-    /// already.
+    /// already, before the tick or by a destructor the tick ran.
     ///
     /// # Examples
     ///

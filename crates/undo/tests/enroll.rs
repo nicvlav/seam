@@ -1,6 +1,7 @@
 //! Enrollment and recording: which writes become steps, and what each step
 //! holds.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use proptest::prelude::*;
@@ -688,9 +689,9 @@ fn a_value_or_list_made_with_another_clock_is_refused() {
 }
 
 #[test]
-fn only_a_parameters_enrolment_ticks_and_a_refused_one_never_does() {
+fn only_a_parameters_enrolment_ticks_and_one_enrolled_already_never_does() {
     // A pending step waits through a value's or a list's enrolment, taken or
-    // refused, and through a refused parameter's.
+    // refused, and through the enrolment of a parameter enrolled already.
     let rig = rig(&["p", "q"]);
     let (p, q) = (rig.ids[0], rig.ids[1]);
     rig.history.enroll_param(p).expect("first");
@@ -726,6 +727,60 @@ fn only_a_parameters_enrolment_ticks_and_a_refused_one_never_does() {
     // pending step too.
     rig.history.enroll_param(q).expect("first");
     assert_eq!(rig.names(), ["v"]);
+}
+
+thread_local! {
+    /// What the next drop of an `Enrols` enrols, once.
+    static ENROL: RefCell<Option<(History, ParamId)>> = const { RefCell::new(None) };
+}
+
+/// A plain value whose drop enrols the parameter `ENROL` holds: a
+/// destructor a tick runs may run any code.
+#[derive(Clone)]
+struct Enrols;
+
+impl seam_undo::UndoSize for Enrols {}
+
+impl seam_undo::UndoEq for Enrols {
+    fn undo_eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Drop for Enrols {
+    fn drop(&mut self) {
+        if let Some((history, id)) = ENROL.with(|armed| armed.borrow_mut().take()) {
+            assert_eq!(history.enroll_param(id), Ok(()));
+        }
+    }
+}
+
+#[test]
+fn an_enrolment_a_destructor_beats_inside_its_tick_is_refused_after_that_tick() {
+    // The tick drops a gone value's copy, whose destructor enrols the same
+    // parameter first. The enrolment is refused, and its tick has recorded
+    // what was pending.
+    let rig = rig(&["p"]);
+    let p = rig.ids[0];
+    let value = rig.value(0_i32);
+    rig.history.enroll(&value, "v").expect("first");
+    let enrols = rig.value(Enrols);
+    rig.history.enroll(&enrols, "enrols").expect("first");
+    // Only the history's copy is left, until the tick finds the value gone.
+    drop(enrols);
+    ENROL.with(|armed| *armed.borrow_mut() = Some((rig.history.clone(), p)));
+    value.set(1);
+
+    assert_eq!(
+        rig.history.enroll_param(p),
+        Err(HistoryError::AlreadyEnrolled)
+    );
+    let ran = ENROL.with(|armed| armed.borrow().is_none());
+    assert!(ran, "the destructor ran");
+    assert_eq!(rig.names(), ["v"], "the refused enrolment ticked");
+    assert!(rig.ui.write(p, 8.0));
+    rig.history.tick();
+    assert_eq!(rig.names(), ["v", "p"], "the destructor's enrolment stands");
 }
 
 #[test]
