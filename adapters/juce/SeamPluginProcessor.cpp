@@ -246,8 +246,12 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     return false;
 }
 
-void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
+    // The buffer carries the block's MIDI in and takes its MIDI out. The C
+    // interface carries none yet, so what came in must not go back out.
+    // Clearing keeps the buffer's storage, so it does not allocate.
+    midi.clear();
     bypassing_ = false;
     if (instance_ == nullptr)
     {
