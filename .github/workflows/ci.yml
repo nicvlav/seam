@@ -46,12 +46,22 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Clippy (all features)
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      # Release builds drop debug assertions, so the code and the lints that
+      # see it differ from the debug build's.
+      - name: Clippy (release)
+        run: cargo clippy --workspace --all-targets --all-features --release --locked -- -D warnings
       # Includes the drift gates for generated files (xtask's drift test,
       # seam-bridge's typescript_drift) and the allocation gates in debug.
       - name: Test
         run: cargo test --workspace --all-features --locked
         # Property tests: proptest's default 256 cases on pull requests,
         # sixteen times as many on pushes to main.
+        env:
+          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+      # Everything again on optimised code, doc tests included: a test that
+      # branches on debug assertions takes its other side here.
+      - name: Test (release)
+        run: cargo test --workspace --all-features --release --locked
         env:
           PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
       # A failing property test writes the case it found next to its test;
@@ -64,7 +74,8 @@ jobs:
           path: "**/*.proptest-regressions"
           if-no-files-found: ignore
       # The allocation gates again on optimised code, which is what a host
-      # runs.
+      # runs. A crate that adds tests/alloc_gate.rs joins this step with no
+      # edit here.
       - name: Allocation gates (release)
         run: cargo test --workspace --all-features --release --test alloc_gate --locked
       # The example EQ through both exporters across block sizes, rates and
