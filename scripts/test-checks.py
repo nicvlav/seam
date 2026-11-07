@@ -331,7 +331,7 @@ class RunLoom(unittest.TestCase):
         self.assertEqual(loom.passed_models(coloured), {("seam_a", ("queue",), "loom_x")})
 
     def test_a_source_with_no_model_fails(self):
-        was, loom.models_in_source = loom.models_in_source, lambda: set()
+        was, loom.models_in_source = loom.models_in_source, lambda: (set(), [])
         try:
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 status = loom.main()
@@ -339,6 +339,63 @@ class RunLoom(unittest.TestCase):
             loom.models_in_source = was
         self.assertEqual(status, 1)
         self.assertIn("no loom model found", err.getvalue())
+
+    def tree(self, files: dict[str, str]):
+        """The models and stray calls the scan finds in a repository holding `files`."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for crate in loom.LANE:
+                (root / "crates" / crate).mkdir(parents=True)
+                (root / "crates" / crate / "Cargo.toml").write_text(
+                    f'[package]\nname = "seam-{crate}"\n', encoding="utf-8"
+                )
+            for name, text in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            return loom.models_in_source(root)
+
+    MODEL = "fn loom_a() {\n    loom::model(|| {});\n}\n"
+
+    def test_a_model_in_a_lane_crates_source_is_found(self):
+        models, stray = self.tree({"crates/params/src/queue.rs": self.MODEL})
+        self.assertEqual(models, {("seam_params", ("queue",), "loom_a")})
+        self.assertEqual(stray, [])
+
+    def test_a_model_the_lane_does_not_build_is_stray(self):
+        for where in (
+            "crates/params/tests/queue.rs",
+            "crates/params/benches/queue.rs",
+            "crates/ump/src/queue.rs",
+            "examples/gain/src/lib.rs",
+            "xtask/src/lib.rs",
+        ):
+            models, stray = self.tree({where: self.MODEL})
+            self.assertEqual(models, set(), where)
+            self.assertEqual(len(stray), 1, where)
+            self.assertIn(where, stray[0])
+
+    def test_a_call_outside_any_function_is_stray(self):
+        _, stray = self.tree({"crates/host/src/lib.rs": "loom::model(|| {});\n"})
+        self.assertEqual(len(stray), 1)
+
+    def test_a_stray_model_fails_the_run_before_cargo_starts(self):
+        was, loom.models_in_source = loom.models_in_source, lambda: ({("a", (), "loom_x")}, ["x.rs: stray"])
+        started = []
+        run, loom.subprocess.run = loom.subprocess.run, lambda *args, **kwargs: started.append(args)
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                status = loom.main()
+        finally:
+            loom.models_in_source = was
+            loom.subprocess.run = run
+        self.assertEqual(started, [])
+        self.assertEqual(status, 1)
+        self.assertIn("x.rs: stray", err.getvalue())
+
+    def test_build_output_is_not_source(self):
+        _, stray = self.tree({"target/debug/build/x/out.rs": self.MODEL})
+        self.assertEqual(stray, [])
 
     def test_same_named_models_in_two_crates_are_two(self):
         ran = ("seam_a", ("queue", "tests"), "loom_x")

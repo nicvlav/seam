@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Runs the loom models and fails unless every model in the source ran.
 
-A model is a test under `crates/*/src` that calls `loom::model(` in its own
-body, and its name starts with `loom_`, which the run filters on. `cargo
-test` passes when its filter matches nothing, so a rename that drops the
-prefix, a cfg that hides a model, or a feature missing from the command
-would pass the lane while it checked nothing. This finds the models by
-their call to `loom::model(`, not by their name: it fails if one is named
-without the prefix, if one is missing from the run, or if the run holds one
-the source does not. A model is identified by its crate, its module path and
-its name, so two models of one name in different crates or modules are two.
+A model is a test that calls `loom::model(` in its own body, and its name
+starts with `loom_`, which the run filters on. The run builds the library
+tests of the crates in `LANE`, so a model belongs in `src/` of one of them.
+`cargo test` passes when its filter matches nothing, so a rename that drops
+the prefix, a cfg that hides a model, a feature missing from the command, or
+a model in a `tests/` file, an example or another crate would pass the lane
+while it checked nothing. This finds the models by their call to
+`loom::model(` in every Rust file of the repository, not by their name: it
+fails if one is named without the prefix, if one sits where the run does not
+look, if one is missing from the run, or if the run holds one the source does
+not. A model is identified by its crate, its module path and its name, so two
+models of one name in different crates or modules are two.
 
 Usage: python3 scripts/run-loom.py
 """
@@ -28,39 +31,65 @@ RUNNING = re.compile(r"Running unittests .*[\\/]([A-Za-z0-9_]+)-[0-9a-f]+(?:\.ex
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 NAME = re.compile(r'^name\s*=\s*"([^"]+)"', re.MULTILINE)
 
+# The crates under `crates/` whose library tests the run builds.
+LANE = ("params", "learn", "host")
 COMMAND = [
-    "cargo", "test", "-p", "seam-params", "-p", "seam-learn", "-p", "seam-host",
+    "cargo", "test", *(arg for name in LANE for arg in ("-p", f"seam-{name}")),
     "--release", "--locked", "--lib", "loom_",
 ]
+# Directories that hold no source of the repository's own.
+SKIPPED_DIRECTORIES = {"target", "node_modules", ".git"}
 
 
-def crate_name(path: pathlib.Path) -> str:
+def crate_name(path: pathlib.Path, root: pathlib.Path = ROOT) -> str:
     """The library name of the crate that holds `path`, as test binaries spell it."""
-    manifest = ROOT / "crates" / path.relative_to(ROOT / "crates").parts[0] / "Cargo.toml"
+    manifest = root / "crates" / path.relative_to(root / "crates").parts[0] / "Cargo.toml"
     return NAME.search(manifest.read_text(encoding="utf-8")).group(1).replace("-", "_")
 
 
-def module_path(path: pathlib.Path) -> tuple[str, ...]:
+def module_path(path: pathlib.Path, root: pathlib.Path = ROOT) -> tuple[str, ...]:
     """The module path of a source file, as its crate names it."""
-    parts = list(path.relative_to(ROOT / "crates").parts[2:])
+    parts = list(path.relative_to(root / "crates").parts[2:])
     parts[-1] = parts[-1].removesuffix(".rs")
     return tuple(part for part in parts if part not in ("lib", "main", "mod"))
 
 
-def models_in_source() -> set[tuple[str, tuple[str, ...], str]]:
-    """Each model as (crate, module path of its file, name): the last `fn`
-    before each call to `loom::model(`."""
+def rust_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every Rust file under `root`, build output and dependencies left out."""
+    return sorted(
+        path
+        for path in root.rglob("*.rs")
+        if not SKIPPED_DIRECTORIES.intersection(path.relative_to(root).parts)
+    )
+
+
+def in_lane(path: pathlib.Path, root: pathlib.Path) -> bool:
+    """Whether `--lib` of the `LANE` crates builds `path`."""
+    parts = path.relative_to(root).parts
+    return len(parts) > 3 and parts[0] == "crates" and parts[1] in LANE and parts[2] == "src"
+
+
+def models_in_source(
+    root: pathlib.Path = ROOT,
+) -> tuple[set[tuple[str, tuple[str, ...], str]], list[str]]:
+    """The models the run covers, each as (crate, module path of its file,
+    name): the last `fn` before each call to `loom::model(`. Also the calls
+    the run cannot reach, one line each, since a model there never runs."""
     models = set()
-    for path in sorted((ROOT / "crates").glob("*/src/**/*.rs")):
+    stray = []
+    for path in rust_files(root):
         text = path.read_text(encoding="utf-8")
         for call in CALL.finditer(text):
+            shown = path.relative_to(root).as_posix()
+            if not in_lane(path, root):
+                stray.append(f"{shown}: loom::model( where the run does not build: only src/ of {', '.join(LANE)}")
+                continue
             functions = FUNCTION.findall(text, 0, call.start())
             if not functions:
-                print(f"{path.relative_to(ROOT)}: loom::model( outside any function", file=sys.stderr)
-                models.add((crate_name(path), module_path(path), "<outside any function>"))
+                stray.append(f"{shown}: loom::model( outside any function")
                 continue
-            models.add((crate_name(path), module_path(path), functions[-1]))
-    return models
+            models.add((crate_name(path, root), module_path(path, root), functions[-1]))
+    return models, stray
 
 
 def passed_models(output: str) -> set[tuple[str, tuple[str, ...], str]]:
@@ -90,9 +119,13 @@ def matches(source: tuple[str, tuple[str, ...], str], ran: tuple[str, tuple[str,
 
 
 def main() -> int:
-    expected = models_in_source()
+    expected, stray = models_in_source()
+    for problem in stray:
+        print(problem, file=sys.stderr)
+    if stray:
+        return 1
     if not expected:
-        print("no loom model found in crates/*/src", file=sys.stderr)
+        print("no loom model found in the lane's crates", file=sys.stderr)
         return 1
     unprefixed = sorted(name for _, _, name in expected if not name.startswith("loom_"))
     if unprefixed:
