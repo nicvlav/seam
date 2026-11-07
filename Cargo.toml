@@ -22,6 +22,18 @@ publish = false
 #   5  seam-example-eq and seam-example-gain, plugins; 6 xtask
 # The core (layers 1 to 3) builds with no window, WebView or host dependency.
 [workspace.dependencies]
+# Tests only.
+seam-testkit = { path = "crates/testkit" }
+
+# Tests only: property tests. CI raises the case count on pushes to main
+# (PROPTEST_CASES). No forking or timeouts, which need extra crates.
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+# Tests only: instruction-count benchmarks for CI (benches/iai.rs in four
+# crates), run under valgrind on Linux. The runner binary CI installs must
+# be this version.
+iai-callgrind = "=0.16.1"
+# Model checks of the lock-free hand-offs, run with RUSTFLAGS="--cfg loom".
+loom = "0.7.2"
 # Tests only: counts allocations made where the audio thread may not make
 # one. Without the default "disable_release", so it also guards release-built
 # tests; the warn features count a violation instead of aborting, so a gate

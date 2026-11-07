@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e748aafa4108d3d8dc9c1f46400d4e3ff9fa9fcae27f8f1481b848dfb859fd67 # shrinks to range = Range { start: -751267.7, end: 153960.38, interval: 0.9052281, skew_centre: None }, value = 0.0
+cc b47fd7d8f4e280dbb859b70d344616535d390ff93d483b30ef03644d99f5c745 # shrinks to (range, s, t, places, steps) = (Range { start: -59.955, end: -53.045, interval: 6.91, skew_centre: None }, -59955, 6910, 3, 1)

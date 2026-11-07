@@ -1,0 +1,30 @@
+[package]
+name = "seam-params"
+description = "Parameters declared once: one real-units store per parameter, writes told apart by origin, gestures, and change counters for polling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "parameters", "automation", "lock-free"]
+categories = ["multimedia::audio", "concurrency"]
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+seam-testkit.workspace = true
+iai-callgrind.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "iai"
+harness = false
