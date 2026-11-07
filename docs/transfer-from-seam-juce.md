@@ -1420,7 +1420,10 @@ nothing. JSON whitespace around the object is part of the JSON text and loads. A
 load that fails, for that or any other reason H2 lists, is answered as failed:
 VST3's `setState` answers `kResultFalse` and the C interface's `load` false.
 Through JUCE, whose `setStateInformation` answers nothing, the adapter cannot
-tell its host.
+tell its host. Where the answer is only a refusal, the first refused load of an
+instance also writes one line with the reason (the error's message, then each
+source's) where faults go; later ones write nothing, and a refused load is not a
+fault, so no count moves.
 
 **Alternatives.** The alternatives were to ignore trailing bytes and load the
 first value, or to refuse any, NUL padding included.
@@ -1919,7 +1922,7 @@ can use `?` on any error, and give text with `.into()`. The load then fails with
 `LoadError::MigrationFailed`, which holds the reason and returns it as its
 `source`, and changes nothing. So `LoadError` is neither `Copy` nor `PartialEq`,
 and a test matches on its variant. Each exporter answers the host as it did for
-any failed load (D66).
+any failed load, and writes the reason on a line, once per instance (D66).
 
 **Alternatives.** The alternatives were a closure generic over its error type,
 which neither `Ok(())` nor `?` lets the compiler infer, so every migration would

@@ -677,8 +677,12 @@ move its line here; when a decision gains code, add one.
 [Record section](transfer-from-seam-juce.md#d66-bytes-after-the-block-and-a-failed-load)
 
 - `crates/host/src/cabi/mod.rs`: `load`
+- `crates/host/src/engine/mod.rs`: `Engine::load_saved`
+- `crates/host/src/faults.rs`: `Faults::report_refused_load`
 - `crates/host/src/state.rs`: `SavedState::load`
 - `crates/host/src/vst3/component.rs`: `Component::setState`
+- test `crates/host/src/cabi/tests.rs`: `the_first_refused_load_writes_the_reason_and_is_no_fault_through_the_cabi_exporter`
+- test `crates/host/src/vst3/tests.rs`: `the_first_refused_load_writes_the_reason_and_is_no_fault_through_the_vst3_exporter`
 - test `crates/host/src/engine/tests.rs`: `a_block_padded_with_nuls_loads_and_one_followed_by_anything_else_fails`
 - test `crates/host/tests/hostile.rs`: `cut_flipped_and_padded_blocks_keep_every_promise`
 

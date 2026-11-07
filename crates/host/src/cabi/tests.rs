@@ -1931,3 +1931,58 @@ fn an_instance_bound_to_no_thread_starts_no_timer() {
     // SAFETY: the same instance, with no other call into it in flight.
     unsafe { (table.destroy)(pointer) };
 }
+
+/// A plugin whose migration refuses every older block, with a reason.
+struct Stuck(Arc<SavedState>);
+
+struct StuckProcessor;
+
+impl Processor for StuckProcessor {
+    fn process(&mut self, _: Block<'_, '_>) -> Status {
+        Status::Continue
+    }
+}
+
+impl Plugin for Stuck {
+    const INFO: PluginInfo = Probe::INFO;
+    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Processor = StuckProcessor;
+
+    fn new() -> Self {
+        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
+        let saved = SavedState::new(&set, &Session::new(&set))
+            .with_migration(1, |_, _| Err("no whole steps".into()));
+        Stuck(Arc::new(saved))
+    }
+
+    fn saved(&self) -> Arc<SavedState> {
+        Arc::clone(&self.0)
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> StuckProcessor {
+        StuckProcessor
+    }
+}
+
+#[test]
+fn the_first_refused_load_writes_the_reason_and_is_no_fault_through_the_cabi_exporter() {
+    let host = TestHost::<Stuck>::new();
+    let older = br#"{"seamStateVersion":1,"pluginStateVersion":0,"parameters":{}}"#;
+    let faults = thread_faults();
+    written();
+    assert_eq!(host.load(older), Err(Refused), "the host's answer stands");
+    let lines = written();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with("seam: Probe (instance "), "{lines:?}");
+    assert!(
+        lines[0].contains("): the host's saved state was refused: "),
+        "{lines:?}"
+    );
+    assert!(
+        lines[0].ends_with(": the plugin could not upgrade the saved block: no whole steps."),
+        "{lines:?}"
+    );
+    assert_eq!(host.load(older), Err(Refused), "refused again");
+    assert_eq!(written(), Vec::<String>::new(), "and said once");
+    assert_eq!(thread_faults(), faults, "a refused load is no fault");
+}

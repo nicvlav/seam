@@ -421,6 +421,23 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         &self.saved
     }
 
+    /// Loads a block the host handed over, and answers whether it took. The
+    /// first refusal of an instance writes a line with the reason, as
+    /// [`faults`](crate::faults) says; it is not a fault. Any thread but
+    /// audio.
+    pub(crate) fn load_saved(&self, bytes: &[u8]) -> bool {
+        match self.saved.load(bytes) {
+            Ok(()) => true,
+            Err(error) => {
+                self.faults.report_refused_load(
+                    || format!("{} (instance {})", P::INFO.name, self.number),
+                    &error,
+                );
+                false
+            }
+        }
+    }
+
     /// The main bus layout. Any thread.
     #[cfg(feature = "vst3")]
     pub(crate) fn layout(&self) -> Layout {

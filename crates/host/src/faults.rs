@@ -19,6 +19,10 @@
 //!   release from a host callback inside a tick reports nothing: the
 //!   instance leaks, and a kind first recorded during that tick is never
 //!   written.
+//! - **A refused load** is not a fault: it counts nowhere, and the host's
+//!   answer is the same refusal. The first one of an instance writes a line
+//!   with the reason, on the thread the host loaded on, never the audio
+//!   thread's; later ones write nothing.
 //! - **A fault outside any instance** is reported at once, on the thread it
 //!   happens on, the first time its kind happens in the process. The calls
 //!   that catch one are not the audio thread's.
@@ -29,8 +33,9 @@
 //! build's failed assertion is a panic too. Seam installs no hook to stop
 //! that: the hook is the whole process's, and belongs to the host.
 
+use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 /// Every fault the exporters caught, process-wide.
 static TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -190,6 +195,8 @@ pub(crate) struct Faults {
     pending: AtomicU8,
     /// Kinds reported already: each is reported once.
     reported: AtomicU8,
+    /// Whether a refused load was reported already: only the first is.
+    refused_load: AtomicBool,
 }
 
 impl Faults {
@@ -238,6 +245,27 @@ impl Faults {
                 fault.what()
             ));
         }
+    }
+
+    /// Writes one line for the first refused load, with the reason: the
+    /// error's message, then each source's. A refused load is not a fault, so
+    /// nothing is counted. `who` names the instance, only when a line is
+    /// written. The caller is not the audio thread.
+    pub(crate) fn report_refused_load(&self, who: impl FnOnce() -> String, error: &dyn Error) {
+        if self.refused_load.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let mut reason = error.to_string();
+        let mut source = error.source();
+        while let Some(cause) = source {
+            reason.push_str(": ");
+            reason.push_str(&cause.to_string());
+            source = cause.source();
+        }
+        write_line(&format!(
+            "seam: {}: the host's saved state was refused: {reason}.",
+            who()
+        ));
     }
 }
 
