@@ -1,12 +1,14 @@
 # Your first plugin
 
 This guide walks through [`examples/gain`](../examples/gain/src/lib.rs), a
-stereo gain that uses every part of Seam a real plugin uses: parameters, saved
+stereo gain that uses the parts of Seam most plugins need: parameters, saved
 state, undo, a value that is not a parameter, MIDI learn, and the VST3 export.
-Read it beside the source, which fits one sitting. The guide follows the order
-in which you would write the plugin, and links the item that owns each rule
-rather than repeating it. Every block of Rust and TOML below is quoted from the
-example, and its `guide` test fails when the two drift apart.
+It leaves two things out: it has no editor or page, so a host shows its
+generic controls, and nothing smooths its gain. Read it beside the source,
+which fits one sitting. The guide follows the order in which you would write
+the plugin, and links the item that owns each rule rather than repeating it.
+Every block of Rust and TOML below is quoted from the example or its tests,
+and its `guide` test fails when the two drift apart.
 
 The plugin has four things to set:
 
@@ -47,11 +49,10 @@ seam-ump.workspace = true
 ```
 
 `seam-host` builds no exporter by default, so the crate's own `vst3` feature
-turns the VST3 one on, and the tests add the test host. The VST3 module
-refuses to build on Linux, so a plugin crate added to this workspace also
-joins the `--exclude` lists of the CI steps that build without a host: the
-core-alone build and the cross check in `ci.yml`, and the miri run in
-`nightly.yml`.
+turns the VST3 one on, and the tests add the test host. Each
+`workspace = true` takes its value from the repository's root manifest;
+[your own crate](#your-own-crate) says what replaces it outside this
+repository.
 
 ## 1. Declare the parameters
 
@@ -68,11 +69,23 @@ const PARAMS: &[ParamDecl] = &[
 ];
 ```
 
+- `Kind::continuous(start, end, interval, skew_centre)` reads as JUCE's
+  `NormalisableRange (start, end, interval)`, where an interval of 0 means no
+  steps, plus the value at the middle of the control's travel, as
+  `setSkewForCentre` takes it; `None` is a linear control. So the gain runs
+  from -60 dB to 12 dB in steps of 0.1 dB, linearly.
+  [`Range::new`](../crates/params/src/decl.rs) says what each argument may be.
 - The store keeps real units (dB, not 0 to 1). A host speaks in 0 to 1
-  positions, and Seam converts both ways at its boundary.
+  positions, and Seam converts both ways at its boundary. Every kind reads as
+  an `f32`: a choice as its index, 0, 1 or 2 here, and a bool as 0 or 1.
 - A choice's names are its list, and the host sees them as the parameter's text.
 - `as_bypass` tells the exporter this parameter is the host's bypass. The
   processor still implements it: the host only learns which parameter it is.
+- The key is the parameter's identity for good. The saved block stores the
+  value under it and the host's id is its hash, so a key never changes once
+  the plugin ships, though the display name may. Adding a parameter later is
+  safe: a block saved before it loads with the new parameter at its default
+  ([`SavedState::load`](../crates/host/src/state.rs)).
 
 ## 2. Write the processor
 
@@ -99,6 +112,9 @@ The processor holds an [`AudioParams`](../crates/params/src/set.rs), the handle
 a block reads parameters through. Reading takes atomics only, and the audio
 thread never allocates, locks or waits
 ([the invariants](../ARCHITECTURE.md#invariants)). The loop itself is plain DSP.
+
+Open: Seam has no smoothing yet. The gain is read once per block, at its
+start, so a change steps there, and a large one can click.
 
 ## 3. The plugin and its saved state
 
@@ -132,7 +148,21 @@ history.enroll_params();
 `ui` is the [`UiParams`](../crates/params/src/ui.rs) handle, the one an editor
 writes parameters through. Only its writes record, as a user's: a host's
 automation, a load and a learned controller never do, so undo never fights
-the host. A drag is one [gesture](glossary.md#gesture) and so one undo step.
+the host. A drag is one [gesture](glossary.md#gesture) and so one undo step,
+and so is each lone `write`, a click say, which is a gesture of one value. The
+history records once per tick, but an undo first records what changed since
+the last one, so it needs no tick before it. From the example's tests:
+
+```rust
+let gain = plugin.ui().set().id(GAIN).expect("declared");
+
+// Each lone write is a gesture of its own, so each is a step. Undo
+// records what changed since the last tick before it undoes.
+assert!(plugin.ui().write(gain, -6.0));
+assert!(plugin.ui().write(gain, -12.0));
+assert_eq!(plugin.undo(), Ok(true));
+assert_eq!(plugin.ui().value(gain), -6.0);
+```
 
 ## 5. A value that is not a parameter
 
@@ -140,11 +170,22 @@ The label is state the host knows nothing about. Two things give it a life:
 
 - A [`Value<String>`](../crates/params/src/value.rs) holds it. Enrolling it
   with `history.enroll(&label, "Rename")` makes its changes undo steps: the
-  sets between two ticks are one step, the latest winning. A
-  [`List`](../crates/params/src/list.rs)'s verbs are one step each instead.
+  sets between two ticks are one step, the latest winning, where two lone
+  writes of a parameter are two. A [`List`](../crates/params/src/list.rs)'s
+  verbs are one step each instead.
 - A [`Participant`](../crates/session/src/lib.rs) saves it. `capture` returns
   the value as a section; `apply` takes a restored section back, or `None`
   when the saved project predates the label, which must give the default.
+
+The same test goes on with the label:
+
+```rust
+// The label's sets between two ticks are one step, the latest winning.
+plugin.set_label("Vocals");
+plugin.set_label("Lead vocals");
+assert_eq!(plugin.undo(), Ok(true));
+assert_eq!(plugin.label(), "Untitled");
+```
 
 The plugin registers the participant under a stable key, `"label"`, and the
 session saves it there. Three details are easy to miss:
@@ -152,7 +193,8 @@ session saves it there. Three details are easy to miss:
 - The session holds a participant weakly, so the plugin keeps the `Rc` alive.
 - A save writes the last capture, so after a change the plugin calls
   `Registration::changed`; `label_moved` does it after each set, undo and redo.
-- A restore applies at the next tick, not when the host loads.
+- A load writes the parameters at once, before it returns, but a
+  participant's section applies at the next tick, not when the host loads.
 
 Undo replays a label step through the same `Value`, so `apply` needs no special
 case for it.
@@ -172,6 +214,12 @@ and one to `activate`:
 ```rust
 let learn = self.learn.borrow_mut().replace_audio();
 ```
+
+The saved state is an `Arc`, a `shared_ptr` whose count is atomic, because the
+host saves and loads on threads of its own; learn is shared with the session
+on the main thread only, so an `Rc`, the same without the atomics, will do,
+and its `RefCell` lends it mutably to one borrower at a time, checked at run
+time.
 
 `Learn::new` also returns an audio side, which `new` drops: `activate` takes a
 fresh one each time with `replace_audio`, and hands the processor that
@@ -219,7 +267,13 @@ and `text`, and carries the saved block through `save` and `load`.
 
 Learn and undo are driven on the plugin itself, since a host cannot reach them:
 the test arms the gain, feeds a controller through the processor, calls `idle`,
-and saves and reloads to check the mapping survives.
+and saves and reloads to check the mapping survives. Run the example's tests,
+this guide's check among them, with:
+
+```sh
+cargo test -p seam-example-gain
+```
+
 [docs/testing.md](testing.md) says what each CI lane proves.
 
 ## 9. Build and bundle the module
@@ -242,8 +296,38 @@ cp target/release/seam_example_gain.dll \
 ```
 
 Copy the bundle to `C:\Program Files\Common Files\VST3` and rescan in the host.
-Open: CI lays out and validates the Windows bundle only. The macOS bundle is
-not built yet.
+The plugin has no editor, so the host shows its own generic controls for the
+three parameters. [pluginval](https://github.com/Tracktion/pluginval) checks a
+bundle without a host. CI runs version 1.0.4 on the EQ's bundle with these
+options; for the gain's:
+
+```sh
+pluginval --strictness-level 5 --validate-in-process --skip-gui-tests \
+  "bundle/Seam Example Gain.vst3"
+```
+
+Open: CI lays out and validates the EQ's Windows bundle only, not the gain's.
+The macOS bundle is not built yet.
+
+## Your own crate
+
+Seam's crates are not published yet, so a plugin outside this repository takes
+them from git or from a checkout. Copy `examples/gain` to a folder of its own,
+delete `tests/guide.rs`, which checks this guide against the example, and
+change the manifest:
+
+- In `[package]`, give each `.workspace = true` a value of your own: edition
+  2024 and a `rust-version` of 1.99 or later, as Seam's.
+- Point each Seam dependency, in `[dev-dependencies]` too, at where it lives:
+  `seam-host = { git = "https://github.com/nicvlav/seam", rev = "..." }`,
+  or `seam-host = { path = "../seam/crates/host" }` for a checkout. Pin one
+  `rev` for every Seam crate, since before 1.0 a minor version may break the
+  API. The dev-dependency on `seam-host` keeps its `features` beside its
+  source.
+- Copy the root manifest's `[workspace.lints.rust]` and
+  `[workspace.lints.clippy]` tables in as `[lints.rust]` and `[lints.clippy]`,
+  or drop the `[lints]` table, and copy its `[profile.release]` for the same
+  release build.
 
 ## Where to read on
 

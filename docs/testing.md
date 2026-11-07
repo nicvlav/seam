@@ -68,6 +68,11 @@ file runs it.
 | Nightly: `soak` (Linux, Windows) | The matrix's conditions, drawn at random for 30 minutes, with random parameter moves, produced no allocation, fault, NaN, denormal or drift from the processor driven directly. |
 | Weekly: `soak` | The same for 3 hours. |
 
+A plugin crate builds the VST3 module by default, which refuses to build on
+Linux. So a plugin crate added to the workspace joins the `--exclude` lists of
+the steps that build default features there: the core-alone build and the
+cross check in `ci.yml`, and the miri run in `nightly.yml`.
+
 The rules below each close a class of failure that reaches a release. Their
 tools live in `crates/testkit`, except the boundary record, which lives with the
 exporters in `seam-host`.

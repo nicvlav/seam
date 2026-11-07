@@ -96,6 +96,27 @@ fn undo_and_redo_restore_the_label_and_its_saved_state() {
 }
 
 #[test]
+fn two_lone_writes_are_two_steps_and_the_labels_sets_between_ticks_are_one() {
+    let mut plugin = Gain::new();
+    let gain = plugin.ui().set().id(GAIN).expect("declared");
+
+    // Each lone write is a gesture of its own, so each is a step. Undo
+    // records what changed since the last tick before it undoes.
+    assert!(plugin.ui().write(gain, -6.0));
+    assert!(plugin.ui().write(gain, -12.0));
+    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.ui().value(gain), -6.0);
+
+    // The label's sets between two ticks are one step, the latest winning.
+    plugin.set_label("Vocals");
+    plugin.set_label("Lead vocals");
+    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.label(), "Untitled");
+    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.ui().value(gain), 0.0);
+}
+
+#[test]
 fn a_learned_controller_drives_the_gain() {
     let mut plugin = Gain::new();
     let mut processor = plugin.activate(&ProcessSetup {
