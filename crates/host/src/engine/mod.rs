@@ -199,16 +199,21 @@ impl Answers {
     /// Reads the plugin's latency and tail, returning the latency.
     fn read(&self, plugin: &impl Plugin) -> u32 {
         let latency = plugin.latency();
-        let tail = match plugin.tail() {
-            Tail::None => TAIL_NONE,
-            // One frame short of forever, so a finite tail never reads as
-            // infinite.
-            Tail::Frames(frames) => frames.min(TAIL_INFINITE - 1),
-            Tail::Infinite => TAIL_INFINITE,
-        };
+        let tail = tail_answer(plugin.tail());
         self.latency.store(latency, Ordering::Release);
         self.tail.store(tail, Ordering::Release);
         latency
+    }
+}
+
+/// What `tail` answers for `tail`.
+fn tail_answer(tail: Tail) -> u32 {
+    match tail {
+        Tail::None => TAIL_NONE,
+        // One frame short of forever, so a finite tail never reads as
+        // infinite.
+        Tail::Frames(frames) => frames.min(TAIL_INFINITE - 1),
+        Tail::Infinite => TAIL_INFINITE,
     }
 }
 
@@ -800,5 +805,40 @@ impl<P: Plugin, H> std::fmt::Debug for Engine<P, H> {
         f.debug_struct("Engine")
             .field("plugin", &P::INFO.name)
             .finish_non_exhaustive()
+    }
+}
+
+// What the engine answers before any exporter is involved, so these build
+// with no feature, unlike `tests`, which drives the engine through them.
+#[cfg(test)]
+mod core_tests {
+    use super::{MAX_FRAMES, Setup, TAIL_INFINITE, TAIL_NONE, Tail, tail_answer};
+
+    #[test]
+    fn a_rate_that_is_not_positive_and_finite_builds_no_setup() {
+        for rate in [0.0, -0.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert_eq!(Setup::new(rate, 512), None, "{rate}");
+        }
+        assert!(Setup::new(f64::MIN_POSITIVE, 512).is_some());
+    }
+
+    #[test]
+    fn a_block_size_of_0_takes_the_fallbacks_and_a_longer_one_the_most() {
+        let fallback = Setup::new(48_000.0, 0).expect("a good rate");
+        assert_eq!(fallback.sample_rate, 48_000.0, "the rate is kept");
+        assert_eq!(fallback.max_frames, Setup::FALLBACK.max_frames);
+        for frames in [MAX_FRAMES + 1, usize::MAX] {
+            let setup = Setup::new(96_000.0, frames).expect("a good rate");
+            assert_eq!(setup.sample_rate, 96_000.0, "the rate is kept");
+            assert_eq!(setup.max_frames.get(), MAX_FRAMES, "{frames}");
+        }
+    }
+
+    #[test]
+    fn a_finite_tail_never_answers_as_infinite() {
+        assert_eq!(tail_answer(Tail::None), TAIL_NONE);
+        assert_eq!(tail_answer(Tail::Frames(48_000)), 48_000);
+        assert_eq!(tail_answer(Tail::Frames(u32::MAX)), u32::MAX - 1);
+        assert_eq!(tail_answer(Tail::Infinite), TAIL_INFINITE);
     }
 }
