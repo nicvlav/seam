@@ -420,6 +420,7 @@ dependencies = [
  "seam-learn",
  "seam-params",
  "seam-session",
+ "seam-testkit",
  "seam-ump",
  "seam-undo",
 ]

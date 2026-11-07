@@ -35,6 +35,7 @@ seam-undo.workspace = true
 [dev-dependencies]
 seam-host = { workspace = true, features = ["vst3", "test-host"] }
 seam-ump.workspace = true
+seam-testkit.workspace = true
 
 [lints]
 workspace = true
