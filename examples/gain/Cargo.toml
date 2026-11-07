@@ -1,0 +1,40 @@
+[package]
+name = "seam-example-gain"
+description = "The example gain: a gain, a bypass, three modes, an undoable label and MIDI learn, on Seam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "gain", "vst3", "example"]
+categories = ["multimedia::audio"]
+publish.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+# The cdylib is the VST3 module; the rlib lets tests drive it in-process.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["vst3"]
+# The VST3 module's entry points, through Seam's exporter.
+vst3 = ["seam-host/vst3"]
+
+[dependencies]
+seam-host.workspace = true
+seam-learn.workspace = true
+seam-params.workspace = true
+seam-session.workspace = true
+seam-undo.workspace = true
+
+[dev-dependencies]
+seam-host = { workspace = true, features = ["vst3", "test-host"] }
+seam-ump.workspace = true
+
+[lints]
+workspace = true

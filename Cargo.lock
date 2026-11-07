@@ -413,6 +413,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "seam-example-gain"
+version = "0.1.0"
+dependencies = [
+ "seam-host",
+ "seam-learn",
+ "seam-params",
+ "seam-session",
+ "seam-ump",
+ "seam-undo",
+]
+
+[[package]]
 name = "seam-host"
 version = "0.1.0"
 dependencies = [
