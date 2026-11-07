@@ -1,9 +1,10 @@
 # Seam
 
 Declare a plugin parameter once, in Rust, and it is automation-correct,
-undo-clean, MIDI-learnable, persisted, and reachable from a React page as a
-typed thing. VST3 sees it natively; AU, AAX and hosting see it through a generic
-JUCE adapter driven by a generated C header.
+undo-clean and persisted. VST3 sees it natively; AU, AAX and hosting see it
+through a generic JUCE adapter driven by a generated C header. MIDI learn and a
+typed React page are built on the same declaration, though neither reaches a
+plugin in a host yet ([Status](#status)).
 
 ## Purpose
 
@@ -79,9 +80,11 @@ python3 scripts/check-decision-index.py
 cd page && npm ci && npm run typecheck && npm test
 ```
 
-These are the checks a change most often trips. CI runs more, the release
-allocation gates and the loom models among them:
-[docs/testing.md](docs/testing.md) lists every lane and what it proves.
+These are the checks a change most often trips. Run the scripts with `python3`
+(`python` on Windows), from a git checkout with `git` on the path: the comment
+check reads the files git tracks. CI runs more, the release allocation gates
+and the loom models among them: [docs/testing.md](docs/testing.md) lists every
+lane and what it proves.
 
 ## Licence
 
