@@ -42,11 +42,11 @@ use crate::state::SavedState;
 /// What the exporters do for every plugin, so none writes it:
 ///
 /// - **Bypass.** A parameter declared with
-///   [`bypass`](seam_params::ParamDecl::bypass) is the one the host drives
-///   as bypass, and the processor implements it. A plugin that declares none
-///   leaves bypass to the host. None of Seam's exporters adds a hidden
-///   parameter, though JUCE's VST3 wrapper does when the JUCE adapter hosts
-///   the plugin.
+///   [`as_bypass`](seam_params::ParamDecl::as_bypass) is the one the host
+///   drives as bypass, and the processor implements it. A plugin that
+///   declares none leaves bypass to the host. None of Seam's exporters adds a
+///   hidden parameter, though JUCE's VST3 wrapper does when the JUCE adapter
+///   hosts the plugin.
 /// - **Programs.** A plugin has one program, and the exporters offer the
 ///   host none to choose.
 /// - **Samples.** 32-bit float only: an exporter refuses a host that asks
@@ -448,6 +448,9 @@ pub trait Processor: Send + 'static {
     /// behaviour. The exporter therefore copies the input in only when the
     /// host's buffers are separate. Even the first block after activation
     /// allocates nothing.
+    ///
+    /// Open: no exporter carries a block's MIDI either way yet, as
+    /// [`PluginInfo::midi_input`] says.
     ///
     /// Thread: audio. Never allocates, locks or makes a system call.
     fn process(&mut self, block: Block<'_, '_>) -> Status;

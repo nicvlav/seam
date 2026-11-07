@@ -20,8 +20,9 @@ pub enum Category {
 }
 
 /// What a plugin does, finer than its [`Category`]: each exporter lists it
-/// in its format's own words (VST3's subcategories, CLAP's features).
-/// More join as plugins need them.
+/// in its format's own words, as VST3's subcategories, and as CLAP's
+/// features once the planned CLAP exporter is built. More join as plugins
+/// need them.
 ///
 /// # Examples
 ///
@@ -174,11 +175,17 @@ pub struct PluginInfo {
     pub layouts: &'static [Layout],
     /// Whether it takes MIDI input (for MIDI learn, or notes).
     ///
-    /// Open: no exporter delivers MIDI yet. The VST3 exporter shows a host
-    /// an event input bus for it, and the block's events stay empty.
+    /// Open: no exporter carries MIDI either way yet. The VST3 exporter shows
+    /// a host an event bus for each direction a plugin declares, but a
+    /// block's [`events`](crate::Block::events) stay empty, and what a
+    /// processor pushes to [`out_events`](crate::Block::out_events) reaches
+    /// no host.
     pub midi_input: bool,
     /// Whether it sends MIDI (a MIDI effect, or MIDI-CI replies), through
     /// [`Block::out_events`](crate::Block::out_events).
+    ///
+    /// Open: no exporter sends it yet, as [`midi_input`](Self::midi_input)
+    /// says.
     pub midi_output: bool,
 }
 

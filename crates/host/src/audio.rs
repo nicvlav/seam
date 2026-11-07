@@ -102,13 +102,20 @@ pub struct Block<'a, 'b> {
     /// [`ProcessSetup::max_frames`], which plays as several blocks. Each
     /// later one finds what the earlier ones sent, already at frames from
     /// the host's block's start.
+    ///
+    /// Open: no exporter sends it to a host yet, as
+    /// [`PluginInfo::midi_input`](crate::PluginInfo::midi_input) says.
     pub out_events: &'a mut EventList,
 }
 
 /// What a block's processing tells the host about the next ones.
 ///
-/// CLAP's process status, which a host uses to stop calling a quiet plugin.
-/// VST3 has no such answer, so its exporter ignores it.
+/// It is CLAP's process status, which a host uses to stop calling a quiet
+/// plugin. VST3 has no such answer, so its exporter ignores it.
+///
+/// Open: no built exporter acts on it. The C interface answers it from
+/// `process`, and the JUCE adapter, which calls that, ignores it. A CLAP
+/// exporter is planned, not built.
 ///
 /// # Examples
 ///
