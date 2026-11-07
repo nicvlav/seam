@@ -23,12 +23,20 @@ publish = false
 # The core (layers 1 to 3) builds with no window, WebView or host dependency.
 [workspace.dependencies]
 seam-params = { path = "crates/params" }
+seam-session = { path = "crates/session" }
+seam-ump = { path = "crates/ump" }
 # Tests only.
 seam-testkit = { path = "crates/testkit" }
 
 # `float_roundtrip` parses every f64 to the nearest value, so a save, a load
 # and a save write the same digits; without it about one in ten drifts a bit.
 serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
+# Learn's dispatch snapshot: the audio thread takes the newest table
+# without waiting, and a replaced one drops on the UI thread. MPL-2.0, used
+# unmodified (THIRD-PARTY-NOTICES).
+# Pinned exactly: the snapshot's soundness rests on this version's source,
+# as crates/learn/src/snapshot.rs checks it.
+triple_buffer = "=9.0.0"
 # Tests only: property tests. CI raises the case count on pushes to main
 # (PROPTEST_CASES). No forking or timeouts, which need extra crates.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

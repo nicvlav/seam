@@ -1,0 +1,18 @@
+Third-party notices
+
+A plugin built with Seam carries code from the works below. Each notice is
+quoted from the work as it is used here.
+
+-------------------------------------------------------------------------------
+triple_buffer (Hadrien G.), version 9.0.0
+-------------------------------------------------------------------------------
+
+MIDI learn's dispatch snapshot uses the `triple_buffer` crate, version 9.0.0,
+unmodified. Its source is available from crates.io
+(https://crates.io/crates/triple_buffer/9.0.0) and from
+https://github.com/HadrienG2/triple-buffer. Its notice, from Exhibit A of the
+licence its `LICENSE` file carries:
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.

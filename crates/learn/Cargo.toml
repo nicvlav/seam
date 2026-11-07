@@ -1,0 +1,35 @@
+[package]
+name = "seam-learn"
+description = "MIDI learn: capture a controller, bind it to a parameter, and dispatch on the audio thread through a published snapshot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["midi", "midi-learn", "controller", "audio", "plugin"]
+categories = ["multimedia::audio", "concurrency"]
+publish.workspace = true
+
+[dependencies]
+seam-params.workspace = true
+seam-session.workspace = true
+seam-ump.workspace = true
+serde_json.workspace = true
+triple_buffer.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+seam-testkit.workspace = true
+iai-callgrind.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "iai"
+harness = false
