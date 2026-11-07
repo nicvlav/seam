@@ -14,8 +14,12 @@
     )
 )]
 
+#[cfg(loom)]
+use loom::sync::atomic::AtomicBool;
 use std::num::NonZeroUsize;
 use std::panic::{self, AssertUnwindSafe};
+#[cfg(not(loom))]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use seam_params::audio_thread;
@@ -132,6 +136,44 @@ pub(super) fn run_held<R, T>(
     }
 }
 
+/// A reset asked of the processor in the audio slot, which the next block
+/// on it runs first.
+pub(super) struct PendingReset(AtomicBool);
+
+impl PendingReset {
+    pub(super) fn new() -> Self {
+        PendingReset(AtomicBool::new(false))
+    }
+
+    /// Asks the next block to reset its processor first. Any thread.
+    pub(super) fn ask(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    /// Whether a reset was asked, clearing the request: for a block that
+    /// holds the slot.
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// Puts `audio` in `slot` for an activation, returning the processor it
+/// replaces. A reset asked of that one is dropped, since the new one has
+/// nothing to clear.
+///
+/// The request is cleared while the slot is held. A block reaches the new
+/// processor only by holding the slot after that, so a reset asked once a
+/// block has run on it is kept for the next one.
+pub(super) fn install<R>(
+    slot: &AudioSlot<Option<Audio<R>>>,
+    reset: &PendingReset,
+    audio: Audio<R>,
+) -> Option<Audio<R>> {
+    let mut held = slot.hold();
+    reset.0.store(false, Ordering::Release);
+    held.replace(audio)
+}
+
 /// What a block came to, for the shell to answer its host with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -211,7 +253,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             return Outcome::Empty;
         }
         let held = run_held(&self.audio, |audio| {
-            if self.reset_pending.swap(false, Ordering::AcqRel) {
+            if self.reset.take() {
                 audio.processor.reset();
             }
             // An exporter's MIDI in is to fill the list here; none does yet.
@@ -320,7 +362,7 @@ mod loom_models {
 
     use std::num::NonZeroUsize;
 
-    use super::{Audio, Held, run_held};
+    use super::{Audio, Held, PendingReset, install, run_held};
     use crate::Layout;
     use crate::boundary::AudioSlot;
 
@@ -366,6 +408,36 @@ mod loom_models {
             let new = slot.try_hold().expect("free once both let go");
             let new = new.as_ref().expect("the activation's processor");
             assert_eq!(new.faulted, ran_on == Some(2), "the activation's processor");
+        });
+    }
+
+    /// A block, then a reset asked once it is done, as a host's stop of
+    /// processing asks one, race an activation that installs a processor
+    /// and drops the resets asked of the one it replaces. Whatever the
+    /// interleaving, once the block ran on the new processor the reset
+    /// asked after it is kept for the next block.
+    #[test]
+    fn loom_a_reset_asked_after_a_block_on_a_new_processor_is_kept() {
+        loom::model(|| {
+            let slot = Arc::new(AudioSlot::new(audio(1)));
+            let reset = Arc::new(PendingReset::new());
+            let (audio_side, asked) = (Arc::clone(&slot), Arc::clone(&reset));
+            let block = loom::thread::spawn(move || {
+                // As a block takes the request before it plays.
+                let held = run_held(&audio_side, |audio: &mut Audio<Built>| {
+                    asked.take();
+                    audio.processor.0
+                });
+                asked.ask();
+                held
+            });
+            let old = install(&slot, &reset, audio(2).expect("built"));
+            let held = block.join().expect("the audio thread");
+
+            assert_eq!(old.map(|old| old.processor.0), Some(1));
+            if held == Held::Ran(2) {
+                assert!(reset.take(), "the reset asked after the new one ran");
+            }
         });
     }
 }

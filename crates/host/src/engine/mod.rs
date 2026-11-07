@@ -31,9 +31,9 @@ use automation::Automation;
 pub(crate) use automation::Points;
 #[cfg(all(test, feature = "vst3"))]
 pub(crate) use automation::{MAX_SKIPPED_QUEUES, Point};
-use process::Audio;
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub(crate) use process::Outcome;
+use process::{Audio, PendingReset, install};
 use timer::{Handle, Timer, abandon};
 
 #[cfg(feature = "cabi")]
@@ -316,9 +316,8 @@ pub(crate) struct Engine<P: Plugin, H> {
     /// Between the host's start and stop of processing, or the deactivation
     /// that ends it too.
     processing: AtomicBool,
-    /// Set when a reset is asked for: the next block resets the processor
-    /// first.
-    reset_pending: AtomicBool,
+    /// A reset asked for, which the next block runs first.
+    reset: PendingReset,
     /// Set once the shell released the engine and it leaks: its tick does
     /// nothing more.
     released: AtomicBool,
@@ -400,7 +399,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             saved,
             answers,
             processing: AtomicBool::new(false),
-            reset_pending: AtomicBool::new(false),
+            reset: PendingReset::new(),
             released: AtomicBool::new(false),
             timer_handle: OnceLock::new(),
             automation: AudioSlot::new(automation),
@@ -468,7 +467,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
 
     /// Asks the next block to reset the processor first. Any thread.
     pub(crate) fn request_reset(&self) {
-        self.reset_pending.store(true, Ordering::Release);
+        self.reset.ask();
     }
 
     /// The main-thread state for one call, as the threading rule above
@@ -562,8 +561,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         let audio = Audio::new(&mut *plugin, setup, layout, |midi| {
             if midi { MAX_EVENTS } else { 0 }
         });
-        let previous = self.audio.hold().replace(audio);
-        self.reset_pending.store(false, Ordering::Release);
+        let previous = install(&self.audio, &self.reset, audio);
         self.answers.set_layout(layout);
         main.active.set(true);
         if let Some(previous) = previous {
