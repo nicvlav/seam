@@ -834,7 +834,7 @@ move its line here; when a decision gains code, add one.
 
 [Record section](transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block)
 
-- `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::version`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
+- `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::versions`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
 - test `crates/host/tests/state.rs`: `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `a_newer_builds_block_keeps_its_version_and_values_through_an_older_builds_save`, `a_fresh_state_and_one_that_loaded_an_older_block_save_their_own_version`, `unknown_top_level_keys_are_kept_saved_after_extra_in_key_order_and_replaced_by_the_next_load`, `a_block_within_the_limit_that_would_save_back_past_it_is_refused_and_changes_nothing`
 
 ### D81. A registration made while a panic unwinds

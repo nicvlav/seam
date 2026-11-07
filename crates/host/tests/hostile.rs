@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use seam_host::SavedState;
+use seam_host::{LoadError, SavedState};
 use seam_params::{Kind, ParamDecl, ParamSet};
 use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
 use serde_json::json;
@@ -127,8 +127,10 @@ fn check(block: &[u8], case: &str) -> bool {
     let (a, b) = (plugin(0), plugin(3));
     let before = (b.values(), b.state.save(), b.set.clock().reader().stamp());
     let (took_a, took_b) = (a.state.load(block), b.state.load(block));
+    let refusal = |took: &Result<(), LoadError>| took.as_ref().err().map(std::mem::discriminant);
     assert_eq!(
-        took_a, took_b,
+        refusal(&took_a),
+        refusal(&took_b),
         "{case}: recognised or not whatever was there"
     );
     if took_b.is_err() {
@@ -259,7 +261,16 @@ fn block(random: &mut Random) -> String {
         1 => format!(",\"extra\":{}", object(random, 3)),
         _ => format!(",\"extra\":{}", value(random, 3)),
     };
-    format!("{{\"seamStateVersion\":{version},\"parameters\":{parameters}{extra}}}")
+    // Drawn last, so the parts above are as they were before it existed.
+    let plugin = match random.below(4) {
+        0 | 1 => String::new(),
+        2 => format!(
+            ",\"pluginStateVersion\":{}",
+            random.pick(&["0", "1", "2", "1.0"])
+        ),
+        _ => format!(",\"pluginStateVersion\":{}", value(random, 1)),
+    };
+    format!("{{\"seamStateVersion\":{version}{plugin},\"parameters\":{parameters}{extra}}}")
 }
 
 /// How many cases each property runs.

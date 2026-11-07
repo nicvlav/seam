@@ -2,6 +2,7 @@
 //! JSON object.
 
 use std::borrow::Cow;
+use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -9,12 +10,19 @@ use seam_params::{Kind, ParamSet};
 use seam_session::{Restored, Session};
 use serde_json::{Map, Value as Json};
 
-/// The version of the block's shape this build of Seam writes, and the least a
-/// plugin's own version may be (see [`SavedState::with_migration`]).
+/// The version of the block's frame this build of Seam writes: the shape Seam
+/// gives `parameters`, `extra` and the keys a load keeps. A plugin's own
+/// schema has a version of its own (see [`SavedState::with_migration`]).
 pub const STATE_VERSION: u64 = 1;
 
-/// A plugin's upgrade of an older block, in place; false when it cannot.
-type Migrate = dyn Fn(u64, &mut Map<String, Json>) -> bool + Send + Sync;
+/// The key of the frame's version, [`STATE_VERSION`].
+const SEAM_VERSION: &str = "seamStateVersion";
+/// The key of the plugin's own schema version.
+const PLUGIN_VERSION: &str = "pluginStateVersion";
+
+/// A plugin's upgrade of an older block, in place, or why it cannot.
+type Migrate =
+    dyn Fn(u64, &mut Map<String, Json>) -> Result<(), Box<dyn Error + Send + Sync>> + Send + Sync;
 
 /// The longest saved block a load reads, 64 MiB: a longer one is refused, so a
 /// host's endless or corrupt stream cannot exhaust memory.
@@ -43,12 +51,12 @@ pub const MAX_STATE_BYTES: usize = seam_session::MAX_STATE_BYTES;
 /// let gain = ParamDecl::new("gain", "Gain", Kind::continuous(0.0, 1.0, 0.0, None), 0.0);
 /// let set = ParamSet::from_decls([gain])?;
 /// let state = SavedState::new(&set, &Session::new(&set));
-/// assert_eq!(state.load(b"[]"), Err(LoadError::NotAnObject));
-/// assert_eq!(state.load(b"{\"parameters\":{}}"), Err(LoadError::BadVersion));
+/// assert!(matches!(state.load(b"[]"), Err(LoadError::NotAnObject)));
+/// assert!(matches!(state.load(b"{\"parameters\":{}}"), Err(LoadError::BadVersion)));
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum LoadError {
     /// The block is longer than [`MAX_STATE_BYTES`], or would save back
@@ -61,8 +69,12 @@ pub enum LoadError {
     NotAnObject,
     /// `seamStateVersion` is missing, not a whole number, or below 1.
     BadVersion,
-    /// The plugin's migration could not upgrade the block's older version.
-    MigrationFailed,
+    /// `pluginStateVersion` is present but not a whole number from 0.
+    BadPluginVersion,
+    /// The plugin's migration could not upgrade the block's older plugin
+    /// version, for the reason it holds, which is also its
+    /// [`source`](Error::source).
+    MigrationFailed(Box<dyn Error + Send + Sync>),
     /// `parameters` is missing or not an object.
     BadParameters,
 }
@@ -76,15 +88,25 @@ impl fmt::Display for LoadError {
             LoadError::NotJson => "the saved block is not one JSON value",
             LoadError::NotAnObject => "the saved block is not a JSON object",
             LoadError::BadVersion => {
-                "the saved block's version is missing or not a whole number from 1"
+                "the saved block's seamStateVersion is missing or not a whole number from 1"
             }
-            LoadError::MigrationFailed => "the plugin could not upgrade the saved block's version",
+            LoadError::BadPluginVersion => {
+                "the saved block's pluginStateVersion is not a whole number from 0"
+            }
+            LoadError::MigrationFailed(_) => "the plugin could not upgrade the saved block",
             LoadError::BadParameters => "the saved block's parameters are missing or not an object",
         })
     }
 }
 
-impl std::error::Error for LoadError {}
+impl Error for LoadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            LoadError::MigrationFailed(reason) => Some(&**reason),
+            _ => None,
+        }
+    }
+}
 
 /// A plugin instance's saved state: what the host saves and restores.
 ///
@@ -124,24 +146,49 @@ impl std::error::Error for LoadError {}
 pub struct SavedState {
     set: Arc<ParamSet>,
     session: Session,
-    /// The version this build writes.
-    version: u64,
-    /// Upgrades a block of an older version before it loads.
-    migrate: Option<Box<Migrate>>,
+    /// The plugin's own schema, when it has a migration; at 0 without.
+    migration: Option<Migration>,
     /// The most bytes a block of this set takes besides the session's `extra`
-    /// object and the unknown keys: its frame at the longest version, and
+    /// object and the unknown keys: its frame at the longest versions, and
     /// every declared parameter at its longest value.
     declared_bytes: usize,
     /// Held across a whole save or load, so the two never interleave.
     last: Mutex<LastLoad>,
 }
 
+/// The plugin's schema version and its upgrade of a block of an older one.
+struct Migration {
+    version: u64,
+    migrate: Box<Migrate>,
+}
+
 /// What the last load left for the saves after it.
 #[derive(Debug, Default)]
 struct LastLoad {
-    /// The version of the block it took, 0 before any.
-    version: u64,
+    /// The versions of the block it took, both 0 before any.
+    versions: Versions,
     unknown: Unknown,
+}
+
+/// A block's two versions, each kept on its own: Seam's frame and the
+/// plugin's schema.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Versions {
+    /// `seamStateVersion`, from 1.
+    seam: u64,
+    /// `pluginStateVersion`, 0 when absent.
+    plugin: u64,
+}
+
+impl Versions {
+    /// Each version the higher of the two, so a block a newer build wrote
+    /// keeps each number it carries.
+    fn newest(self, other: Versions) -> Versions {
+        Versions {
+            seam: self.seam.max(other.seam),
+            plugin: self.plugin.max(other.plugin),
+        }
+    }
 }
 
 /// The most bytes a declared parameter's value takes in the block.
@@ -218,8 +265,8 @@ fn sorted(map: &Map<String, Json>) -> Vec<(&String, &Json)> {
 impl std::fmt::Debug for SavedState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SavedState")
-            .field("version", &self.version)
-            .field("migrates", &self.migrate.is_some())
+            .field("plugin_version", &self.versions().plugin)
+            .field("migrates", &self.migration.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -237,9 +284,10 @@ impl SavedState {
             session.uses(set),
             "the session was made from another ParamSet; make the Session from the same ParamSet"
         );
+        let longest = u64::MAX;
         let frame = format!(
-            "{{\"seamStateVersion\":{},\"parameters\":{{}},\"extra\":}}",
-            u64::MAX
+            "{{\"{SEAM_VERSION}\":{longest},\"{PLUGIN_VERSION}\":{longest},\
+             \"parameters\":{{}},\"extra\":}}"
         );
         // Each parameter writes `"key":value` and a `,` or the `}` after it.
         let parameters: usize = set
@@ -249,8 +297,7 @@ impl SavedState {
         let state = SavedState {
             set: Arc::clone(set),
             session: session.clone(),
-            version: STATE_VERSION,
-            migrate: None,
+            migration: None,
             declared_bytes: frame.len() + parameters,
             last: Mutex::default(),
         };
@@ -267,15 +314,19 @@ impl SavedState {
         MAX_STATE_BYTES.saturating_sub(self.declared_bytes + unknown.bytes())
     }
 
-    /// Returns this saved state writing blocks of `version`, and upgrading
-    /// a block of any older version with `migrate` before it loads.
+    /// Returns this saved state writing blocks of the plugin's own schema
+    /// `version`, and upgrading a block of any older one with `migrate`
+    /// before it loads.
     ///
-    /// A plugin raises its version when a block of the old shape would load
-    /// wrong: a parameter renamed or rescaled, a section restructured.
-    /// `migrate` gets the block's version and the block, as a JSON object
-    /// with its `parameters` and `extra`. `migrate` rewrites the block in
-    /// place into the current shape, and returns false for a block it cannot
-    /// upgrade, which is then not recognised and changes nothing. A block of
+    /// The plugin's version is its own, apart from Seam's frame
+    /// ([`STATE_VERSION`]). A block carries it as `pluginStateVersion`, and a
+    /// plugin with no migration is at 0, as is a block without the key. A
+    /// plugin raises it when a block of the old shape would load wrong: a
+    /// parameter renamed or rescaled, a section restructured. `migrate` gets
+    /// the block's plugin version and the block, as a JSON object with its
+    /// `parameters` and `extra`. `migrate` rewrites the block in place into
+    /// the current shape, or returns why it cannot, and the load then fails
+    /// with [`LoadError::MigrationFailed`] and changes nothing. A block of
     /// this version or a newer one loads as it is. `migrate` runs inside the
     /// load, on whichever thread the host loads from, so it touches only the
     /// block.
@@ -290,60 +341,80 @@ impl SavedState {
     /// A value it wrote back in the old scale under the same key would then
     /// load here as it is, never migrated.
     ///
-    /// # Panics
-    ///
-    /// When `version` is below [`STATE_VERSION`].
-    ///
     /// # Examples
     ///
-    /// Version 2 of a plugin renamed its `level` parameter `gain`:
+    /// Version 1 of a plugin's state renamed its `level` parameter `gain`:
     ///
     /// ```
-    /// use seam_host::SavedState;
+    /// use seam_host::{LoadError, SavedState};
     /// use seam_params::{Kind, ParamDecl, ParamSet};
     /// use seam_session::Session;
     /// use serde_json::Value;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let set = ParamSet::from_decls([
     ///     ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0)
     ///         .with_unit("dB"),
-    /// ])
-    /// .expect("a valid declaration");
-    /// let state = SavedState::new(&set, &Session::new(&set)).with_migration(2, |from, block| {
-    ///     if from < 2 {
-    ///         let Some(Value::Object(parameters)) = block.get_mut("parameters") else {
-    ///             return false;
-    ///         };
+    /// ])?;
+    /// let state = SavedState::new(&set, &Session::new(&set)).with_migration(1, |from, block| {
+    ///     if from < 1 {
+    ///         let parameters = block
+    ///             .get_mut("parameters")
+    ///             .and_then(Value::as_object_mut)
+    ///             .ok_or("the parameters are not an object")?;
     ///         if let Some(level) = parameters.remove("level") {
     ///             parameters.entry("gain").or_insert(level);
     ///         }
     ///     }
-    ///     true
+    ///     Ok(())
     /// });
     ///
-    /// let gain = set.id("gain").expect("declared");
-    /// assert!(state.load(br#"{"seamStateVersion": 1, "parameters": {"level": 6}}"#).is_ok());
+    /// // A block from before the rename has no plugin version: it is at 0.
+    /// let gain = set.id("gain").ok_or("declared")?;
+    /// state.load(br#"{"seamStateVersion": 1, "parameters": {"level": 6}}"#)?;
     /// assert_eq!(set.value(gain), 6.0);
-    /// assert!(state.save().starts_with(br#"{"seamStateVersion":2,"#));
+    /// assert!(state.save().starts_with(br#"{"seamStateVersion":1,"pluginStateVersion":1,"#));
     ///
     /// // A `gain` the block holds already, kept by an older build from a newer one, stands.
     /// let both = br#"{"seamStateVersion": 1, "parameters": {"level": 6, "gain": 3}}"#;
-    /// assert!(state.load(both).is_ok());
+    /// state.load(both)?;
     /// assert_eq!(set.value(gain), 3.0);
+    ///
+    /// // The reason a migration gives reaches the host's load.
+    /// let Err(LoadError::MigrationFailed(reason)) =
+    ///     state.load(br#"{"seamStateVersion": 1, "parameters": []}"#)
+    /// else {
+    ///     panic!("not migrated");
+    /// };
+    /// assert_eq!(reason.to_string(), "the parameters are not an object");
+    /// # Ok(())
+    /// # }
     /// ```
     #[must_use]
     pub fn with_migration(
         mut self,
         version: u64,
-        migrate: impl Fn(u64, &mut Map<String, Json>) -> bool + Send + Sync + 'static,
+        migrate: impl Fn(u64, &mut Map<String, Json>) -> Result<(), Box<dyn Error + Send + Sync>>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
-        assert!(
-            version >= STATE_VERSION,
-            "a saved state writes version {STATE_VERSION} or later"
-        );
-        self.version = version;
-        self.migrate = Some(Box::new(migrate));
+        self.migration = Some(Migration {
+            version,
+            migrate: Box::new(migrate),
+        });
         self
+    }
+
+    /// The versions this build writes: Seam's frame, and the plugin's schema.
+    fn versions(&self) -> Versions {
+        Versions {
+            seam: STATE_VERSION,
+            plugin: self
+                .migration
+                .as_ref()
+                .map_or(0, |migration| migration.version),
+        }
     }
 
     /// Returns the parameter set it saves and loads.
@@ -355,16 +426,19 @@ impl SavedState {
     }
 
     /// Returns the block as UTF-8 JSON with no byte-order mark:
-    /// `{"seamStateVersion": 1, "parameters": {...}, "extra": {...}}`.
+    /// `{"seamStateVersion": 1, "pluginStateVersion": 0, "parameters": {...},
+    /// "extra": {...}}`.
     ///
-    /// The parameters come in declaration order, then the unknown keys the
-    /// last load kept. The session's `extra` is left out when there is
-    /// nothing in it. Last come the top-level keys the last load held that
-    /// this build does not read, in key order. The version is the higher of
-    /// this build's and the last loaded block's, so a newer build that loads
-    /// the block does not migrate it as an older one, and finds what it wrote.
-    /// A bool writes `true` or `false`, a choice its index as an integer, and
-    /// everything else a double that holds the stored `f32` exactly.
+    /// Both versions are always written, the plugin's at 0 too, so every
+    /// block says what it holds. Each is the higher of this build's and the
+    /// last loaded block's, on its own, so a newer build that loads the block
+    /// does not migrate it as an older one, and finds what it wrote. The
+    /// parameters come in declaration order, then the unknown keys the last
+    /// load kept. The session's `extra` is left out when there is nothing in
+    /// it. Last come the top-level keys the last load held that this build
+    /// does not read, in key order. A bool writes `true` or `false`, a choice
+    /// its index as an integer, and everything else a double that holds the
+    /// stored `f32` exactly.
     ///
     /// Thread: any but audio.
     ///
@@ -381,7 +455,10 @@ impl SavedState {
     /// let state = SavedState::new(&set, &Session::new(&set));
     ///
     /// let block = String::from_utf8(state.save())?;
-    /// assert_eq!(block, r#"{"seamStateVersion":1,"parameters":{"bypass":true}}"#);
+    /// assert_eq!(
+    ///     block,
+    ///     r#"{"seamStateVersion":1,"pluginStateVersion":0,"parameters":{"bypass":true}}"#
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -403,8 +480,9 @@ impl SavedState {
         let parameters: Vec<String> = declared.chain(kept).collect();
 
         // Written by hand, since `serde_json`'s map would sort the keys.
-        let version = self.version.max(last.version);
-        let mut block = format!("{{\"seamStateVersion\":{version},\"parameters\":{{");
+        let Versions { seam, plugin } = self.versions().newest(last.versions);
+        let mut block =
+            format!("{{\"{SEAM_VERSION}\":{seam},\"{PLUGIN_VERSION}\":{plugin},\"parameters\":{{");
         block.push_str(&parameters.join(","));
         block.push('}');
         if let Some(extra) = self.session.save() {
@@ -424,21 +502,23 @@ impl SavedState {
     /// Thread: any but audio.
     ///
     /// Trailing NUL bytes are ignored: a host that stores blocks in
-    /// fixed-size chunks pads them with these. A block older than the version
-    /// this build writes is first upgraded by its
-    /// [migration](Self::with_migration), when it has one.
+    /// fixed-size chunks pads them with these. A block whose plugin version
+    /// is older than this build's is first upgraded by the plugin's
+    /// [migration](Self::with_migration), which gets the block's plugin
+    /// version. A block of a newer frame or plugin version loads what this
+    /// build reads.
     ///
-    /// A recognised block, of any version from 1 up, assigns every declared
-    /// parameter, so the same block always gives the same state. A value
-    /// that is missing, not a number or a bool, or outside `f32`'s range
-    /// takes the parameter's default. Anything else goes through the restore
-    /// write, which snaps it. A number past `f64`'s range, anywhere in the
-    /// block, reads as `null`, so it alone is refused and the rest loads.
-    /// Parameter keys this build does not declare, and top-level keys it does
-    /// not read, replace the ones kept before and are saved back. The load
-    /// marks the restore as stored before its first write, so no undo history
-    /// replays anything from before it. Then the session stores `extra`, which
-    /// it applies at a later tick.
+    /// A recognised block, of any frame version from 1 up, assigns every
+    /// declared parameter, so the same block always gives the same state. A
+    /// value that is missing, not a number or a bool, or outside `f32`'s
+    /// range takes the parameter's default. Anything else goes through the
+    /// restore write, which snaps it. A number past `f64`'s range, anywhere
+    /// in the block, reads as `null`, so it alone is refused and the rest
+    /// loads. Parameter keys this build does not declare, and top-level keys
+    /// it does not read, replace the ones kept before and are saved back. The
+    /// load marks the restore as stored before its first write, so no undo
+    /// history replays anything from before it. Then the session stores
+    /// `extra`, which it applies at a later tick.
     ///
     /// # Errors
     ///
@@ -484,13 +564,13 @@ impl SavedState {
             Ok(_) => return Err(LoadError::NotAnObject),
             Err(_) => return Err(LoadError::NotJson),
         };
-        let Some(version) = version(root.get("seamStateVersion")) else {
-            return Err(LoadError::BadVersion);
-        };
-        if let Some(migrate) = self.migrate.as_ref().filter(|_| version < self.version)
-            && !migrate(version, &mut root)
+        let versions = versions(&root)?;
+        // Seam's frame has had one shape, so only the plugin's schema
+        // migrates.
+        if let Some(migration) = &self.migration
+            && versions.plugin < migration.version
         {
-            return Err(LoadError::MigrationFailed);
+            (migration.migrate)(versions.plugin, &mut root).map_err(LoadError::MigrationFailed)?;
         }
         let Some(Json::Object(mut parameters)) = root.remove("parameters") else {
             return Err(LoadError::BadParameters);
@@ -501,7 +581,8 @@ impl SavedState {
             .ids()
             .map(|id| parameters.remove(self.set.decl(id).key))
             .collect();
-        root.remove("seamStateVersion");
+        root.remove(SEAM_VERSION);
+        root.remove(PLUGIN_VERSION);
         let extra = Restored::new(root.remove("extra"));
         let unknown = Unknown { parameters, root };
         let room = self.room_for_extra(&unknown);
@@ -520,7 +601,7 @@ impl SavedState {
             };
             load.restore(id, value.unwrap_or_else(|| decl.default_value()));
         }
-        *last = LastLoad { version, unknown };
+        *last = LastLoad { versions, unknown };
         // The sections and their budget under one lock, so no capture is
         // judged against the budget before this one.
         self.session.restore_within(extra, room);
@@ -528,18 +609,32 @@ impl SavedState {
     }
 }
 
-/// A block's version: a whole number from 1 up, as an integer or a float,
-/// one past `u64`'s range read as `u64::MAX`.
-fn version(value: Option<&Json>) -> Option<u64> {
-    let Json::Number(number) = value? else {
+/// A block's versions: the frame's a whole number from 1 up, and the
+/// plugin's one from 0 up, 0 when the block has none.
+fn versions(root: &Map<String, Json>) -> Result<Versions, LoadError> {
+    let seam = root
+        .get(SEAM_VERSION)
+        .and_then(|value| whole(value, 1))
+        .ok_or(LoadError::BadVersion)?;
+    let plugin = match root.get(PLUGIN_VERSION) {
+        None => 0,
+        Some(value) => whole(value, 0).ok_or(LoadError::BadPluginVersion)?,
+    };
+    Ok(Versions { seam, plugin })
+}
+
+/// A whole number from `least` up, as an integer or a float, one past
+/// `u64`'s range read as `u64::MAX`.
+fn whole(value: &Json, least: u64) -> Option<u64> {
+    let Json::Number(number) = value else {
         return None;
     };
     match number.as_u64() {
-        Some(version) => (version >= 1).then_some(version),
+        Some(whole) => (whole >= least).then_some(whole),
         None => {
-            let version = number.as_f64()?;
+            let float = number.as_f64()?;
             // `as` saturates a float past `u64`'s range.
-            (version >= 1.0 && version.fract() == 0.0).then_some(version as u64)
+            (float >= least as f64 && float.fract() == 0.0).then_some(float as u64)
         }
     }
 }
