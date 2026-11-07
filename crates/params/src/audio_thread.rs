@@ -7,14 +7,18 @@
 //! `Session::save`, asserts with [`assert_not_here`] that the thread holds no
 //! mark from [`enter`].
 //!
-//! Without `debug_assertions` there is no mark and no check, so the mark
-//! proves what the tests run: it catches a locking call made from a test or a
-//! debug build of a host, not one that only a release build reaches.
+//! Without `debug_assertions` there is no mark and no check ([`CHECKED`] says
+//! which build this is), so the mark proves what the tests run: it catches a
+//! locking call made from a test or a debug build of a host, not one that only
+//! a release build reaches.
 //!
 //! [`AudioParams`]: crate::AudioParams
 //! [`HostEventDrain`]: crate::HostEventDrain
 
 use std::marker::PhantomData;
+
+/// Whether the mark is live: this library was built with `debug_assertions`.
+pub const CHECKED: bool = cfg!(debug_assertions);
 
 #[cfg(debug_assertions)]
 thread_local! {
@@ -34,8 +38,8 @@ thread_local! {
 /// let outer = audio_thread::enter();
 /// let inner = audio_thread::enter();
 /// drop(inner);
-/// // The outer guard still marks the thread (in a debug build).
-/// assert_eq!(audio_thread::is_here(), cfg!(debug_assertions));
+/// // The outer guard still marks the thread, in a build that checks.
+/// assert_eq!(audio_thread::is_here(), audio_thread::CHECKED);
 /// drop(outer);
 /// assert!(!audio_thread::is_here());
 /// ```
@@ -87,7 +91,7 @@ impl Drop for AudioThreadGuard {
 /// use seam_params::audio_thread;
 ///
 /// let _audio = audio_thread::enter();
-/// assert_eq!(audio_thread::is_here(), cfg!(debug_assertions));
+/// assert_eq!(audio_thread::is_here(), audio_thread::CHECKED);
 /// ```
 pub fn is_here() -> bool {
     #[cfg(debug_assertions)]
@@ -121,7 +125,7 @@ pub fn is_here() -> bool {
 ///
 /// let _audio = audio_thread::enter();
 /// let refused = std::panic::catch_unwind(|| audio_thread::assert_not_here("Session::save"));
-/// assert_eq!(refused.is_err(), cfg!(debug_assertions));
+/// assert_eq!(refused.is_err(), audio_thread::CHECKED);
 /// ```
 #[inline(always)]
 #[track_caller]
