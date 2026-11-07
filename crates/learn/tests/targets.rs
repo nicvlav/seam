@@ -5,10 +5,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_learn::{
-    Config, Control, CustomId, Learn, LearnAudio, LearnError, Learned, Mapping, Source, Takes,
-    Target, TargetId,
+    Config, Control, CustomId, Learn, LearnAudio, LearnError, Learned, Mapping, SESSION_KEY,
+    Source, Takes, Target, TargetId,
 };
 use seam_params::{Kind, ParamDecl, ParamSet, ParamSetBuilder};
+use seam_session::Session;
 use seam_ump::{ChannelVoice, EventList, Voice};
 
 fn set() -> Arc<ParamSet> {
@@ -325,6 +326,114 @@ fn a_target_panicking_as_a_restore_closes_its_burst_leaves_learn_usable() {
         "the old project's mapping went"
     );
     assert_eq!(rig.audio.refresh_slots(), 1);
+}
+
+/// One block of MIDI 1.0 control changes, as (controller, value) pairs.
+fn controllers(changes: &[(u8, u8)]) -> EventList {
+    let mut events = EventList::with_capacity(changes.len());
+    for &(controller, value) in changes {
+        let voice = Voice::Midi1ControlChange { controller, value };
+        let voice = ChannelVoice {
+            group: 0,
+            channel: 0,
+            voice,
+        };
+        events.push(voice.event(0));
+    }
+    events
+}
+
+#[test]
+fn a_target_panicking_as_a_restore_leaves_the_audio_side_on_the_new_table() {
+    // Target code runs after the publish and after the session hears of
+    // the change, so the old project's mappings stop on the audio thread
+    // and in the next save too, and a burst the panic left open closes at
+    // the next poll.
+    let set = set();
+    let gain = set.id("gain").expect("declared");
+    let session = Session::new(&set);
+    let ui = session.take_ui().expect("the first UI handle");
+    let (learn, mut audio) = Learn::new(&set, Config::default());
+    let learn = Rc::new(RefCell::new(learn));
+    Learn::attach(&learn, &ui).expect("free");
+    let mut learning = learn.borrow_mut();
+    let pan = learning
+        .register("view.pan", Box::new(PanicsAtEnd))
+        .expect("free");
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let zoom = Logged {
+        log: Rc::clone(&log),
+        held: Rc::new(Cell::new(false)),
+    };
+    let zoom = learning
+        .register("view.zoom", Box::new(zoom))
+        .expect("free");
+    for (target, controller) in [(TargetId::from(gain), 7), (pan.into(), 8), (zoom.into(), 9)] {
+        let mapping = Mapping::new(Source::any(Control::Cc(controller)));
+        learning.map(target, mapping).expect("legal");
+    }
+    audio.process(&controllers(&[(8, 127), (9, 127)]));
+    learning.poll();
+    assert_eq!(*log.borrow(), ["begin", "apply 1.000"], "both bursts open");
+    log.borrow_mut().clear();
+    drop(learning);
+    ui.tick();
+    let saved = session.save().expect("a section");
+    assert_eq!(
+        saved[SESSION_KEY]["mappings"].as_array().map(Vec::len),
+        Some(3)
+    );
+
+    let mut learning = learn.borrow_mut();
+    let restored =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| learning.restore(None)));
+    assert!(restored.is_err(), "the pan target's end panicked");
+    assert!(learning.is_empty());
+    audio.process(&controllers(&[(7, 127)]));
+    assert_eq!(set.value(gain), 0.5, "controller 7 no longer routes");
+    drop(learning);
+    ui.tick();
+    let saved = session.save().expect("a section");
+    assert_eq!(saved[SESSION_KEY]["mappings"], serde_json::json!([]));
+    assert!(log.borrow().is_empty(), "the panic came before zoom's end");
+    learn.borrow_mut().poll();
+    assert_eq!(*log.borrow(), ["end"], "the next poll closes it");
+}
+
+#[test]
+fn a_target_panicking_as_it_unmaps_leaves_the_table_published_and_saved() {
+    // Target code runs after the publish and after the session hears of
+    // the change, so the audio side stops routing it and the next save
+    // drops it.
+    let set = set();
+    let session = Session::new(&set);
+    let ui = session.take_ui().expect("the first UI handle");
+    let (learn, mut audio) = Learn::new(&set, Config::default());
+    let learn = Rc::new(RefCell::new(learn));
+    Learn::attach(&learn, &ui).expect("free");
+    let pan = learn
+        .borrow_mut()
+        .register("view.pan", Box::new(PanicsAtEnd))
+        .expect("free");
+    let mapping = Mapping::new(Source::any(Control::Cc(8)));
+    learn.borrow_mut().map(pan, mapping).expect("legal");
+    audio.process(&controllers(&[(8, 127)]));
+    learn.borrow_mut().poll();
+    ui.tick();
+    let saved = |session: &Session| session.save().expect("a section")[SESSION_KEY].clone();
+    assert_eq!(saved(&session)["mappings"][0]["target"], "view.pan");
+
+    let unmapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        learn.borrow_mut().unmap(pan)
+    }));
+    assert!(unmapped.is_err(), "the target's end panicked");
+    assert_eq!(
+        audio.refresh_slots(),
+        0,
+        "the audio side stopped routing it"
+    );
+    ui.tick();
+    assert_eq!(saved(&session)["mappings"], serde_json::json!([]));
 }
 
 #[test]

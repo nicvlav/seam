@@ -98,15 +98,30 @@ impl Learn {
         let readable =
             section.is_none_or(|s| s.get("schema").and_then(Json::as_u64) == Some(SCHEMA));
         self.arm.disarm();
-        // The table settles before any target's own code runs, so a
-        // panicking `end` leaves no mapping without its staging slot.
         self.mappings.clear();
         self.held.clear();
-        self.customs.values_mut().for_each(Custom::unmap);
-        if !readable {
-            self.publish();
-            return Err(ApplyError::new("a midiLearn section of another schema"));
+        for custom in self.customs.values_mut() {
+            custom.staging = None;
         }
+        let outcome = if readable {
+            self.insert_entries(section);
+            Ok(())
+        } else {
+            Err(ApplyError::new("a midiLearn section of another schema"))
+        };
+        self.publish();
+        if outcome.is_ok() {
+            self.saved_changed();
+        }
+        // Target code runs last, once the audio thread can take the new
+        // table, so a panicking `end` leaves no old mapping routing there.
+        self.customs.values_mut().for_each(Custom::close);
+        outcome
+    }
+
+    /// Puts each entry of a readable section in the table, or holds it for a
+    /// target not registered yet. Unpublished.
+    fn insert_entries(&mut self, section: Option<&Section>) {
         let entries = section
             .and_then(|section| section.get("mappings"))
             .and_then(Json::as_array)
@@ -126,9 +141,6 @@ impl Learn {
                 }
             }
         }
-        self.publish();
-        self.saved_changed();
-        Ok(())
     }
 
     /// Registers `learn` with the session as its `midiLearn` participant.

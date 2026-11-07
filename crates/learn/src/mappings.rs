@@ -225,9 +225,12 @@ impl fmt::Debug for Custom {
 }
 
 impl Custom {
-    /// One poll tick of a mapped target's burst, as [`Target`] describes it.
+    /// One poll tick of the target's burst, as [`Target`] describes it. An
+    /// unmapped target's burst closes here if a panicking `end` left it
+    /// open.
     fn tick(&mut self) {
         let Some(staging) = &self.staging else {
+            self.close();
             return;
         };
         if self.target.held() {
@@ -254,14 +257,7 @@ impl Custom {
         }
     }
 
-    /// Drops the staging slot, so the poll never writes the target again,
-    /// and closes the open burst.
-    fn unmap(&mut self) {
-        self.staging = None;
-        self.close();
-    }
-
-    /// Closes the open burst, once.
+    /// Closes the open burst, once, whether or not the target is mapped.
     fn close(&mut self) {
         if self.burst.take().is_some() {
             self.target.end();
@@ -698,14 +694,25 @@ impl Learn {
         let target = target.into();
         self.edited(target);
         let removed = self.mappings.remove(&target)?;
-        if let TargetId::Custom(id) = target
-            && let Some(custom) = self.customs.get_mut(&id)
-        {
-            custom.unmap();
+        // The poll never writes the target again.
+        if let Some(custom) = self.custom(target) {
+            custom.staging = None;
         }
         self.publish();
         self.saved_changed();
+        // Last, so a panicking `end` finds the table published.
+        if let Some(custom) = self.custom(target) {
+            custom.close();
+        }
         Some(removed)
+    }
+
+    /// The registered custom target `target` names, if it names one.
+    fn custom(&mut self, target: TargetId) -> Option<&mut Custom> {
+        match target {
+            TargetId::Custom(id) => self.customs.get_mut(&id),
+            TargetId::Param(_) => None,
+        }
     }
 
     /// Returns the key `target` saves under: a parameter's key, or the key a
