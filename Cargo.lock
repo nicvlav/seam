@@ -487,6 +487,7 @@ version = "0.1.0"
 dependencies = [
  "iai-callgrind",
  "proptest",
+ "seam-testkit",
 ]
 
 [[package]]
