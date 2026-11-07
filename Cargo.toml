@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -27,6 +27,7 @@ seam-undo = { path = "crates/undo" }
 seam-session = { path = "crates/session" }
 seam-learn = { path = "crates/learn" }
 seam-ump = { path = "crates/ump" }
+seam-host = { path = "crates/host" }
 # Tests only.
 seam-testkit = { path = "crates/testkit" }
 

@@ -1,0 +1,48 @@
+[package]
+name = "seam-example-eq"
+description = "The example EQ: six biquad bands and an output gain, on Seam"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "equalizer", "vst3", "example"]
+categories = ["multimedia::audio"]
+publish.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+# The cdylib is the VST3 module; the rlib lets tests drive it in-process. The
+# JUCE adapter builds the static library itself, with only `cabi` on.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["vst3"]
+# The VST3 module's entry points, through Seam's exporter.
+vst3 = ["seam-host/vst3"]
+# The C interface's one symbol, for the JUCE adapter, which defines the VST3
+# entry points itself: built without `vst3`.
+cabi = ["seam-host/cabi"]
+
+[dependencies]
+seam-host.workspace = true
+seam-params.workspace = true
+seam-session.workspace = true
+
+[dev-dependencies]
+seam-host = { workspace = true, features = ["vst3", "cabi", "test-host"] }
+seam-testkit.workspace = true
+serde_json.workspace = true
+iai-callgrind.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "iai"
+harness = false

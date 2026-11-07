@@ -401,6 +401,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "seam-example-eq"
+version = "0.1.0"
+dependencies = [
+ "iai-callgrind",
+ "seam-host",
+ "seam-params",
+ "seam-session",
+ "seam-testkit",
+ "serde_json",
+]
+
+[[package]]
 name = "seam-host"
 version = "0.1.0"
 dependencies = [
