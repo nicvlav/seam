@@ -23,7 +23,7 @@ fn committed() -> Vec<(u32, String)> {
 
 fn parse(text: &str) -> Vec<(u32, String)> {
     text.lines()
-        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+        .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
         .map(|line| {
             let words: Vec<&str> = line.split_whitespace().collect();
             let ["version", version, "shape", shape] = words[..] else {
@@ -139,6 +139,6 @@ fn a_gap_or_a_lower_version_fails() {
 
 #[test]
 fn the_file_parses_one_line_per_version() {
-    let text = "# comment\n\nversion 2 shape abc\nversion 3 shape def\n";
+    let text = "# comment\n  # indented comment\n\nversion 2 shape abc\nversion 3 shape def\n";
     assert_eq!(parse(text), [line(2, "abc"), line(3, "def")]);
 }

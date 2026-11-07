@@ -51,7 +51,7 @@ class CommentTags(unittest.TestCase):
         self.assertEqual(hits, ["Q100"])
 
     def test_a_record_without_ids_fails(self):
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(tags.CheckError):
             tags.record_ids("| id | text |\n| --- | --- |\n")
 
     def test_a_quote_char_literal_does_not_hide_a_comment(self):
@@ -133,11 +133,36 @@ class CommentTags(unittest.TestCase):
         self.assertEqual([text for _, text, _ in found], ["x" + chr(9) + "y" + chr(92) + "z"])
 
     def test_rust_that_does_not_lex_fails(self):
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(tags.CheckError):
             self.rust('let s = "never closed;\n')
 
     def test_no_rust_file_to_scan_is_no_facts(self):
         self.assertEqual(tags.xtask_facts("scan", []), {})
+
+    def test_a_scanned_file_that_is_not_utf8_fails_and_a_corpus_entry_is_not_scanned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "notes.md"
+            path.write_bytes(b"caf\xe9\n")
+            with self.assertRaises(tags.CheckError):
+                tags.read_scanned(str(path))
+            path.write_text("fine\n", encoding="utf-8")
+            self.assertEqual(tags.read_scanned(str(path)), "fine\n")
+        self.assertTrue(tags.is_scanned("crates/x/src/lib.rs"))
+        self.assertTrue(tags.is_scanned("adapters/juce/CMakeLists.txt"))
+        self.assertFalse(tags.is_scanned("fuzz/corpus/ump_packets/mixed"))
+
+    def test_a_check_that_cannot_run_fails_with_its_reason_not_an_exit_deep_inside(self):
+        def cannot_run():
+            raise tags.CheckError("cannot run")
+
+        was, tags.check = tags.check, cannot_run
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                status = tags.main()
+        finally:
+            tags.check = was
+        self.assertEqual(status, 1)
+        self.assertIn("cannot run", err.getvalue())
 
     def test_the_decision_history_is_exempt_like_the_record_and_its_index(self):
         source = (SCRIPTS / "check-comment-tags.py").read_text(encoding="utf-8")
@@ -154,7 +179,7 @@ class CommentTags(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "generate.rs"
             path.write_text("pub fn generated() -> Vec<Generated> {" + chr(10) + "    Vec::new()" + chr(10) + "}" + chr(10), encoding="utf-8")
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(tags.CheckError):
                 tags.generated_files(str(path))
 
     def test_shell_comments_are_read(self):
@@ -220,25 +245,25 @@ class CoreDeps(unittest.TestCase):
             "dependencies": [{"name": d, "kind": None} for d in depends],
         }
 
-    def test_a_new_plugin_under_examples_takes_the_plugin_tier(self):
+    def test_a_new_plugin_under_examples_takes_the_plugin_layer(self):
         packages = [
             self.package("seam-host", "crates/host"),
             self.package("seam-example-reverb", "examples/reverb", ["seam-host"]),
         ]
         problems = deps.layering_problems(
-            [p for p in packages] + [self.package(n, f"crates/{n}") for n in deps.TIERS if n != "seam-host"],
+            [p for p in packages] + [self.package(n, f"crates/{n}") for n in deps.LAYERS if n != "seam-host"],
             Path("/repo"),
         )
         self.assertEqual([p for p in problems if "reverb" in p], [])
 
-    def test_a_crate_outside_examples_still_needs_a_tier(self):
+    def test_a_crate_outside_examples_still_needs_a_layer(self):
         packages = [self.package("seam-new", "crates/new")]
         problems = deps.layering_problems(packages, Path("/repo"))
-        self.assertIn("seam-new has no tier in TIERS", problems)
+        self.assertIn("seam-new has no layer in LAYERS", problems)
 
     def test_a_table_entry_that_is_no_crate_fails(self):
         problems = deps.layering_problems([], Path("/repo"))
-        self.assertIn("seam-host is in TIERS but is not a workspace crate", problems)
+        self.assertIn("seam-host is in LAYERS but is not a workspace crate", problems)
 
     def test_common_ui_stacks_are_forbidden(self):
         for name in ["egui", "eframe", "iced", "iced_wgpu", "slint", "sdl2", "glfw", "x11", "x11rb",
@@ -249,16 +274,26 @@ class CoreDeps(unittest.TestCase):
 
 class ExampleCoverage(unittest.TestCase):
     def test_a_crate_with_no_reachable_item_fails(self):
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(coverage.CheckError):
             coverage.missing_of("seam-x", [])
+
+    def test_a_check_that_cannot_run_fails_with_its_reason(self):
+        was, coverage.library_crates = coverage.library_crates, lambda: {}
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                status = coverage.main()
+        finally:
+            coverage.library_crates = was
+        self.assertEqual(status, 1)
+        self.assertIn("no library crate found", err.getvalue())
 
     def test_missing_names_are_listed(self):
         self.assertEqual(coverage.missing_of("seam-x", [("a", True), ("b", False)]), ["b"])
 
     def test_an_unknown_format_version_fails(self):
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(coverage.CheckError):
             coverage.check_format({"format_version": coverage.FORMAT_VERSION + 1}, "seam-x")
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(coverage.CheckError):
             coverage.check_format({}, "seam-x")
         coverage.check_format({"format_version": coverage.FORMAT_VERSION}, "seam-x")
 
@@ -420,6 +455,11 @@ class ShapeAppendOnly(unittest.TestCase):
     def test_a_comment_edit_passes(self):
         head = "# another note\nversion 2 shape aaaa\nversion 3 shape bbbb\n"
         self.assertEqual(shape.problems(self.BASE, head), [])
+
+    def test_an_indented_comment_is_a_comment(self):
+        head = "  # an indented note\nversion 2 shape aaaa\nversion 3 shape bbbb\n"
+        self.assertEqual(shape.problems(self.BASE, head), [])
+        self.assertEqual(shape.version_lines(head), ["version 2 shape aaaa", "version 3 shape bbbb"])
 
     def test_a_file_with_no_version_line_fails(self):
         self.assertTrue(shape.problems(self.BASE, "# nothing\n"))

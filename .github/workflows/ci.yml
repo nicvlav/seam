@@ -144,8 +144,8 @@ jobs:
           SEAM_XTASK: target/debug/xtask
       # And they build on a runner with no WebView or GTK development
       # libraries installed. Every workspace crate is built but the ones that
-      # may need them (the host, the example EQ), the test tools and xtask, so
-      # a new crate is built here until it is excluded.
+      # may need them (the host, the two example plugins), the test tools and
+      # xtask, so a new crate is built here until it is excluded.
       - name: Build the core alone
         run: cargo build --workspace --exclude seam-host --exclude seam-example-eq --exclude seam-example-gain --exclude seam-testkit --exclude xtask --locked
 

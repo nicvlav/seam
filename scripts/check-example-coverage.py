@@ -41,6 +41,11 @@ from pathlib import Path
 FORMAT_VERSION = 61
 
 
+class CheckError(Exception):
+    """The check cannot run or cannot trust what it read, as opposed to
+    finding an item with no example. `main` reports it and fails."""
+
+
 def library_crates():
     """Each library crate under crates/, with the features that expose every public item."""
     out = subprocess.run(
@@ -78,7 +83,7 @@ def rustdoc_json(crate, features):
 def check_format(data, crate):
     version = data.get("format_version")
     if version != FORMAT_VERSION:
-        sys.exit(f"{crate}: rustdoc JSON format {version}, this script reads {FORMAT_VERSION}")
+        raise CheckError(f"{crate}: rustdoc JSON format {version}, this script reads {FORMAT_VERSION}")
 
 
 def has_example(item):
@@ -232,16 +237,25 @@ def method_report(crate, methods):
 
 
 def missing_of(crate, items):
-    """The names in `items` with no example; exits when there are no items."""
+    """The names in `items` with no example; fails when there are no items."""
     if not items:
-        sys.exit(f"{crate}: no reachable public item; the walk is out of date or the crate exports nothing")
+        raise CheckError(f"{crate}: no reachable public item; the walk is out of date or the crate exports nothing")
     return sorted(name for name, covered in items if not covered)
 
 
 def main():
+    """Runs the check; a run that cannot be trusted fails with its reason."""
+    try:
+        return check()
+    except CheckError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+
+def check():
     crates = library_crates()
     if not crates:
-        sys.exit("no library crate found under crates/")
+        raise CheckError("no library crate found under crates/")
     wanted = sys.argv[1:] or list(crates)
     failed = False
     method_lines = []
@@ -262,8 +276,9 @@ def main():
         print(chr(10).join(method_report(crate, methods)))
     if failed:
         print("Add a runnable example to each item listed, or mark plumbing #[doc(hidden)].")
-        sys.exit(1)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

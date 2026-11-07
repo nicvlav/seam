@@ -22,7 +22,7 @@ def version_lines(text: str) -> list[str]:
     return [
         " ".join(line.split())
         for line in text.splitlines()
-        if line.strip() and not line.startswith("#")
+        if line.strip() and not line.strip().startswith("#")
     ]
 
 

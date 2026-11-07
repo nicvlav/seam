@@ -1,5 +1,7 @@
 # cargo-deny: what the dependency tree may contain. CI runs
-# `cargo deny check` (.github/workflows/ci.yml).
+# `cargo deny --locked check` (.github/workflows/ci.yml) over the workspace.
+# fuzz/ is a workspace of its own, so this check does not read it. Its tree
+# adds libfuzzer-sys, whose licence includes NCSA, which is not allowed below.
 
 [graph]
 all-features = true
@@ -17,7 +19,8 @@ allow = [
     "Unlicense",
 ]
 confidence-threshold = 0.93
-# Seam's own crates are not published and name no licence.
+# Seam's own crates are not published (they name MIT, but are not checked
+# against the list above).
 private = { ignore = true }
 
 [advisories]

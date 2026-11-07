@@ -50,6 +50,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 RECORD = "docs/transfer-from-seam-juce.md"
@@ -83,6 +84,20 @@ YAML_VALUE_START = ("", ":", "-", "[", "{", ",", "?")
 PARENTHESISED = re.compile(r"\(([^()]*)\)")
 
 
+class CheckError(Exception):
+    """The check cannot run or cannot trust what it read, as opposed to
+    finding a comment that cites an id. `main` reports it and fails."""
+
+
+@dataclass
+class Nesting:
+    """What the JS-like scanner has open: a template literal's text, or a
+    `${}` expression inside one with the braces it has opened."""
+
+    template: bool
+    braces: int = 0
+
+
 def record_ids(text: str) -> tuple[set[str], set[str], set[str]]:
     """Returns the ids the record defines, the ones it only cites, and its
     property numbers."""
@@ -101,7 +116,7 @@ def record_ids(text: str) -> tuple[set[str], set[str], set[str]]:
         cited |= set(re.findall(r"\b([A-Z]\d+)\b", inside))
     if not defined:
         # A record whose tables changed format would otherwise let everything pass.
-        sys.exit(f"{RECORD}: no decision ids found; the script's reading of the record is out of date")
+        raise CheckError(f"{RECORD}: no decision ids found; the script's reading of the record is out of date")
     letters = {i[0] for i in defined}
     # An id the record cites but never defines, in a series of its own.
     cited_only = {i for i in cited - defined if i[0] not in letters}
@@ -115,7 +130,7 @@ def generated_files(generator: str = GENERATOR) -> set[str]:
     source = Path(generator).read_text(encoding="utf-8")
     paths = set(re.findall(r'path: "([^"]+)"', source))
     if not paths:
-        sys.exit(f"{generator}: no generated file found; the script's reading of the generator is out of date")
+        raise CheckError(f"{generator}: no generated file found; the script's reading of the generator is out of date")
     return paths
 
 
@@ -145,9 +160,7 @@ def slash_comments(text: str, language: str = "c") -> list[tuple[int, str]]:
     """
     parts: dict[int, list[str]] = {}
     line, i, end = 1, 0, len(text)
-    # What is open, innermost last: a template literal's text, or a `${}`
-    # expression inside one with the braces it has opened.
-    nesting: list[list] = []
+    nesting: list[Nesting] = []
 
     def skip(to: int) -> None:
         nonlocal line, i
@@ -156,14 +169,14 @@ def slash_comments(text: str, language: str = "c") -> list[tuple[int, str]]:
 
     while i < end:
         ch = text[i]
-        if nesting and nesting[-1][0] == "template":
+        if nesting and nesting[-1].template:
             if ch == "\\":
                 skip(min(i + 2, end))
             elif ch == "`":
                 nesting.pop()
                 i += 1
             elif text.startswith("${", i):
-                nesting.append(["expression", 0])
+                nesting.append(Nesting(template=False))
                 i += 2
             else:
                 skip(i + 1)
@@ -182,20 +195,20 @@ def slash_comments(text: str, language: str = "c") -> list[tuple[int, str]]:
         elif ch == '"' or (language == "js" and ch == "'"):
             skip(string_end(text, i))
         elif language == "js" and ch == "`":
-            nesting.append(["template"])
+            nesting.append(Nesting(template=True))
             i += 1
         elif language == "c" and ch == "'":
             skip(char_literal_end(text, i))
         elif language == "c" and (raw := raw_string_at(text, i)) is not None:
             skip(raw)
         elif nesting and ch == "{":
-            nesting[-1][1] += 1
+            nesting[-1].braces += 1
             i += 1
         elif nesting and ch == "}":
-            if nesting[-1][1] == 0:
+            if nesting[-1].braces == 0:
                 nesting.pop()
             else:
-                nesting[-1][1] -= 1
+                nesting[-1].braces -= 1
             i += 1
         else:
             skip(i + 1)
@@ -270,7 +283,7 @@ def xtask_facts(task: str, paths: list[str]) -> dict[str, list[list[str]]]:
         xtask_command(task), input="\n".join(paths), capture_output=True, text=True, encoding="utf-8"
     )
     if done.returncode != 0:
-        sys.exit(f"cargo xtask {task} failed:\n{done.stderr}")
+        raise CheckError(f"cargo xtask {task} failed:\n{done.stderr}")
     facts: dict[str, list[list[str]]] = {}
     current = None
     for line in done.stdout.split("\n"):
@@ -283,7 +296,7 @@ def xtask_facts(task: str, paths: list[str]) -> dict[str, list[list[str]]]:
             current.append([fields[0]] + [unescape(f) for f in fields[1:]])
     missing = [path for path in paths if path not in facts]
     if missing:
-        sys.exit(f"cargo xtask {task} read nothing of {missing[0]}")
+        raise CheckError(f"cargo xtask {task} read nothing of {missing[0]}")
     return facts
 
 
@@ -361,12 +374,36 @@ def problems_in(comment: str, markdown: bool, ids) -> list[str]:
     return hits
 
 
+def is_scanned(path: str) -> bool:
+    """Whether the check reads comments in `path`: a Rust file, or one of the
+    kinds `comments` knows. Any other (a fuzz corpus entry) holds none."""
+    return path.endswith((".rs", *SLASH_COMMENTS, *HASH_COMMENTS, *MARKDOWN)) or Path(path).name == "CMakeLists.txt"
+
+
+def read_scanned(path: str) -> str:
+    """The text of a file `is_scanned` accepts. A file that is not UTF-8
+    would otherwise go unchecked without a word."""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise CheckError(f"{path} is not UTF-8, so its comments cannot be checked: {error}") from error
+
+
 def main() -> int:
+    """Runs the check; a run that cannot be trusted fails with its reason."""
+    try:
+        return check()
+    except CheckError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+
+def check() -> int:
     ids = record_ids(Path(RECORD).read_text(encoding="utf-8"))
     skipped = {RECORD, INDEX, HISTORY, "scripts/check-comment-tags.py"} | generated_files()
     listed = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode != 0:
-        sys.exit("the check reads the files git tracks, so it runs in a git checkout:\n" + listed.stderr)
+        raise CheckError("the check reads the files git tracks, so it runs in a git checkout:\n" + listed.stderr)
     tracked = listed.stdout.split("\0")
     problems = []
     texts: dict[str, str] = {}
@@ -376,16 +413,14 @@ def main() -> int:
             or path.startswith(SKIPPED_PREFIXES)
             or path.endswith(SKIPPED_SUFFIXES)
             or Path(path).name in SKIPPED_NAMES
+            or not is_scanned(path)
             or not Path(path).is_file()
         ):
             continue
-        try:
-            texts[path] = Path(path).read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
+        texts[path] = read_scanned(path)
     rust = xtask_facts("scan", [path for path in texts if path.endswith(".rs")])
     if not rust:
-        sys.exit("no tracked Rust file to scan; the script's file selection is out of date")
+        raise CheckError("no tracked Rust file to scan; the script's file selection is out of date")
     for path, text in texts.items():
         markdown = path.endswith(MARKDOWN)
         if path.endswith(".rs"):

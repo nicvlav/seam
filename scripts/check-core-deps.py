@@ -9,13 +9,13 @@ WebView, UI toolkit or plugin-format crate. No feature may pull one in either
 (ARCHITECTURE.md): a crate that needs one belongs in seam-host or in a
 shell crate such as seam-webview.
 
-It also checks the layering among Seam's own crates against TIERS: every
-dependency, dev-dependencies included, points to a lower tier, so two crates
-of one tier never depend on each other (undo and session in particular). A
-crate missing from the table fails until it is given a tier, and a table entry
+It also checks the layering among Seam's own crates against LAYERS: every
+dependency, dev-dependencies included, points to a lower layer, so two crates
+of one layer never depend on each other (undo and session in particular). A
+crate missing from the table fails until it is given a layer, and a table entry
 that is no workspace crate fails until it is removed. A crate under examples/
-is a plugin and takes the plugin tier without an entry. The crates checked for
-window, WebView and host dependencies are the ones of tiers 1 to 3.
+is a plugin and takes the plugin layer without an entry. The crates checked for
+window, WebView and host dependencies are the ones of layers 1 to 3.
 
 The window, WebView and host dependencies are a denylist of names and
 prefixes, not an allowlist, because an allowlist of every crate the core links,
@@ -31,10 +31,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-# A crate may depend only on crates of a lower tier. Learn is above session
+# A crate may depend only on crates of a lower layer. Learn is above session
 # because it reads the session's saved block; the shells, which depend on
 # everything, are on top; xtask drives the example.
-TIERS = {
+LAYERS = {
     "seam-testkit": 0,
     "seam-params": 1,
     "seam-ump": 1,
@@ -48,12 +48,12 @@ TIERS = {
 
 # Every crate under examples/ is a plugin: it depends on the host and below,
 # and nothing depends on it but xtask.
-PLUGIN_TIER = 5
+PLUGIN_LAYER = 5
 
 # The core and the projection that must build with no window, WebView or host:
-# every crate of tiers 1 to 3, which is everything but the test tools (tier 0)
-# and the crates that may link a host (tier 4 and above).
-CORE = [name for name, tier in TIERS.items() if 1 <= tier <= 3]
+# every crate of layers 1 to 3, which is everything but the test tools (layer 0)
+# and the crates that may link a host (layer 4 and above).
+CORE = [name for name, layer in LAYERS.items() if 1 <= layer <= 3]
 
 # Exact crate names, and prefixes that cover a family (wry's per-platform
 # backends, the gtk stack, the objc2 AppKit and WebKit bindings).
@@ -112,38 +112,38 @@ def forbidden(name: str) -> bool:
     return name in FORBIDDEN or name.startswith(FORBIDDEN_PREFIXES)
 
 
-def tier_of(package: dict, root: Path) -> int | None:
-    """The tier of a workspace package: its table entry, or the plugin tier
+def layer_of(package: dict, root: Path) -> int | None:
+    """The layer of a workspace package: its table entry, or the plugin layer
     for a crate under examples/."""
-    if package["name"] in TIERS:
-        return TIERS[package["name"]]
+    if package["name"] in LAYERS:
+        return LAYERS[package["name"]]
     manifest = Path(package["manifest_path"])
     if manifest.is_relative_to(root / "examples"):
-        return PLUGIN_TIER
+        return PLUGIN_LAYER
     return None
 
 
 def layering_problems(packages: list[dict], root: Path) -> list[str]:
     """Every way a workspace crate depends on one that is not below it."""
     names = {package["name"] for package in packages}
-    tiers = {package["name"]: tier_of(package, root) for package in packages}
-    problems = [f"{name} is in TIERS but is not a workspace crate" for name in TIERS if name not in names]
+    layers = {package["name"]: layer_of(package, root) for package in packages}
+    problems = [f"{name} is in LAYERS but is not a workspace crate" for name in LAYERS if name not in names]
     for package in packages:
         name = package["name"]
-        if tiers[name] is None:
-            problems.append(f"{name} has no tier in TIERS")
+        if layers[name] is None:
+            problems.append(f"{name} has no layer in LAYERS")
             continue
         for dependency in package["dependencies"]:
             target = dependency["name"]
             if target not in names:
                 continue
-            if tiers[target] is None:
-                problems.append(f"{name} depends on {target}, which has no tier in TIERS")
-            elif tiers[target] >= tiers[name]:
+            if layers[target] is None:
+                problems.append(f"{name} depends on {target}, which has no layer in LAYERS")
+            elif layers[target] >= layers[name]:
                 kind = dependency["kind"] or "normal"
                 problems.append(
-                    f"{name} (tier {tiers[name]}) has a {kind} dependency on "
-                    f"{target} (tier {tiers[target]}): dependencies point down a tier"
+                    f"{name} (layer {layers[name]}) has a {kind} dependency on "
+                    f"{target} (layer {layers[target]}): dependencies point down a layer"
                 )
     return problems
 
@@ -164,7 +164,7 @@ def main() -> int:
         failed = True
         print(problem, file=sys.stderr)
     if not problems:
-        print("every dependency points down a tier")
+        print("every dependency points down a layer")
     for crate in CORE:
         for all_features, label in ((False, "default features"), (True, "all features")):
             bad = sorted(name for name in dependencies(crate, all_features) if forbidden(name))
