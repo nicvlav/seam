@@ -1,6 +1,8 @@
 //! What a list or a plain value lets go of drops after its lock is
 //! released, so an element's `Drop` may call the list or value it sat in.
 
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -37,6 +39,41 @@ impl Drop for Reaches {
         let call = self.slot().clone();
         if let Some(call) = call {
             call();
+        }
+    }
+}
+
+/// A [`Reaches`] whose clones can be set to panic.
+struct Brittle {
+    reaches: Reaches,
+    /// Clones left before one panics.
+    clones: Arc<AtomicI32>,
+}
+
+impl Brittle {
+    fn new() -> Self {
+        Brittle {
+            reaches: Reaches::default(),
+            clones: Arc::new(AtomicI32::new(i32::MAX)),
+        }
+    }
+
+    /// The clone after the next `clones` panics.
+    fn panic_after(&self, clones: i32) {
+        self.clones.store(clones, Ordering::SeqCst);
+    }
+}
+
+impl Clone for Brittle {
+    fn clone(&self) -> Self {
+        assert_ne!(
+            self.clones.fetch_sub(1, Ordering::SeqCst),
+            0,
+            "a clone that panics"
+        );
+        Brittle {
+            reaches: self.reaches.clone(),
+            clones: Arc::clone(&self.clones),
         }
     }
 }
@@ -132,5 +169,34 @@ fn every_value_a_plain_value_lets_go_of_drops_after_the_unlock() {
         value.set(reaches.clone());
         drop(tracker);
         reaches.stop();
+    });
+}
+
+#[test]
+fn what_a_write_replaced_drops_after_the_unlock_when_a_clone_panics() {
+    finishes("a plain value", || {
+        let set = ParamSet::from_decls([]).expect("valid");
+        let writer = set.clock().writer();
+        let element = Brittle::new();
+        let value = Value::new(element.clone(), &set);
+        let handle = value.clone();
+        element.reaches.reach(move || {
+            let _ = handle.gesture_open();
+        });
+
+        // A restore during a gesture clones twice: the stored value, then
+        // the gesture's new before. The second panics with the replaced
+        // value already taken out.
+        let drag = value.begin();
+        let next = element.clone();
+        element.panic_after(1);
+        let unwound = {
+            let _applying = writer.applying();
+            panic::catch_unwind(AssertUnwindSafe(|| value.set(next))).is_err()
+        };
+        element.panic_after(i32::MAX);
+        assert!(unwound, "the second clone panicked");
+        drop(drag);
+        element.reaches.stop();
     });
 }

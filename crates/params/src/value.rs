@@ -76,6 +76,10 @@ impl<T> Shared<T> {
 /// A plain value has its own gestures, from [`begin`](Self::begin), with no
 /// host to tell.
 ///
+/// `T`'s `Clone` runs under the value's lock, which is not reentrant, so a
+/// `Clone` that calls the same value deadlocks. Its `Drop` runs after the
+/// unlock and may call it.
+///
 /// # Examples
 ///
 /// ```
@@ -214,6 +218,9 @@ impl<T: Clone> Value<T> {
     pub fn begin(&self) -> ValueGesture<T> {
         let mut state = self.shared.lock();
         if state.gestures == 0 {
+            // The last close took both, so these assignments drop nothing
+            // under the lock.
+            debug_assert!(state.before.is_none() && state.after.is_none());
             state.before = Some(state.value.clone());
             state.after = None;
         }
@@ -261,12 +268,17 @@ impl<T: Clone> Value<T> {
     fn write(&self, value: T, author: Author) {
         let (origin, recorded) = author.resolve(self.shared.clock.applying());
         let stamp = self.shared.clock.stamp();
+        // What the write replaces is declared before the guard, so it drops
+        // after the unlock on every path, a panicking `Clone` included,
+        // since a `T`'s `Drop` may call this value.
+        let old;
+        let stale;
+        let mut gesture = (None, None);
+        let mut coalesced = None;
         let mut state = self.shared.lock();
-        // What the write replaces drops after the unlock, since a `T`'s
-        // `Drop` may call this value.
-        let old = std::mem::replace(&mut state.value, value.clone());
+        old = std::mem::replace(&mut state.value, value.clone());
         state.origin = origin;
-        let stale = if origin == Origin::Replay {
+        stale = if origin == Origin::Replay {
             // A replay writes over whatever another thread wrote since the
             // tick began; those commits would record on top of it and drop
             // the redo, so they go.
@@ -274,8 +286,6 @@ impl<T: Clone> Value<T> {
         } else {
             VecDeque::new()
         };
-        let mut gesture = (None, None);
-        let mut coalesced = None;
         if state.gestures > 0 && recorded {
             gesture.1 = state.after.replace(value);
         } else if state.gestures > 0 && matches!(origin, Origin::User | Origin::Program) {
