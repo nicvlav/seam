@@ -63,8 +63,7 @@ impl<R> Audio<R> {
         let processor = plugin.activate(&ProcessSetup {
             sample_rate: setup.sample_rate,
             max_frames: setup.max_frames.get(),
-            inputs: layout.inputs,
-            outputs: layout.outputs,
+            layout,
             max_events,
             max_out_events,
         });

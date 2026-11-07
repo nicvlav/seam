@@ -2,6 +2,8 @@
 
 pub use seam_ump::{Event, EventList};
 
+use crate::Layout;
+
 /// The most frames a processor is built for per block: 65,536, about 1.4
 /// seconds at 48 kHz.
 ///
@@ -24,12 +26,11 @@ pub const MAX_FRAMES: usize = 65_536;
 /// let setup = ProcessSetup {
 ///     sample_rate: 44_100.0,
 ///     max_frames: 1_024,
-///     inputs: Layout::STEREO.inputs,
-///     outputs: Layout::STEREO.outputs,
+///     layout: Layout::STEREO,
 ///     max_events: 256,
 ///     max_out_events: 0,
 /// };
-/// let scratch = vec![0.0_f32; setup.max_frames * setup.outputs];
+/// let scratch = vec![0.0_f32; setup.max_frames * setup.layout.outputs];
 /// assert_eq!(scratch.len(), 2_048);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,10 +39,9 @@ pub struct ProcessSetup {
     pub sample_rate: f64,
     /// The most frames a block will hold, at most [`MAX_FRAMES`].
     pub max_frames: usize,
-    /// Input channels.
-    pub inputs: usize,
-    /// Output channels.
-    pub outputs: usize,
+    /// The main bus's channels in and out: the one of the plugin's
+    /// [`layouts`](crate::PluginInfo::layouts) the host chose.
+    pub layout: Layout,
     /// The most MIDI events one block may carry in; more are dropped and
     /// counted.
     pub max_events: usize,
@@ -85,8 +85,9 @@ pub struct ProcessSetup {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Block<'a, 'b> {
-    /// `max(inputs, outputs)` channels (from [`ProcessSetup`]), each
-    /// [`frames`](Self::frames) long, processed in place.
+    /// `max(inputs, outputs)` channels of the setup's
+    /// [`layout`](ProcessSetup::layout), each [`frames`](Self::frames) long,
+    /// processed in place.
     ///
     /// On entry the first `inputs` carry the input, and any further ones are
     /// zeroed. On return the first `outputs` carry the output.

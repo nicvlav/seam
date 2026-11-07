@@ -8,7 +8,7 @@ use std::hint::black_box;
 
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use seam_example_eq::ExampleEq;
-use seam_host::{Block, EventList, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
 use seam_params::{AudioParams, ParamId};
 
 const FRAMES: usize = 256;
@@ -31,8 +31,7 @@ fn rig() -> Rig {
     let processor = plugin.activate(&ProcessSetup {
         sample_rate: 48_000.0,
         max_frames: FRAMES,
-        inputs: 2,
-        outputs: 2,
+        layout: Layout::STEREO,
         max_events: 0,
         max_out_events: 0,
     });

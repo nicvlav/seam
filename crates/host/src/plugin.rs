@@ -130,8 +130,7 @@ use crate::state::SavedState;
 /// let setup = ProcessSetup {
 ///     sample_rate: 48_000.0,
 ///     max_frames: 64,
-///     inputs: 2,
-///     outputs: 2,
+///     layout: Layout::STEREO,
 ///     max_events: 0,
 ///     max_out_events: 0,
 /// };
@@ -348,8 +347,7 @@ pub trait Plugin: 'static {
     /// # let setup = ProcessSetup {
     /// #     sample_rate: 48_000.0,
     /// #     max_frames: 1,
-    /// #     inputs: 0,
-    /// #     outputs: 2,
+    /// #     layout: Layout::new(0, 2),
     /// #     max_events: 1,
     /// #     max_out_events: 0,
     /// # };

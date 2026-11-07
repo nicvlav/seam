@@ -51,8 +51,7 @@ fn audio_through_the_c_interface_matches_the_processor_driven_directly() {
     let mut processor = plugin.activate(&ProcessSetup {
         sample_rate: RATE,
         max_frames: MAX_FRAMES as usize,
-        inputs: 2,
-        outputs: 2,
+        layout: Layout::STEREO,
         max_events: 0,
         max_out_events: 0,
     });

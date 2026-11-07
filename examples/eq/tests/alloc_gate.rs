@@ -21,8 +21,7 @@ fn processing_and_retuning_never_allocate() {
     let setup = ProcessSetup {
         sample_rate: 48_000.0,
         max_frames: 256,
-        inputs: 2,
-        outputs: 2,
+        layout: Layout::STEREO,
         max_events: 0,
         max_out_events: 0,
     };

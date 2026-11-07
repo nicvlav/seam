@@ -125,8 +125,7 @@ impl Direct {
         let processor = plugin.activate(&ProcessSetup {
             sample_rate: rate,
             max_frames: MAX_FRAMES,
-            inputs: layout.inputs,
-            outputs: layout.outputs,
+            layout,
             max_events: EVENT_ROOM,
             max_out_events: EVENT_ROOM,
         });

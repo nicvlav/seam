@@ -434,11 +434,8 @@ fn layouts_follow_the_declaration() {
     assert!(host.activate());
     assert!(!host.arrange(Layout::STEREO), "not while active");
     assert_eq!(
-        probe(|state| state
-            .setups
-            .last()
-            .map(|setup| (setup.inputs, setup.outputs))),
-        Some((1, 1))
+        probe(|state| state.setups.last().map(|setup| setup.layout)),
+        Some(Layout::MONO)
     );
 }
 
@@ -534,13 +531,8 @@ fn activation_builds_the_processor_and_deactivation_hands_it_back() {
     let setup = probe(|state| state.setups.clone());
     assert_eq!(setup.len(), 2);
     assert_eq!(
-        (
-            setup[0].sample_rate,
-            setup[0].max_frames,
-            setup[0].inputs,
-            setup[0].outputs
-        ),
-        (96_000.0, 333, 2, 2)
+        (setup[0].sample_rate, setup[0].max_frames, setup[0].layout),
+        (96_000.0, 333, Layout::STEREO)
     );
     assert_eq!((setup[0].max_events, setup[0].max_out_events), (0, 0));
     assert!(host.deactivate());

@@ -378,8 +378,7 @@ fn activation_builds_a_processor_for_the_setup_and_layout() {
         [ProcessSetup {
             sample_rate: 44_100.0,
             max_frames: 256,
-            inputs: 1,
-            outputs: 1,
+            layout: Layout::MONO,
             max_events: 0,
             max_out_events: 0,
         }]
@@ -1135,7 +1134,7 @@ fn an_instrument_plays_with_no_input_or_a_narrower_one() {
     );
     assert!(host.activate(48_000.0, 8, Layout::new(0, 2)));
     let setup = probe(|state| state.setups[0]);
-    assert_eq!((setup.inputs, setup.outputs), (0, 2));
+    assert_eq!(setup.layout, Layout::new(0, 2));
     assert_eq!(setup.max_events, 2048, "it takes MIDI");
     host.set(GAIN, 0.75);
     let (mut left, mut right) = ([9.0f32; 8], [9.0f32; 8]);

@@ -4,7 +4,7 @@
 
 use seam_example_gain::{BYPASS, GAIN, Gain, MODE};
 use seam_host::vst3::TestHost;
-use seam_host::{Block, EventList, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
 use seam_params::host_id;
 use seam_ump::{ChannelVoice, Voice};
 
@@ -122,8 +122,7 @@ fn a_learned_controller_drives_the_gain() {
     let mut processor = plugin.activate(&ProcessSetup {
         sample_rate: 48_000.0,
         max_frames: 8,
-        inputs: 2,
-        outputs: 2,
+        layout: Layout::STEREO,
         max_events: 4,
         max_out_events: 0,
     });

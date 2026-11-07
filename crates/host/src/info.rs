@@ -193,7 +193,7 @@ pub struct PluginInfo {
     pub features: &'static [Feature],
     /// The main bus layouts it runs with, the first by default; at least
     /// one. A host picks one before activation, and
-    /// [`ProcessSetup`](crate::ProcessSetup) reports it.
+    /// [`ProcessSetup::layout`](crate::ProcessSetup::layout) reports it.
     pub layouts: &'static [Layout],
     /// Whether it takes MIDI input (for MIDI learn, or notes).
     ///

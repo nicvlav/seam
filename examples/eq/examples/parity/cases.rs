@@ -5,7 +5,7 @@ use std::io::{BufRead, Write};
 use seam_example_eq::dsp::{Shape, coefficients};
 use seam_example_eq::params::BANDS;
 use seam_example_eq::{ExampleEq, PARAMS};
-use seam_host::{Block, EventList, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
 use seam_params::{Kind, ParamDecl, Range};
 
 fn bits(value: f32) -> String {
@@ -215,8 +215,7 @@ pub(crate) fn audio(input: impl BufRead, out: &mut impl Write) {
                 let setup = ProcessSetup {
                     sample_rate: rate.parse().expect("a rate"),
                     max_frames: 4_096,
-                    inputs: 2,
-                    outputs: 2,
+                    layout: Layout::STEREO,
                     max_events: 0,
                     max_out_events: 0,
                 };

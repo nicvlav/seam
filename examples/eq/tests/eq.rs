@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use seam_example_eq::{EqProcessor, ExampleEq, PARAMS};
-use seam_host::{Block, EventList, Plugin, ProcessSetup, Processor, SavedState};
+use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor, SavedState};
 use seam_params::{Kind, ParamDecl};
 
 const RATE: f64 = 48_000.0;
@@ -14,8 +14,7 @@ fn setup() -> ProcessSetup {
     ProcessSetup {
         sample_rate: RATE,
         max_frames: MAX_FRAMES,
-        inputs: 2,
-        outputs: 2,
+        layout: Layout::STEREO,
         max_events: 0,
         max_out_events: 0,
     }
