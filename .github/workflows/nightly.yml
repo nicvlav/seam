@@ -3,13 +3,11 @@ name: Nightly
 # The long lanes: miri over the core and the host crate, the fuzz targets, the
 # real-time sanitizer over the allocation gates and the gate matrix, and a
 # 30-minute soak of the example EQ through both exporters.
+#
+# Started by hand, from any branch. It has no schedule yet: a nightly run
+# costs more runner minutes than the pull request gate has to spare, and
+# docs/testing.md says how to run each lane on your own machine.
 on:
-  schedule:
-    - cron: "41 2 * * *"
-  # A change to this file runs it, since a dispatch is possible only for a
-  # workflow already on the default branch.
-  push:
-    paths: [.github/workflows/nightly.yml]
   workflow_dispatch:
     inputs:
       fuzz_seconds:
@@ -32,6 +30,7 @@ jobs:
   miri:
     name: miri (${{ matrix.borrows }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +71,7 @@ jobs:
   fuzz:
     name: fuzz (${{ matrix.target }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -85,9 +85,9 @@ jobs:
           workspaces: fuzz
       - name: cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
-      # The corpus grows as the fuzzer finds inputs; keep it between nights.
+      # The corpus grows as the fuzzer finds inputs; keep it between runs.
       # The committed seeds (fuzz/corpus) are the start of every run.
-      - name: Corpus from earlier nights
+      - name: Corpus from earlier runs
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: fuzz/corpus/${{ matrix.target }}
@@ -121,6 +121,7 @@ jobs:
   rtsan:
     name: realtime sanitizer
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       # `--target` keeps the flags off build scripts and proc macros.
       RUSTFLAGS: -Zsanitizer=realtime --cfg seam_rtsan

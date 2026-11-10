@@ -1,0 +1,16 @@
+# Keeps the workflows' pinned actions current: one pull request a month for
+# all of them, with a title in the shape the title check accepts. Cargo and
+# npm dependencies are raised only by a security update, which the
+# repository's settings turn on, since every pull request spends runner
+# minutes.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

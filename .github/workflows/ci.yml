@@ -1,9 +1,19 @@
 name: CI
 
+# Two sizes of run.
+#
+# A pull request takes the thin gate: what a developer's own machine cannot
+# show (Linux, and macOS in a light form) and the checks that cost seconds.
+# It runs once the pull request is ready for review, never on a draft, and
+# main is not tested again after a merge, since the squash of a branch rebased
+# onto main is the tree its pull request tested.
+#
+# A run started by hand, from any branch, is the full run: every job, every
+# step on Windows and macOS, and the larger property-test count. It is for a
+# change the thin gate cannot judge, and for the commit a release is cut from.
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       bench_base:
@@ -13,7 +23,7 @@ on:
 permissions:
   contents: read
 
-# Supersede runs on a branch, but let every push to main finish.
+# Supersede runs on a branch, but let a run on main finish.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -24,11 +34,20 @@ env:
 jobs:
   rust:
     name: rust (${{ matrix.os }})
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, macos-15]
+        # A pull request takes macOS alone, and only the steps that show its
+        # code lints and passes: Clippy with all features, and the tests in
+        # debug. That leg is the gate's one build of the VST3 exporter; a
+        # developer's Windows machine shows the rest. The full run takes
+        # both systems and every step.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["windows-2025", "macos-15"]' || '["macos-15"]') }}
     runs-on: ${{ matrix.os }}
+    env:
+      EVERY_STEP: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # rust-toolchain.toml pins the compiler. `rustup show` no longer
@@ -39,31 +58,35 @@ jobs:
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Format
+        if: env.EVERY_STEP == 'true'
         run: cargo fmt --all --check
       # Every step that resolves dependencies runs --locked, so a lockfile out
       # of step with the manifests fails.
       - name: Clippy (default features)
+        if: env.EVERY_STEP == 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Clippy (all features)
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       # Release builds drop debug assertions, so the code and the lints that
       # see it differ from the debug build's.
       - name: Clippy (release)
+        if: env.EVERY_STEP == 'true'
         run: cargo clippy --workspace --all-targets --all-features --release --locked -- -D warnings
       # Includes the drift gates for generated files (xtask's drift test,
       # seam-bridge's typescript_drift) and the allocation gates in debug.
       - name: Test
         run: cargo test --workspace --all-features --locked
         # Property tests: proptest's default 256 cases on pull requests,
-        # sixteen times as many on pushes to main.
+        # sixteen times as many on a run started by hand.
         env:
-          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+          PROPTEST_CASES: ${{ github.event_name == 'workflow_dispatch' && '4096' || '256' }}
       # Everything again on optimised code, doc tests included: a test that
       # branches on debug assertions takes its other side here.
       - name: Test (release)
+        if: env.EVERY_STEP == 'true'
         run: cargo test --workspace --all-features --release --locked
         env:
-          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+          PROPTEST_CASES: ${{ github.event_name == 'workflow_dispatch' && '4096' || '256' }}
       # A failing property test writes the case it found next to its test;
       # keep it, so the failure can be replayed and committed.
       - name: Keep the property tests' failing cases
@@ -77,16 +100,20 @@ jobs:
       # runs. A crate that adds tests/alloc_gate.rs joins this step with no
       # edit here.
       - name: Allocation gates (release)
+        if: env.EVERY_STEP == 'true'
         run: cargo test --workspace --all-features --release --test alloc_gate --locked
       # The example EQ through both exporters across block sizes, rates and
       # layouts, under the allocation gate, on optimised code.
       - name: Gate matrix (release)
+        if: env.EVERY_STEP == 'true'
         run: cargo test -p seam-example-eq --release --test matrix --test overflow --locked
       - name: Docs
+        if: env.EVERY_STEP == 'true'
         run: cargo doc --workspace --all-features --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # Full run only.
   # Nightly rustdoc counts the public types, traits, functions and macros that
   # should carry an example and the ones that do. The count is unstable, so
   # this lane pins the nightly the scheduled lanes use; the stable toolchain
@@ -94,6 +121,8 @@ jobs:
   # leg builds the VST3 exporter.
   examples:
     name: doc examples
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
     runs-on: windows-2025
     env:
       NIGHTLY: nightly-2026-11-04
@@ -109,6 +138,8 @@ jobs:
 
   core-alone:
     name: core builds alone
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,6 +194,8 @@ jobs:
 
   loom:
     name: loom models
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -183,7 +216,8 @@ jobs:
   # last line, so this compares the whole file with the pull request's base.
   protocol-shape:
     name: protocol shape history
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    timeout-minutes: 5
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -196,6 +230,8 @@ jobs:
 
   page:
     name: page
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -220,6 +256,8 @@ jobs:
   # design (it has no main-thread timer), and a check proves the refusal.
   linux:
     name: linux
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     env:
       PACKAGES: --workspace
@@ -231,12 +269,15 @@ jobs:
           rustup toolchain install
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Here as well as in `rust`, whose Format step a pull request skips.
+      - name: Format
+        run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy $PACKAGES $FEATURES --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test $PACKAGES $FEATURES --locked
         env:
-          PROPTEST_CASES: ${{ github.event_name == 'push' && '4096' || '256' }}
+          PROPTEST_CASES: ${{ github.event_name == 'workflow_dispatch' && '4096' || '256' }}
       - name: Allocation gates (release)
         run: cargo test $PACKAGES $FEATURES --release --test alloc_gate --locked
       - name: Gate matrix (release)
@@ -256,6 +297,8 @@ jobs:
   # cross-compilation sysroot is needed to check a target's layout.
   header:
     name: seam.h
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 5
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,10 +312,13 @@ jobs:
             done
           done
 
+  # Full run only.
   # The core and the C interface type-check for the 64-bit ARM targets the
   # adapter ships for: Linux hosts and Android.
   cross-check:
     name: cross check (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -293,9 +339,11 @@ jobs:
       - name: C interface alone
         run: cargo check --locked --target ${{ matrix.target }} -p seam-host --features cabi
 
-  # Licences, advisories, bans and sources, by deny.toml.
+  # Full run only. Licences, advisories, bans and sources, by deny.toml.
   deny:
     name: cargo deny
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -304,9 +352,12 @@ jobs:
           tool: cargo-deny@0.20.2
       - run: cargo deny --locked check
 
-  # Line coverage of the code Linux builds, failing below the kept threshold.
+  # Full run only. Line coverage of the code Linux builds, failing below the
+  # kept threshold.
   coverage:
     name: coverage
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     env:
       PACKAGES: --workspace --exclude seam-testkit --exclude xtask
@@ -337,9 +388,15 @@ jobs:
           path: lcov.info
           if-no-files-found: ignore
 
-  # The example EQ's VST3 bundle, laid out by hand, through pluginval.
-  pluginval:
-    name: pluginval (windows)
+  # Full run only.
+  # The example EQ's VST3 bundle, laid out by hand, through pluginval and then
+  # the Steinberg validator, built from the VST3 SDK at a pinned commit. One
+  # job, so the bundle is built once; the second validator runs whether or not
+  # the first passed.
+  validators:
+    name: plugin validators (windows)
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 20
     runs-on: windows-2025
     env:
       PLUGINVAL_VERSION: v1.0.4
@@ -347,6 +404,8 @@ jobs:
       # The highest strictness the module passes today; docs/testing.md says
       # what it covers.
       PLUGINVAL_STRICTNESS: "5"
+      VST3_SDK_TAG: v3.8.1_build_84
+      VST3_SDK_COMMIT: 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
@@ -377,11 +436,32 @@ jobs:
           name: pluginval-logs
           path: pluginval-logs
           if-no-files-found: ignore
+      - name: The Steinberg validator, if built before
+        id: cached
+        if: ${{ !cancelled() }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vst3sdk-build/bin/Release
+          key: vst3-validator-${{ env.VST3_SDK_COMMIT }}
+      - name: Build the Steinberg validator
+        if: ${{ !cancelled() && steps.cached.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$VST3_SDK_TAG" --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+          test "$(git -C vst3sdk rev-parse HEAD)" = "$VST3_SDK_COMMIT"
+          cmake -S vst3sdk -B vst3sdk-build -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
+          cmake --build vst3sdk-build --config Release --target validator --parallel 4
+      - name: The Steinberg validator
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: vst3sdk-build/bin/Release/validator.exe "bundle/Seam Example EQ.vst3"
 
   # Instruction counts of the EQ's block, a host write, learn's dispatch and
   # UMP decoding; on a pull request, compared with its base.
   bench:
     name: benchmarks
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -401,43 +481,3 @@ jobs:
         run: scripts/run-benches.sh "${BASE}"
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.bench_base || '' }}
-
-  # The same bundle through the Steinberg validator, built from the VST3 SDK
-  # at a pinned commit.
-  vst3-validator:
-    name: vst3 validator (windows)
-    runs-on: windows-2025
-    env:
-      VST3_SDK_TAG: v3.8.1_build_84
-      VST3_SDK_COMMIT: 3cdf9ca5d1f5b1b21e0a86832aa4abe55607bd96
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
-        run: |
-          rustup toolchain install
-          rustup show active-toolchain
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo build -p seam-example-eq --release --locked
-      - name: Lay out the bundle
-        shell: bash
-        run: |
-          bundle="bundle/Seam Example EQ.vst3"
-          mkdir -p "$bundle/Contents/x86_64-win"
-          cp target/release/seam_example_eq.dll "$bundle/Contents/x86_64-win/Seam Example EQ.vst3"
-      - name: The validator, if built before
-        id: cached
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: vst3sdk-build/bin/Release
-          key: vst3-validator-${{ env.VST3_SDK_COMMIT }}
-      - name: Build the validator
-        if: steps.cached.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          git clone --depth 1 --branch "$VST3_SDK_TAG" --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git vst3sdk
-          test "$(git -C vst3sdk rev-parse HEAD)" = "$VST3_SDK_COMMIT"
-          cmake -S vst3sdk -B vst3sdk-build -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
-          cmake --build vst3sdk-build --config Release --target validator --parallel 4
-      - name: Validate
-        shell: bash
-        run: vst3sdk-build/bin/Release/validator.exe "bundle/Seam Example EQ.vst3"

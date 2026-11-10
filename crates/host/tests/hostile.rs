@@ -5,8 +5,8 @@
 //! back to itself.
 //!
 //! The cases come from a seeded generator, so a failure names its case and
-//! replays; `PROPTEST_CASES`, which CI raises on pushes to main, scales them
-//! as it scales the property tests.
+//! replays; `PROPTEST_CASES`, which CI raises on a run started by hand,
+//! scales them as it scales the property tests.
 
 use std::cell::RefCell;
 use std::rc::Rc;
