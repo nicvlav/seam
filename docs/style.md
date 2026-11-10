@@ -101,6 +101,8 @@ Seam's other crates reach it is `#[doc(hidden)]`, and no public doc links to it.
 | Doc | Holds |
 | --- | --- |
 | [README.md](../README.md) | What Seam is, its status, the layout, how to build, the licence; under 100 lines. |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | How a change reaches `main`: the pull request, its title and the merge. |
+| [AGENTS.md](../AGENTS.md) | Where a coding agent starts: it points at the rules and adds none. |
 | [ARCHITECTURE.md](../ARCHITECTURE.md) | The bird's-eye view, the codemap, a host's call to a block, the invariants and the threads ([matklad's form][architecture]), naming files and items, never line numbers. |
 | [first-plugin.md](first-plugin.md) | A walk through the example gain, in the order a plugin is written. |
 | [testing.md](testing.md) | The test rules, and what each CI lane proves. |
