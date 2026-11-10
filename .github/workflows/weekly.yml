@@ -3,13 +3,10 @@ name: Weekly
 # The 3-hour soak of the example EQ through both exporters, with randomised
 # parameter moves, checked for allocation, faults, NaN or denormal output and
 # drift from the processor driven directly.
+#
+# Started by hand, from any branch, before a release. It has no schedule yet,
+# for the reason nightly.yml gives.
 on:
-  schedule:
-    - cron: "23 4 * * 0"
-  # A push that changes this file runs a 5-minute soak, since a dispatch is
-  # possible only for a workflow already on the default branch.
-  push:
-    paths: [.github/workflows/weekly.yml]
   workflow_dispatch:
     inputs:
       soak_seconds:
@@ -42,4 +39,4 @@ jobs:
         shell: bash
         run: cargo test -p seam-example-eq --no-default-features --features cabi --release --test matrix --locked -- --ignored soak --nocapture
         env:
-          SEAM_SOAK_SECONDS: ${{ inputs.soak_seconds || (github.event_name == 'push' && '300' || '10800') }}
+          SEAM_SOAK_SECONDS: ${{ inputs.soak_seconds || '10800' }}

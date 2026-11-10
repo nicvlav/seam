@@ -2,24 +2,29 @@ name: JUCE adapter
 
 # The example EQ built through adapters/juce for arm64 and x86_64, at the JUCE
 # commit bench/ pins, and its Windows VST3 through the Steinberg validator.
-# Runs when the adapter or the host crate changes, every night, and on demand.
+#
+# A pull request that changes the adapter, the host crate or the example EQ
+# runs the Windows lane once it is ready for review. The macOS build runs only
+# when started by hand: no macOS bundle ships yet, and macOS minutes are the
+# dearest by far. Nothing here runs on a schedule, since JUCE, the SDK and the
+# toolchain are all pinned.
 on:
-  push:
-    branches: [main]
-    paths: &paths
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
       - adapters/**
       - crates/host/**
       - examples/eq/**
       - .github/juce-adapter/**
       - .github/workflows/juce-adapter.yml
-  pull_request:
-    paths: *paths
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: juce-adapter-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,6 +32,8 @@ env:
 jobs:
   universal:
     name: universal build (macos-15)
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,10 +80,12 @@ jobs:
           test "$status" = 0
 
   # The adapter's Windows VST3 through the same validator, at the same pinned
-  # SDK commit, as ci.yml's `vst3-validator` lane. Keep the two pins and the
+  # SDK commit, as ci.yml's `validators` lane. Keep the two pins and the
   # cache key in step: the lanes share one built validator.
   vst3-validator:
     name: vst3 validator (windows)
+    if: ${{ !github.event.pull_request.draft }}
+    timeout-minutes: 30
     runs-on: windows-2025
     env:
       VST3_SDK_TAG: v3.8.1_build_84

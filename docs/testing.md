@@ -4,7 +4,8 @@ Every behaviour change carries a test. A bug fix starts with a test that fails
 for the bug, seen failing before the fix and passing after it. Every test file
 starts with a `//!` line that says what it tests: a test crate is a crate, and
 `missing_docs` fails one without that line under CI's `-D warnings`. Each
-command below is marked with where CI runs it ([CI lanes](#ci-lanes)).
+command below is marked with where CI runs it ([CI lanes](#ci-lanes)); the
+nightly and weekly workflows are started by hand.
 
 ```sh
 cargo test --workspace --all-features                                # pull request: everything, debug
@@ -20,22 +21,30 @@ python3 scripts/test-checks.py       # pull request: the check scripts refuse th
 python3 scripts/check-shape-append-only.py origin/main   # pull request, against its base: the shape file only gains lines
 cargo xtask wrap                     # pull request: the comment lines of crates/, examples/ and xtask/ past 80 columns
 cargo xtask wrap --markdown          # pull request: the prose lines of the repository's docs past 80 columns
-RUSTFLAGS="-Zsanitizer=realtime --cfg seam_rtsan" cargo +nightly test ... --target x86_64-unknown-linux-gnu   # nightly: see Real-time sanitizer
-cargo test --manifest-path fuzz/Cargo.toml --lib   # nightly: the fuzz crate's unit test
+RUSTFLAGS="-Zsanitizer=realtime --cfg seam_rtsan" cargo +nightly test ... --target x86_64-unknown-linux-gnu   # nightly workflow: see Real-time sanitizer
+cargo test --manifest-path fuzz/Cargo.toml --lib   # nightly workflow: the fuzz crate's unit test
 python3 scripts/run-loom.py          # pull request: the loom models, counted
 cargo test -p seam-example-eq --release --test matrix --test overflow   # pull request: the gate matrix
-SEAM_SOAK_SECONDS=60 cargo test -p seam-example-eq --release --test matrix -- --ignored soak --nocapture   # nightly (30 minutes) and weekly (3 hours)
-cargo +nightly fuzz run saved_block  # nightly, ten minutes per target; in fuzz/, needs a nightly compiler
+SEAM_SOAK_SECONDS=60 cargo test -p seam-example-eq --release --test matrix -- --ignored soak --nocapture   # nightly workflow (30 minutes) and weekly workflow (3 hours)
+cargo +nightly fuzz run saved_block  # nightly workflow, ten minutes per target; in fuzz/, needs a nightly compiler
 scripts/run-benches.sh               # pull request, against the base; Linux, with valgrind and iai-callgrind-runner
 cd page && npm ci && npm run typecheck && npm test                   # pull request
 ```
 
 ## CI lanes
 
-Pull requests and pushes to `main` run `.github/workflows/ci.yml`. The JUCE
-adapter has its own workflow (`juce-adapter.yml`), and the long lanes run on a
-schedule (`nightly.yml`, `weekly.yml`); a change to a scheduled workflow's own
-file runs it.
+A pull request runs `.github/workflows/ci.yml` once it is ready for review. A
+draft runs nothing, and `main` is not tested again after a merge: the squash of
+a branch rebased onto `main` is the tree its pull request tested. On a pull
+request the macOS leg of `rust` takes two steps, Clippy with all features and
+Test; started by hand, the workflow takes every step on both systems. The JUCE
+adapter has its own workflow (`juce-adapter.yml`).
+
+The long lanes (`nightly.yml`, `weekly.yml`) and the macOS build of the JUCE
+adapter have no schedule yet. They are started by hand, from any branch, so the
+runner minutes go to the pull request gate. Each long lane's command is in the
+list above and runs on a developer's machine, except the real-time sanitizer,
+which needs Linux.
 
 | Lane | What it proves |
 | --- | --- |
@@ -53,8 +62,8 @@ file runs it.
 | `cross check` (aarch64 Linux, aarch64 Android) | The core, the bridge and the C interface type-check for those targets. Nothing is linked or run. |
 | `cargo deny` | Every dependency of the workspace has a licence `deny.toml` lists, no advisory applies (two, in the benchmark harness, are named there), no source is outside crates.io. It does not read `fuzz/`, which is outside the workspace and whose libFuzzer is under NCSA. |
 | `coverage` | Line coverage of the code Linux builds is at least 92 % (see [Coverage](#coverage)). |
-| `pluginval (windows)` | pluginval 1.0.4, pinned by hash, passes the example EQ's VST3 bundle at strictness level 5 without a GUI, run in the validator's own process. It does not show what a real host does with it. |
-| `vst3 validator (windows)` | The Steinberg validator, built from the VST3 SDK at a pinned commit, passes the same bundle. |
+| `plugin validators (windows)`: pluginval | pluginval 1.0.4, pinned by hash, passes the example EQ's VST3 bundle at strictness level 5 without a GUI, run in the validator's own process. It does not show what a real host does with it. |
+| `plugin validators (windows)`: The Steinberg validator | The Steinberg validator, built from the VST3 SDK at a pinned commit, passes the same bundle. It runs whether or not pluginval passed. |
 | `benchmarks` | On a pull request, no benchmark's instruction count grew more than 2 % against the base (see [Benchmarks](#benchmarks)). |
 | `core builds alone`: No window, WebView or host dependency | No core crate or `seam-bridge` links a window, WebView, UI toolkit or plugin-format crate, and no crate depends on one of its own layer or above (see [Repository checks](#repository-checks)). |
 | `core builds alone`: The Rust reader's tests | `cargo xtask scan`, `defs` and `wrap` read comments, string literals, `fn` names and item definitions as the language does (see [Repository checks](#repository-checks)). |
@@ -67,8 +76,8 @@ file runs it.
 | `protocol shape history` (pull requests) | `crates/bridge/protocol-shape.txt` only gains lines against the base revision (see [Repository checks](#repository-checks)). |
 | `loom models` | The lock-free hand-offs are correct under every interleaving their atomics allow, and `scripts/run-loom.py` fails unless every model ran (section 3). |
 | `page`: Typecheck, Test | The page compiles against the committed generated types, and its tests pass. |
-| `JUCE adapter` (macOS, on a change to `adapters/`, `crates/host/` or `examples/eq/`, nightly, on dispatch) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
-| `JUCE adapter` (Windows) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `vst3 validator (windows)` lane passes Seam's own. |
+| `JUCE adapter` (macOS, started by hand) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
+| `JUCE adapter` (Windows, on a pull request that changes `adapters/`, `crates/host/` or `examples/eq/`) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `plugin validators (windows)` lane passes Seam's own. |
 | Nightly: `miri` | `seam-host`'s tests, the core crates' unit tests and some integration tests find no undefined behaviour under Stacked Borrows and Tree Borrows (see [Miri](#miri)). |
 | Nightly: `rtsan` (Linux) | A canary that allocates inside a marked call aborts, and the allocation gates and the gate matrix pass under RealtimeSanitizer. Not run yet; see [Real-time sanitizer](#real-time-sanitizer). |
 | Nightly: `fuzz` | Each of four `cargo-fuzz` targets ran ten minutes with no crash, no panic and no broken fixpoint (see [Fuzzing](#fuzzing)). |
@@ -592,12 +601,12 @@ generated inputs, not only as examples:
   watch left shows the gesture's value while one is open and the store
   otherwise.
 
-They run proptest's default 256 cases on every pull request and 4,096 on pushes
-to `main`, through `PROPTEST_CASES`. A failing property test's regression file
-is uploaded. Three properties are pinned differently, where `PROPTEST_CASES`
-does not reach: one by examples (a no-op write keeps the redo, NaN payloads
-included), the session race by a seeded loop of threads, and the page's held
-queue by a seeded loop of 4,096 random write and call sequences
+They run proptest's default 256 cases on every pull request and 4,096 on a run
+started by hand, through `PROPTEST_CASES`. A failing property test's
+regression file is uploaded. Three properties are pinned differently, where
+`PROPTEST_CASES` does not reach: one by examples (a no-op write keeps the redo,
+NaN payloads included), the session race by a seeded loop of threads, and the
+page's held queue by a seeded loop of 4,096 random write and call sequences
 (`page/test/held.test.ts`).
 
 Saved blocks are tested the same way without proptest.
@@ -624,12 +633,12 @@ exporter's save and load.
 - `cabi_state`: the same through the C interface's state calls.
 
 The seeds in `fuzz/corpus/` are real messages, saved blocks and hostile
-variants. The nightly lane starts from them plus the corpus earlier nights grew.
+variants. The nightly lane starts from them plus the corpus earlier runs grew.
 Run one locally with `cargo +nightly fuzz run <target>` from `fuzz/`. On Windows
 the sanitiser's DLL (`clang_rt.asan_dynamic-x86_64.dll`, in the Visual Studio
 compiler's `bin\Hostx64\x64`) must be on `PATH`.
 
-In the nightly lane each target runs ten minutes, and a night passes with no
+In the nightly lane each target runs ten minutes, and a run passes with no
 crash, no panic and no broken fixpoint; a crash is uploaded. Each leg also runs
 the fuzz crate's own unit test (`cargo test --manifest-path fuzz/Cargo.toml
 --lib`), which no other lane runs because the crate is outside the workspace.

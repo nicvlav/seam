@@ -51,8 +51,8 @@ windows-sys = "0.61.2"
 # Pinned exactly: the snapshot's soundness rests on this version's source,
 # as crates/learn/src/snapshot.rs checks it.
 triple_buffer = "=9.0.0"
-# Tests only: property tests. CI raises the case count on pushes to main
-# (PROPTEST_CASES). No forking or timeouts, which need extra crates.
+# Tests only: property tests. CI raises the case count on a run started by
+# hand (PROPTEST_CASES). No forking or timeouts, which need extra crates.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 # Tests only: instruction-count benchmarks for CI (benches/iai.rs in four
 # crates), run under valgrind on Linux. The runner binary CI installs must

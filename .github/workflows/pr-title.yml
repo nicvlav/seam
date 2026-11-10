@@ -1,0 +1,39 @@
+name: PR title
+
+# A pull request is squash-merged, and its title becomes the commit's subject
+# on main, with the pull request's number added by GitHub. So the title is
+# checked for the shape every subject on main has.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: pr title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: The title is the squash subject
+        # Through the environment, so the title is never read as script.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          shape='^(feat|fix|docs|test|ci)(\([a-z0-9-]+\))?: [^ ].*[^. ]$'
+          if [[ ! "$TITLE" =~ $shape ]]; then
+            echo "::error::The title is not 'type(scope): what changed', with a type of feat, fix, docs, test or ci and no full stop."
+            exit 1
+          fi
+          if [[ "$TITLE" =~ \(#[0-9]+\)$ ]]; then
+            echo "::error::Leave the number off: GitHub adds it at the merge."
+            exit 1
+          fi
+          if (( ${#TITLE} > 72 )); then
+            echo "::error::The title is ${#TITLE} characters; 72 is the limit."
+            exit 1
+          fi
