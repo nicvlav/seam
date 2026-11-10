@@ -105,7 +105,7 @@ Seam's other crates reach it is `#[doc(hidden)]`, and no public doc links to it.
 | [first-plugin.md](first-plugin.md) | A walk through the example gain, in the order a plugin is written. |
 | [testing.md](testing.md) | The test rules, and what each CI lane proves. |
 | [glossary.md](glossary.md) | The words Seam coins, a sentence or two each, linking the item that owns it. |
-| [The decision record](transfer-from-seam-juce.md) | What holds now: each decision's status, question, answer and alternatives. |
+| [The decision record](decisions.md) | What holds now: each decision's status, question, answer and alternatives. |
 | [decision-history.md](decision-history.md) | How each decision was reached and changed; dates and review words belong here. |
 | [decision-index.md](decision-index.md) | From each decision to its code and tests, one line per site. |
 | [CHANGELOG.md](../CHANGELOG.md) | What each version holds, in [Keep a Changelog][changelog] form. |

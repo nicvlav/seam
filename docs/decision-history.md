@@ -1,6 +1,6 @@
 # Decision history
 
-How the decisions and rules of [the decision record](transfer-from-seam-juce.md)
+How the decisions and rules of [the decision record](decisions.md)
 were reached, and how they changed. The record states what holds now; this file
 keeps the path there: who decided, what an earlier form did, and which review
 or audit moved it. Each entry was its record section's paragraph headed
@@ -8,6 +8,11 @@ or audit moved it. Each entry was its record section's paragraph headed
 carried. Each links back to its section, and the record's summary table keeps
 each decision's status. A decision or rule with no entry here has no history
 beyond its section.
+
+This file is closed. It runs to the first commit on `main`, and the audits,
+reviews and stages it names left no other trace in this repository. A decision
+or rule changed since then has its history in the commits that touched its
+section of the record, which `git log` on the record shows.
 
 The entries use these words:
 
@@ -27,14 +32,14 @@ The entries use these words:
 
 ### D6. A participant that registers after a restore
 
-[The decision](transfer-from-seam-juce.md#d6-a-participant-that-registers-after-a-restore)
+[The decision](decisions.md#d6-a-participant-that-registers-after-a-restore)
 
 Worded after the 2026-11-05 audits, which found the second participant's case
 (ST-7); the code is as decided.
 
 ### D8. The history bound
 
-[The decision](transfer-from-seam-juce.md#d8-the-history-bound)
+[The decision](decisions.md#d8-the-history-bound)
 
 The first form booked `size_of` alone, so 800 edits of a 64 KiB value kept 46
 MiB under the default bound (the first audit's finding 5). Decided on
@@ -46,39 +51,39 @@ audit.
 
 ### D9. Sequential consistency of the learn dispatch table
 
-[The decision](transfer-from-seam-juce.md#d9-sequential-consistency-of-the-learn-dispatch-table)
+[The decision](decisions.md#d9-sequential-consistency-of-the-learn-dispatch-table)
 
 Confirmed in `triple_buffer` 9.0.0's source when learn's table landed
 (`seam_learn`'s snapshot module says where).
 
 ### D10. Learn over MIDI 2.0
 
-[The decision](transfer-from-seam-juce.md#d10-learn-over-midi-20)
+[The decision](decisions.md#d10-learn-over-midi-20)
 
 Stage 2 left pitch bend unlearnable.
 
 ### D12. Host step metadata for a stepped range
 
-[The decision](transfer-from-seam-juce.md#d12-host-step-metadata-for-a-stepped-range)
+[The decision](decisions.md#d12-host-step-metadata-for-a-stepped-range)
 
 The 2026-11-05 audits found that the C interface passes no step count for a
 continuous range (RD-4).
 
 ### D16. Where the WebView pieces live
 
-[The decision](transfer-from-seam-juce.md#d16-where-the-webview-pieces-live)
+[The decision](decisions.md#d16-where-the-webview-pieces-live)
 
 `seam-webview` was planned for stage 3.
 
 ### D18. Earlier in-house code
 
-[The decision](transfer-from-seam-juce.md#d18-earlier-in-house-code)
+[The decision](decisions.md#d18-earlier-in-house-code)
 
 When this was decided, the example plugin was the plan's first bar.
 
 ### D19. The restore counter and the applying mark
 
-[The decision](transfer-from-seam-juce.md#d19-the-restore-counter-and-the-applying-mark)
+[The decision](decisions.md#d19-the-restore-counter-and-the-applying-mark)
 
 The first form kept the mark on the clock, so a worker's `Value::set` during a
 UI apply recorded nothing and took the restore's origin (ST-5). Decided on
@@ -89,46 +94,46 @@ Storing the applying thread's id in the clock was ST-5's suggestion.
 
 ### D22. Controllers reaching learn in VST3
 
-[The decision](transfer-from-seam-juce.md#d22-controllers-reaching-learn-in-vst3)
+[The decision](decisions.md#d22-controllers-reaching-learn-in-vst3)
 
 Decided by the owner, the MIDI 2.0 pool included.
 
 ### D30. An NRPN data entry with only its high byte
 
-[The decision](transfer-from-seam-juce.md#d30-an-nrpn-data-entry-with-only-its-high-byte)
+[The decision](decisions.md#d30-an-nrpn-data-entry-with-only-its-high-byte)
 
 Decided on 2026-11-03; amended after the 2026-11-05 audits, which found a low
 byte sent first dropped (MD-5); confirmed by the owner on 2026-11-07.
 
 ### D33. Undo during a user gesture
 
-[The decision](transfer-from-seam-juce.md#d33-undo-during-a-user-gesture)
+[The decision](decisions.md#d33-undo-during-a-user-gesture)
 
 In Rust's first form the replay shared the drag's bracket, and the drag's step
 kept its before-value from before the replay.
 
 ### D34. A sync while a gesture is open
 
-[The decision](transfer-from-seam-juce.md#d34-a-sync-while-a-gesture-is-open)
+[The decision](decisions.md#d34-a-sync-while-a-gesture-is-open)
 
 Taken as the review recommended; confirmed by the owner.
 
 ### D35. A reserved NRPN block
 
-[The decision](transfer-from-seam-juce.md#d35-a-reserved-nrpn-block)
+[The decision](decisions.md#d35-a-reserved-nrpn-block)
 
 Taken as the review recommended; confirmed by the owner.
 
 ### D36. The order one undo tick records
 
-[The decision](transfer-from-seam-juce.md#d36-the-order-one-undo-tick-records)
+[The decision](decisions.md#d36-the-order-one-undo-tick-records)
 
 The first Rust form recorded parameters first, then values and lists in
 enrollment order.
 
 ### D37. Whether the history keeps enrolled values alive
 
-[The decision](transfer-from-seam-juce.md#d37-whether-the-history-keeps-enrolled-values-alive)
+[The decision](decisions.md#d37-whether-the-history-keeps-enrolled-values-alive)
 
 The first Rust form held strong handles, so an editor that enrolled its own
 values and closed without forgetting them left an enrollment and a poll per
@@ -136,7 +141,7 @@ value for the life of the instance.
 
 ### D38. The origin of a newest write
 
-[The decision](transfer-from-seam-juce.md#d38-the-origin-of-a-newest-write)
+[The decision](decisions.md#d38-the-origin-of-a-newest-write)
 
 Keeping the origin in one atomic word with the value was added on 2026-11-06,
 after a review showed the two stored apart could split; confirmed by the owner
@@ -145,7 +150,7 @@ confirmed by the owner on 2026-11-07.
 
 ### D39. A load between a replay's check and its write
 
-[The decision](transfer-from-seam-juce.md#d39-a-load-between-a-replays-check-and-its-write)
+[The decision](decisions.md#d39-a-load-between-a-replays-check-and-its-write)
 
 The first form held it for every step, so a list step took the list's lock
 inside it while a thread loading inside `List::with` took them the other way
@@ -161,7 +166,7 @@ choice; confirmed by the owner on 2026-11-07.
 
 ### D40. One undo history per UiParams
 
-[The decision](transfer-from-seam-juce.md#d40-one-undo-history-per-uiparams)
+[The decision](decisions.md#d40-one-undo-history-per-uiparams)
 
 Decided on 2026-11-03; amended after the 2026-11-05 audits; confirmed by the
 owner on 2026-11-07.
@@ -170,7 +175,7 @@ The first form answered `None` to a second history.
 
 ### D41. A list step replaying against a waiting verb
 
-[The decision](transfer-from-seam-juce.md#d41-a-list-step-replaying-against-a-waiting-verb)
+[The decision](decisions.md#d41-a-list-step-replaying-against-a-waiting-verb)
 
 Taken as the review recommended; confirmed by the owner. The first form treated
 the step as stale only until the verb was taken; a redo stale for that moment
@@ -178,7 +183,7 @@ still moved the cursor, and a later step then took the wrong element.
 
 ### D42. Order across ticks
 
-[The decision](transfer-from-seam-juce.md#d42-order-across-ticks)
+[The decision](decisions.md#d42-order-across-ticks)
 
 Taken as the review recommended; confirmed by the owner. Without it, a worker's
 push then select could record as select, then push a tick later, so one undo
@@ -186,7 +191,7 @@ left the selection past the end.
 
 ### D43. A derived change records nothing
 
-[The decision](transfer-from-seam-juce.md#d43-a-derived-change-records-nothing)
+[The decision](decisions.md#d43-a-derived-change-records-nothing)
 
 Taken as the review recommended; confirmed by the owner. D38's first form
 recorded a change derived from a user's or the plugin's own change, so a value
@@ -195,7 +200,7 @@ derived from a sync wiped the redo.
 
 ### D44. A participant that changes while its owner holds it
 
-[The decision](transfer-from-seam-juce.md#d44-a-participant-that-changes-while-its-owner-holds-it)
+[The decision](decisions.md#d44-a-participant-that-changes-while-its-owner-holds-it)
 
 Taken as the review recommended; confirmed by the owner. The first form did
 nothing, so a mapping learned through `Learn::map` would have been lost from
@@ -210,7 +215,7 @@ on 2026-11-07.
 
 ### D45. Registrations when a SessionUi drops
 
-[The decision](transfer-from-seam-juce.md#d45-registrations-when-a-sessionui-drops)
+[The decision](decisions.md#d45-registrations-when-a-sessionui-drops)
 
 Taken as the review recommended; confirmed by the owner. The first form left
 them orphaned: no later handle's tick reached them, so a restored section waited
@@ -218,7 +223,7 @@ forever and the key stayed taken.
 
 ### D46. A derived write and a plain value's open gesture
 
-[The decision](transfer-from-seam-juce.md#d46-a-derived-write-and-a-plain-values-open-gesture)
+[The decision](decisions.md#d46-a-derived-write-and-a-plain-values-open-gesture)
 
 Taken as the review recommended; confirmed by the owner. The first form rebased
 the gesture for every derived write, so an echo lost the whole drag and a
@@ -226,7 +231,7 @@ mirrored host write became its before-value.
 
 ### D47. When a lone NRPN high byte settles as coarse
 
-[The decision](transfer-from-seam-juce.md#d47-when-a-lone-nrpn-high-byte-settles-as-coarse)
+[The decision](decisions.md#d47-when-a-lone-nrpn-high-byte-settles-as-coarse)
 
 Taken as the review recommended; confirmed by the owner. The first form settled
 it at the end of the next audio block, so at buffers of 64 frames or fewer a low
@@ -245,13 +250,13 @@ the low byte. Confirmed by the owner on 2026-11-07.
 
 ### D48. A plain Value as a learn Target
 
-[The decision](transfer-from-seam-juce.md#d48-a-plain-value-as-a-learn-target)
+[The decision](decisions.md#d48-a-plain-value-as-a-learn-target)
 
 The recommendation is the review's.
 
 ### D49. A participant writing a parameter during apply
 
-[The decision](transfer-from-seam-juce.md#d49-a-participant-writing-a-parameter-during-apply)
+[The decision](decisions.md#d49-a-participant-writing-a-parameter-during-apply)
 
 Taken as the review recommended; confirmed by the owner. Through `UiParams` the
 write recorded an undo step in a late apply and reached the host as a user
@@ -259,13 +264,13 @@ gesture, so a host in Touch or Latch mode wrote automation during a restore.
 
 ### D50. Learn's audio side per activation
 
-[The decision](transfer-from-seam-juce.md#d50-learns-audio-side-per-activation)
+[The decision](decisions.md#d50-learns-audio-side-per-activation)
 
 Taken as the review recommended; confirmed by the owner.
 
 ### D51. Whether a plugin must be Send
 
-[The decision](transfer-from-seam-juce.md#d51-whether-a-plugin-must-be-send)
+[The decision](decisions.md#d51-whether-a-plugin-must-be-send)
 
 Decided by the owner; amended after the 2026-11-05 audits, and on 2026-11-06 for
 the owner's rule that a `Send` plugin is never bound (D62); confirmed by the
@@ -273,7 +278,7 @@ owner on 2026-11-07.
 
 ### D52. Who makes the RestoreClock
 
-[The decision](transfer-from-seam-juce.md#d52-who-makes-the-restoreclock)
+[The decision](decisions.md#d52-who-makes-the-restoreclock)
 
 Decided by the owner. The consolidated review wired a history on one clock and a
 session and saved block on another: a load wrote a value and an undo wrote the
@@ -281,7 +286,7 @@ old one over it, breaking D20 and D39, and nothing failed.
 
 ### D53. What ticks a plugin with no editor open
 
-[The decision](transfer-from-seam-juce.md#d53-what-ticks-a-plugin-with-no-editor-open)
+[The decision](decisions.md#d53-what-ticks-a-plugin-with-no-editor-open)
 
 Decided by the owner; amended after the 2026-11-05 audits, which found that off
 Windows the VST3 exporter never ticked, so a host's load never reached a session
@@ -290,25 +295,25 @@ participant (the first audit's finding 3, HB-3); confirmed by the owner on
 
 ### D54. Detaching a learn target
 
-[The decision](transfer-from-seam-juce.md#d54-detaching-a-learn-target)
+[The decision](decisions.md#d54-detaching-a-learn-target)
 
 Decided by the owner.
 
 ### D55. A participant whose apply panics
 
-[The decision](transfer-from-seam-juce.md#d55-a-participant-whose-apply-panics)
+[The decision](decisions.md#d55-a-participant-whose-apply-panics)
 
 Decided by the owner.
 
 ### D56. The hash that names a parameter
 
-[The decision](transfer-from-seam-juce.md#d56-the-hash-that-names-a-parameter)
+[The decision](decisions.md#d56-the-hash-that-names-a-parameter)
 
 The implementer's choice, confirmed by the owner on 2026-11-07.
 
 ### D57. The lattice of a stepped range
 
-[The decision](transfer-from-seam-juce.md#d57-the-lattice-of-a-stepped-range)
+[The decision](decisions.md#d57-the-lattice-of-a-stepped-range)
 
 Found by the example EQ, which stored a 0 dB default as 8.94e-7; the first fix
 still put 0 off zero in about a quarter of decimal ranges, -0.3 to 0.3 in steps
@@ -316,13 +321,13 @@ of 0.1 storing 5.55e-17. Decided by the owner on 2026-11-04.
 
 ### D58. What the plugin trait tells every host
 
-[The decision](transfer-from-seam-juce.md#d58-what-the-plugin-trait-tells-every-host)
+[The decision](decisions.md#d58-what-the-plugin-trait-tells-every-host)
 
 Taken from the step 1 review's list; confirmed by the owner.
 
 ### D59. The shape of the VST3 exporter
 
-[The decision](transfer-from-seam-juce.md#d59-the-shape-of-the-vst3-exporter)
+[The decision](decisions.md#d59-the-shape-of-the-vst3-exporter)
 
 The implementer's choice, confirmed by the owner; amended after the 2026-11-05
 audits, which found every call refused when a host creates the instance on one
@@ -339,7 +344,7 @@ creates the instance.
 
 ### D60. A panic inside a host's call
 
-[The decision](transfer-from-seam-juce.md#d60-a-panic-inside-a-hosts-call)
+[The decision](decisions.md#d60-a-panic-inside-a-hosts-call)
 
 The implementer's choice, confirmed by the owner; amended after the 2026-11-05
 audits; confirmed by the owner on 2026-11-07. The first form counted per thread,
@@ -350,13 +355,13 @@ activation (found by the real-time review of the audit fixes).
 
 ### D61. Who flushes denormals
 
-[The decision](transfer-from-seam-juce.md#d61-who-flushes-denormals)
+[The decision](decisions.md#d61-who-flushes-denormals)
 
 The step 1 review's recommendation; confirmed by the owner.
 
 ### D62. The C interface for the JUCE adapter
 
-[The decision](transfer-from-seam-juce.md#d62-the-c-interface-for-the-juce-adapter)
+[The decision](decisions.md#d62-the-c-interface-for-the-juce-adapter)
 
 The implementer's choice, amended after the step 4 review and again after the
 2026-11-05 audits, which found an instance created on one thread and called on
@@ -387,7 +392,7 @@ rule.
 
 ### D63. Keeping the C header true
 
-[The decision](transfer-from-seam-juce.md#d63-keeping-the-c-header-true)
+[The decision](decisions.md#d63-keeping-the-c-header-true)
 
 The implementer's choice, amended after the step 4 review and again after the
 2026-11-05 audits; confirmed by the owner on 2026-11-07.
@@ -397,7 +402,7 @@ CI compiles the header as C and as C++ for x86_64 and AArch64 since HB-12, and
 
 ### D64. How the JUCE adapter builds a plugin
 
-[The decision](transfer-from-seam-juce.md#d64-how-the-juce-adapter-builds-a-plugin)
+[The decision](decisions.md#d64-how-the-juce-adapter-builds-a-plugin)
 
 The implementer's choice, amended after the step 4 review and again after the
 2026-11-05 audits; confirmed by the owner on 2026-11-07.
@@ -406,7 +411,7 @@ The build once per architecture answers HB-4.
 
 ### D65. What a host sees through JUCE
 
-[The decision](transfer-from-seam-juce.md#d65-what-a-host-sees-through-juce)
+[The decision](decisions.md#d65-what-a-host-sees-through-juce)
 
 The implementer's choice, amended after the step 4 review and again after the
 2026-11-05 audits; confirmed by the owner on 2026-11-07.
@@ -427,7 +432,7 @@ implementer's choices; confirmed by the owner on 2026-11-07.
 
 ### D66. Bytes after the block, and a failed load
 
-[The decision](transfer-from-seam-juce.md#d66-bytes-after-the-block-and-a-failed-load)
+[The decision](decisions.md#d66-bytes-after-the-block-and-a-failed-load)
 
 The first form refused any trailing byte and answered VST3 with success all the
 same (HB-8). Decided by the owner on 2026-11-05.
@@ -437,7 +442,7 @@ confirmed by the owner on 2026-11-07.
 
 ### D67. Checking the audio-thread locking rule
 
-[The decision](transfer-from-seam-juce.md#d67-checking-the-audio-thread-locking-rule)
+[The decision](decisions.md#d67-checking-the-audio-thread-locking-rule)
 
 Decided by the owner on 2026-11-05.
 
@@ -447,13 +452,13 @@ comment.
 
 ### D68. Audit items that wait for their code
 
-[The decision](transfer-from-seam-juce.md#d68-audit-items-that-wait-for-their-code)
+[The decision](decisions.md#d68-audit-items-that-wait-for-their-code)
 
 Decided by the owner on 2026-11-05.
 
 ### D69. Where a continuous range is checked
 
-[The decision](transfer-from-seam-juce.md#d69-where-a-continuous-range-is-checked)
+[The decision](decisions.md#d69-where-a-continuous-range-is-checked)
 
 The first form had public fields checked only by the builder, so a range never
 built into a set could panic in `Kind::steps` (the first audit's finding 17).
@@ -461,7 +466,7 @@ The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D70. Learn's reading of MIDI 1.0 pairs
 
-[The decision](transfer-from-seam-juce.md#d70-learns-reading-of-midi-10-pairs)
+[The decision](decisions.md#d70-learns-reading-of-midi-10-pairs)
 
 The implementer's choice; confirmed by the owner on 2026-11-07. Amended on
 2026-11-06: the first form left 96 and 97 plain controllers, as C++ did; it let
@@ -488,7 +493,7 @@ a lone NRPN high byte does, under D47's amended rule.
 
 ### D71. Learn after an unreadable midiLearn section
 
-[The decision](transfer-from-seam-juce.md#d71-learn-after-an-unreadable-midilearn-section)
+[The decision](decisions.md#d71-learn-after-an-unreadable-midilearn-section)
 
 The first form failed before clearing, so the previous project's mappings went
 on routing MIDI (ST-6). The implementer's choice; confirmed by the owner on
@@ -499,7 +504,7 @@ table (D82).
 
 ### D72. How much a host may ask
 
-[The decision](transfer-from-seam-juce.md#d72-how-much-a-host-may-ask)
+[The decision](decisions.md#d72-how-much-a-host-may-ask)
 
 The first form had none of the others: an endless stream or a block size near
 2^31 allocated until the host aborted (the first audit's finding 14), and a host
@@ -520,7 +525,7 @@ A reviewer suggested 256 MiB for the state.
 
 ### D73. What an activation makes of an open setup
 
-[The decision](transfer-from-seam-juce.md#d73-what-an-activation-makes-of-an-open-setup)
+[The decision](decisions.md#d73-what-an-activation-makes-of-an-open-setup)
 
 The first forms differed: the VST3 exporter did nothing at an activation while
 active, so a processor that panicked stayed silent, where the C interface
@@ -531,7 +536,7 @@ every filter (HB-9). The implementer's choice; confirmed by the owner on
 
 ### D74. What export_vst3! refuses to build
 
-[The decision](transfer-from-seam-juce.md#d74-what-export_vst3-refuses-to-build)
+[The decision](decisions.md#d74-what-export_vst3-refuses-to-build)
 
 The first form accepted every layout, offered six channels as 5.1 and then
 refused the host's 5.1 (the first audit's finding 13), and built for macOS and
@@ -543,7 +548,7 @@ The refusals of a plugin that declares no layout and of a crate built with
 
 ### D75. Making a caught fault visible
 
-[The decision](transfer-from-seam-juce.md#d75-making-a-caught-fault-visible)
+[The decision](decisions.md#d75-making-a-caught-fault-visible)
 
 The first form counted per thread, which nothing outside a test read, so a
 refused call in a real host looked exactly like a working mute (HB-5). The
@@ -557,7 +562,7 @@ The throttled line per instance and kind was the second audit's suggestion.
 
 ### D76. A panic while edits are told to the host
 
-[The decision](transfer-from-seam-juce.md#d76-a-panic-while-edits-are-told-to-the-host)
+[The decision](decisions.md#d76-a-panic-while-edits-are-told-to-the-host)
 
 The first form cleared the flags before emitting, so a panic lost the
 parameter's events and stranded the later ones, though its doc said they waited
@@ -565,7 +570,7 @@ parameter's events and stranded the later ones, though its doc said they waited
 
 ### D77. How deep a session section may nest
 
-[The decision](transfer-from-seam-juce.md#d77-how-deep-a-session-section-may-nest)
+[The decision](decisions.md#d77-how-deep-a-session-section-may-nest)
 
 The first form saved any depth, and the load then refused the whole block, so
 the instance came back at its defaults (ST-1). The implementer's choice;
@@ -599,7 +604,7 @@ stores its sections and budget under one lock.
 
 ### D78. Protocol versions
 
-[The decision](transfer-from-seam-juce.md#d78-protocol-versions)
+[The decision](decisions.md#d78-protocol-versions)
 
 The first form answered with a snapshot of the native side's version and no
 parameters, which a newer page never got, since its `ready` failed to decode
@@ -608,7 +613,7 @@ The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D79. The page client before the native side answers
 
-[The decision](transfer-from-seam-juce.md#d79-the-page-client-before-the-native-side-answers)
+[The decision](decisions.md#d79-the-page-client-before-the-native-side-answers)
 
 The first form sent `ready` once, so a page whose `ready` came before the native
 side listened waited forever (TL-13), and kept the old command's result, typed
@@ -621,7 +626,7 @@ with the same effect.
 
 ### D80. Upgrading an older saved block
 
-[The decision](transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block)
+[The decision](decisions.md#d80-upgrading-an-older-saved-block)
 
 The implementer's choice, but for the version a save writes, which the owner
 decided on 2026-11-06: the first form stamped the build's own version on every
@@ -650,7 +655,7 @@ keyed on `seamStateVersion` and answered a `bool`.
 
 ### D81. A registration made while a panic unwinds
 
-[The decision](transfer-from-seam-juce.md#d81-a-registration-made-while-a-panic-unwinds)
+[The decision](decisions.md#d81-a-registration-made-while-a-panic-unwinds)
 
 The first form owed a pass whenever a pass or a late apply ended while its
 thread was unwinding, so a registration made from a destructor during an
@@ -660,7 +665,7 @@ The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D82. When learn runs a target's own code
 
-[The decision](transfer-from-seam-juce.md#d82-when-learn-runs-a-targets-own-code)
+[The decision](decisions.md#d82-when-learn-runs-a-targets-own-code)
 
 The first form closed each target's burst before it cleared the table, so a
 target whose `end` panicked inside a restore left the previous project's
@@ -674,14 +679,14 @@ unmap too. The implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D83. A control's drag and one-shot set
 
-[The decision](transfer-from-seam-juce.md#d83-a-controls-drag-and-one-shot-set)
+[The decision](decisions.md#d83-a-controls-drag-and-one-shot-set)
 
 The first form had two functions with the same body. They are one since
 2026-11-07, the implementer's choice; confirmed by the owner on 2026-11-07.
 
 ### D84. The saved block's two versions
 
-[The decision](transfer-from-seam-juce.md#d84-the-saved-blocks-two-versions)
+[The decision](decisions.md#d84-the-saved-blocks-two-versions)
 
 Decided by the owner on 2026-11-07. The form before carried one number,
 `seamStateVersion`, for Seam's frame and the plugin's schema both. A plugin
@@ -695,7 +700,7 @@ than reading it as 0. Confirmed by the owner on 2026-11-07.
 
 ### D85. A migration that cannot upgrade a block
 
-[The decision](transfer-from-seam-juce.md#d85-a-migration-that-cannot-upgrade-a-block)
+[The decision](decisions.md#d85-a-migration-that-cannot-upgrade-a-block)
 
 Decided by the owner on 2026-11-07. The form before returned `bool`, and its
 false became `LoadError::MigrationFailed` with no reason. That the error is one
@@ -705,7 +710,7 @@ Confirmed by the owner on 2026-11-07.
 
 ### D86. The AU codes
 
-[The decision](transfer-from-seam-juce.md#d86-the-au-codes)
+[The decision](decisions.md#d86-the-au-codes)
 
 Decided by the owner on 2026-11-07. The form before was the pair
 `([u8; 4], [u8; 4])`, subtype first, which a plugin could swap silently. One
@@ -714,14 +719,14 @@ the decision. Confirmed by the owner on 2026-11-07.
 
 ### D87. The main bus in `ProcessSetup`
 
-[The decision](transfer-from-seam-juce.md#d87-the-main-bus-in-processsetup)
+[The decision](decisions.md#d87-the-main-bus-in-processsetup)
 
 Decided by the owner on 2026-11-07. The form before had `inputs` and `outputs`
 fields.
 
 ### D88. A call a test host was refused
 
-[The decision](transfer-from-seam-juce.md#d88-a-call-a-test-host-was-refused)
+[The decision](decisions.md#d88-a-call-a-test-host-was-refused)
 
 Decided by the owner on 2026-11-07. The form before answered `bool`, true for
 `kResultOk` and the C interface's true. A `Refused` per host, rather than one
@@ -732,14 +737,14 @@ owner on 2026-11-07. `save` followed the same day, answering a `Result` too.
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish
 
-[The rule](transfer-from-seam-juce.md#p7-the-host-write-sanitise-clamp-convert-snap-store-publish)
+[The rule](decisions.md#p7-the-host-write-sanitise-clamp-convert-snap-store-publish)
 
 Before the 2026-11-05 audits nothing failed on x86 when either ordering was
 weakened (RT-1).
 
 ### P17. Host-facing metadata
 
-[The rule](transfer-from-seam-juce.md#p17-host-facing-metadata)
+[The rule](decisions.md#p17-host-facing-metadata)
 
 The first form counted a value's places from the step's first significant digit,
 so on a step of 0.125 it showed 0.125 as "0.12". A later form counted the step's
@@ -748,32 +753,32 @@ decimals alone, so a whole step from 0.5 showed 1.5 as "2", which read back as
 
 ### U19. A bounded history
 
-[The rule](transfer-from-seam-juce.md#u19-a-bounded-history)
+[The rule](decisions.md#u19-a-bounded-history)
 
 The test that checks the booking against the documented numbers answers ST-8.
 
 ### L4. The dispatch snapshot
 
-[The rule](transfer-from-seam-juce.md#l4-the-dispatch-snapshot)
+[The rule](decisions.md#l4-the-dispatch-snapshot)
 
 The second audit found this paragraph read as if the fallback and its models
 existed in the code.
 
 ### L10. Learn in the menu and the poll
 
-[The rule](transfer-from-seam-juce.md#l10-learn-in-the-menu-and-the-poll)
+[The rule](decisions.md#l10-learn-in-the-menu-and-the-poll)
 
 The first page that needs a context menu was planned for stage 3.
 
 ### L11. A learning plugin declares MIDI input
 
-[The rule](transfer-from-seam-juce.md#l11-a-learning-plugin-declares-midi-input)
+[The rule](decisions.md#l11-a-learning-plugin-declares-midi-input)
 
 The check was planned for stage 3, with the exporters.
 
 ### H1. The saved block
 
-[The rule](transfer-from-seam-juce.md#h1-the-saved-block)
+[The rule](decisions.md#h1-the-saved-block)
 
 Writing a choice as an integer answers ST-14, and `float_roundtrip` ST-2.
 

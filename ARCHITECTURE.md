@@ -12,7 +12,7 @@ Three [tiers](docs/glossary.md#tier), dependencies pointing down only. The core
 is `params`, `undo`, `session`, `learn` and `ump`. The projections are `bridge`
 (the page) and `host` (plugin formats). Shells (a plugin crate, the JUCE
 adapter) sit on top and may depend on both. Each rule below links the entry of
-[the decision record](docs/transfer-from-seam-juce.md) that says why it exists,
+[the decision record](docs/decisions.md) that says why it exists,
 where the record has one, and [docs/decision-index.md](docs/decision-index.md)
 leads from each decision to its code. A word Seam coins links to [the
 glossary](docs/glossary.md) where it first appears. To write a plugin before
@@ -234,18 +234,18 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   and `SeqCst` fences. Its `unsafe` is under the boundary's rules, with a miri
   job.
 
-[applies]: docs/transfer-from-seam-juce.md#d13-when-a-session-restore-applies
-[cabi]: docs/transfer-from-seam-juce.md#d62-the-c-interface-for-the-juce-adapter
-[clock]: docs/transfer-from-seam-juce.md#d52-who-makes-the-restoreclock
-[faults]: docs/transfer-from-seam-juce.md#d75-making-a-caught-fault-visible
-[generator]: docs/transfer-from-seam-juce.md#d27-what-runs-the-generator
-[header]: docs/transfer-from-seam-juce.md#d63-keeping-the-c-header-true
-[load]: docs/transfer-from-seam-juce.md#d39-a-load-between-a-replays-check-and-its-write
-[mark]: docs/transfer-from-seam-juce.md#d67-checking-the-audio-thread-locking-rule
-[migration]: docs/transfer-from-seam-juce.md#d80-upgrading-an-older-saved-block
-[panic]: docs/transfer-from-seam-juce.md#d60-a-panic-inside-a-hosts-call
-[send]: docs/transfer-from-seam-juce.md#d51-whether-a-plugin-must-be-send
-[tick]: docs/transfer-from-seam-juce.md#d53-what-ticks-a-plugin-with-no-editor-open
-[versions]: docs/transfer-from-seam-juce.md#d84-the-saved-blocks-two-versions
-[vst3]: docs/transfer-from-seam-juce.md#d59-the-shape-of-the-vst3-exporter
-[webview]: docs/transfer-from-seam-juce.md#d16-where-the-webview-pieces-live
+[applies]: docs/decisions.md#d13-when-a-session-restore-applies
+[cabi]: docs/decisions.md#d62-the-c-interface-for-the-juce-adapter
+[clock]: docs/decisions.md#d52-who-makes-the-restoreclock
+[faults]: docs/decisions.md#d75-making-a-caught-fault-visible
+[generator]: docs/decisions.md#d27-what-runs-the-generator
+[header]: docs/decisions.md#d63-keeping-the-c-header-true
+[load]: docs/decisions.md#d39-a-load-between-a-replays-check-and-its-write
+[mark]: docs/decisions.md#d67-checking-the-audio-thread-locking-rule
+[migration]: docs/decisions.md#d80-upgrading-an-older-saved-block
+[panic]: docs/decisions.md#d60-a-panic-inside-a-hosts-call
+[send]: docs/decisions.md#d51-whether-a-plugin-must-be-send
+[tick]: docs/decisions.md#d53-what-ticks-a-plugin-with-no-editor-open
+[versions]: docs/decisions.md#d84-the-saved-blocks-two-versions
+[vst3]: docs/decisions.md#d59-the-shape-of-the-vst3-exporter
+[webview]: docs/decisions.md#d16-where-the-webview-pieces-live

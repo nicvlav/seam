@@ -2,7 +2,7 @@
 """Fails if a comment or doc cites a decision id, the decision record or a stage.
 
 A comment states its reason in words. The decision record
-(docs/transfer-from-seam-juce.md) keeps the history, and its index
+(docs/decisions.md) keeps the history, and its index
 (docs/decision-index.md) points from each decision to the code, so the code
 never points back.
 
@@ -53,7 +53,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-RECORD = "docs/transfer-from-seam-juce.md"
+RECORD = "docs/decisions.md"
 INDEX = "docs/decision-index.md"
 HISTORY = "docs/decision-history.md"
 GENERATOR = "xtask/src/generate.rs"
@@ -71,7 +71,7 @@ MARKDOWN = (".md",)
 
 FINDING = re.compile(r"\b(?:(?:RD|RT|ST|HB|MD|TL|BN)-\d+|[RC]-[MSN]\d+)\b")
 PROCESS = re.compile(r"\b(?:stage|wave) \d+\b", re.IGNORECASE)
-RECORD_POINTER = re.compile(r"transfer-from-seam-juce|transfer document", re.IGNORECASE)
+RECORD_POINTER = re.compile(r"decisions\.md", re.IGNORECASE)
 DECISION_WORD = re.compile(r"\bdecisions? \d+\b", re.IGNORECASE)
 PROPERTY_WORD = re.compile(r"\bpropert(?:y|ies) (\d+)\b", re.IGNORECASE)
 ID_LIKE = re.compile(r"\b([A-Z]{1,2})[ -]?(\d+)\b")
