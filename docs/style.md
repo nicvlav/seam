@@ -109,6 +109,7 @@ Seam's other crates reach it is `#[doc(hidden)]`, and no public doc links to it.
 | [decision-history.md](decision-history.md) | How each decision was reached and changed; dates and review words belong here. |
 | [decision-index.md](decision-index.md) | From each decision to its code and tests, one line per site. |
 | [CHANGELOG.md](../CHANGELOG.md) | What each version holds, in [Keep a Changelog][changelog] form. |
+| [ROADMAP.md](../ROADMAP.md) | Where Seam is going: goals in order, never a task list. |
 
 ## What checks it
 

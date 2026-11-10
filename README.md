@@ -37,7 +37,7 @@ versioning](https://semver.org/): before 1.0, a minor version may break the API.
   WebView glue that opens the page in a plugin window (wry's IPC handler, the
   custom-scheme asset server), which is to be a shell crate so `seam-bridge`
   stays free of any WebView; and MIDI delivered to a plugin through an
-  exporter.
+  exporter. [ROADMAP.md](ROADMAP.md) says what comes next.
 
 ## Start here
 
