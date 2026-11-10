@@ -906,6 +906,19 @@ move its line here; when a decision gains code, add one.
 - test `crates/host/src/vst3/tests.rs`: `the_host_writes_through_process_and_through_the_controller`, `layouts_follow_the_declaration`, `a_panicking_entry_point_answers_an_error`, `state_round_trips_through_streams_on_any_thread`, `setup_is_refused_while_active`, `a_setup_with_no_block_size_keeps_its_rate_and_one_past_the_limit_is_built_for_the_limit`
 - test `crates/host/src/cabi/tests.rs`: `activation_builds_a_processor_for_the_setup_and_layout`, `a_panic_in_activate_or_idle_is_answered`, `the_saved_block_round_trips_and_a_stranger_changes_nothing`, `an_instrument_plays_with_no_input_or_a_narrower_one`
 
+### D89. How plugin code names a parameter
+
+[Record section](decisions.md#d89-how-plugin-code-names-a-parameter)
+
+- `crates/params/src/handle.rs`: module, `Handle`, `Float`, `Bool`, `Choice`, `Choices`, `Bind`, `BindError`, `ParamSet::bind`
+- `crates/params/src/changes.rs`: module, `Changes`, `Changes::new`, `Changes::moved`
+- `crates/params/src/set.rs`: `ParamSet::value`, `AudioParams::value`
+- `crates/params/src/ui.rs`: `UiParams::value`, `UiParams::write`
+- `examples/gain/src/lib.rs`: `Mode`, `GainParams`, `GainProcessor::retune`
+- `examples/eq/src/lib.rs`: `EqParams`, `BandParams`, `EqProcessor::retune`
+- test `crates/params/tests/handles.rs`: module, `a_handle_bound_to_another_kind_is_refused_with_its_key`, `a_key_nothing_is_declared_under_is_refused_by_name`, `a_choice_whose_enum_has_other_labels_is_refused_with_its_key`, `each_handle_reads_back_through_the_audio_side_what_the_ui_wrote`, `a_parameter_id_is_the_untyped_handle`, `a_group_moves_once_per_write_to_a_member_and_never_for_another`, `the_group_check_and_typed_reads_run_under_the_audio_thread_mark`, `decoding_is_total_and_inverts_encoding_on_stored_values`
+- test `crates/params/tests/alloc_gate.rs`: `typed_reads_and_the_group_check_do_not_allocate`
+
 ## Parameters
 
 ### P1. One store per parameter

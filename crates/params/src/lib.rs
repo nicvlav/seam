@@ -12,6 +12,11 @@
 //!   writes][learned-write]), [`UiParams`] (user [`Gesture`]s, [`Edit`]s, undo
 //!   replays) and [`ProgramParams`] ([syncs][sync] and a saved state's
 //!   [`Load`], a [restore]).
+//! - A typed handle, [`Float`], [`Bool`] or [`Choice`], is a parameter as
+//!   plugin code holds it: [`ParamSet::bind`] checks it against the
+//!   declaration once, and each read returns an `f32`, a `bool` or the
+//!   plugin's own enum. [`Changes`] tells the audio thread when any of a group
+//!   moved.
 //! - [`Value`] and [`List`] hold plugin state that is not a parameter, and
 //!   undo enrols them.
 //! - A [`Watch`] (a [watch]) shows one parameter on a [surface]; a
@@ -33,43 +38,52 @@
 //!
 //! # Examples
 //!
-//! A processor holds the audio thread's handle, remembers the change count it
-//! last acted on, and recomputes only when the count moved. It holds
-//! [`AudioParams`], not an `Arc<ParamSet>`, so a debug build catches a drop on
-//! the audio thread that would free the set.
+//! A processor holds the audio thread's handle and a typed handle per
+//! parameter, bound once when the plugin is built, and recomputes only when one
+//! moved. It holds [`AudioParams`], not an `Arc<ParamSet>`, so a debug build
+//! catches a drop on the audio thread that would free the set.
 //!
 //! ```
-//! use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet};
+//! use seam_params::{AudioParams, Bool, Changes, Float, Handle, Kind, ParamDecl, ParamSet};
 //!
 //! struct Processor {
-//!     params: AudioParams,
-//!     gain: ParamId,
-//!     seen: u64,
+//!     audio: AudioParams,
+//!     gain: Float,
+//!     mute: Bool,
+//!     changes: Changes<2>,
 //!     factor: f32,
 //! }
 //!
 //! impl Processor {
 //!     /// Called once per block, on the audio thread.
 //!     fn retune(&mut self) {
-//!         let changes = self.params.changes(self.gain);
-//!         if changes != self.seen {
-//!             self.seen = changes;
-//!             let decibels = self.params.value(self.gain);
-//!             self.factor = 10.0_f32.powf(decibels / 20.0);
+//!         if self.changes.moved(&self.audio) {
+//!             let decibels = self.audio.value(self.gain); // an f32, in dB
+//!             let muted = self.audio.value(self.mute); // a bool
+//!             self.factor = if muted { 0.0 } else { 10.0_f32.powf(decibels / 20.0) };
 //!         }
 //!     }
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! const GAIN: ParamDecl =
+//! const PARAMS: &[ParamDecl] = &[
 //!     ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.1, None), 0.0)
-//!         .with_unit("dB");
-//! let params = ParamSet::from_decls([GAIN])?;
-//! let gain = params.id("gain").ok_or("declared")?;
-//! let mut processor = Processor { params: params.audio(), gain, seen: 0, factor: 1.0 };
+//!         .with_unit("dB"),
+//!     ParamDecl::new("mute", "Mute", Kind::Bool, 0.0),
+//! ];
+//! let params = ParamSet::from_decls(PARAMS.iter().copied())?;
+//! let gain: Float = params.bind("gain")?;
+//! let mute: Bool = params.bind("mute")?;
+//! let mut processor = Processor {
+//!     audio: params.audio(),
+//!     gain,
+//!     mute,
+//!     changes: Changes::new([gain.id(), mute.id()]),
+//!     factor: 1.0,
+//! };
 //!
 //! // The host automates the gain to the top of its range (0..1 is its scale).
-//! processor.params.host_write(gain, 1.0);
+//! processor.audio.host_write(gain.id(), 1.0);
 //! processor.retune();
 //! assert!((processor.factor - 15.848_932).abs() < 1e-3); // +24 dB
 //! # Ok(())
@@ -90,9 +104,11 @@ compile_error!(
 );
 
 pub mod audio_thread;
+mod changes;
 mod clock;
 pub mod decl;
 mod events;
+mod handle;
 mod host_events;
 mod host_id;
 mod list;
@@ -104,6 +120,7 @@ mod ui;
 mod value;
 mod watch;
 
+pub use changes::Changes;
 pub use clock::{
     ApplyingGuard, LoadHold, RestoreClock, RestoreReader, RestoreStamp, RestoreWriter, Stamped,
 };
@@ -111,6 +128,7 @@ pub use clock::{
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
 pub use events::{GestureRecord, HostEvent};
+pub use handle::{Bind, BindError, Bool, Choice, Choices, Float, Handle};
 pub use host_events::HostEventDrain;
 pub use host_id::{RESERVED_HOST_IDS, host_id};
 pub use list::{Derived, List, ListCommit, ListTracker, TrackedList};

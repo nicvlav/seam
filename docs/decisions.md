@@ -125,6 +125,7 @@ comments never cite an id: they state the reason in words, and
 | D86 | [How does `PluginInfo` hold the AU codes? (D64)](#d86-the-au-codes) | As one `AuCodes` with named `subtype` and `manufacturer` fields, so the two cannot be swapped unseen. | decided |
 | D87 | [How does `ProcessSetup` give the main bus? (D58)](#d87-the-main-bus-in-processsetup) | As one `layout: Layout`, the one of the plugin's layouts the host chose. | decided |
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
+| D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed handle, `Float`, `Bool` or `Choice<E>`, bound once by key with `ParamSet::bind`, which checks the declaration. A read returns an `f32`, a `bool` or the plugin's enum; `ParamId` is the untyped handle. `Changes` asks once per block whether any of a group moved. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1984,6 +1985,43 @@ the `tresult` as a C++ host would, and one `Refused` for both hosts, whose
 variants each host would only half use.
 
 [History](decision-history.md#d88-a-call-a-test-host-was-refused)
+
+### D89. How plugin code names a parameter
+
+**Question and C++ Seam.** How does plugin code name a parameter and read its
+value? (P1, P10) Not applicable: the C++ Seam's plugins were JUCE's, and read
+their parameters through JUCE.
+
+**Rust.** Plugin code holds a parameter as a typed handle: `Float` for a
+continuous one, `Bool`, or `Choice<E>` for an enum `E` that implements
+`Choices`, whose `LABELS` the declaration takes as `Kind::Choice(E::LABELS)`.
+`ParamSet::bind` makes one from a key, once, when the plugin is built. It
+refuses with a `BindError` that names the key when nothing is declared under
+it, when the declaration is another kind, and when a choice's labels are not
+`E::LABELS`. Nothing is checked after that.
+
+Each handle implements `Handle`, whose `decode` turns the stored `f32` into the
+handle's value. It must give a value for any `f32` and never panic, since the
+audio thread calls it: a choice's index saturates, and `Choices::from_index`
+must be total too. `ParamSet::value`, `AudioParams::value` and
+`UiParams::value` take any handle and return its value, and `UiParams::write`
+takes a handle and its value. `ParamId` is itself the untyped handle, whose
+value is the stored `f32`, so every read and write that took an id still does
+and means what it meant. The rest of the API takes a `ParamId`, which a handle
+gives with `id()`. The table of `ParamDecl`s stays the one declaration; the
+struct of handles and its binding are written by hand.
+
+A processor asks once per block whether any of a group of parameters moved
+with `Changes`. It holds up to `N` ids inline, with the sum of their change
+counts at its last check, so the check is a load per member and a compare.
+
+**Alternatives.** The alternatives were the id it was, looked up by string
+behind `expect` and decoded from an `f32` with a threshold per kind in every
+plugin; typed reads under names of their own beside the untyped ones, which
+doubled the API; a macro that writes the table, the struct and the binding
+from one list, left until the hand-written form reads badly; and a group check
+over a boxed list of ids, which puts a pointer to follow on the audio thread,
+or one that hands its last count back through an out-parameter.
 
 ## How to read this
 

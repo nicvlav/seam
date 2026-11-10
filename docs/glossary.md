@@ -120,6 +120,13 @@ one parameter nest and count, so the host hears one begin and one end and undo
 records one step. A plain [`Value`](../crates/params/src/value.rs) has gestures
 of its own, with no host to tell.
 
+### Handle
+
+A parameter as plugin code holds it: an id bound once to its declaration,
+whose reads return the type its kind stands for, an `f32`, a `bool` or the
+plugin's enum ([`Handle`](../crates/params/src/handle.rs)). A
+[`ParamId`](../crates/params/src/decl.rs) is the untyped one.
+
 ### Held
 
 Several senses:

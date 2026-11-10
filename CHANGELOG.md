@@ -23,6 +23,12 @@ delivered to a plugin through an exporter.
   `Value::read` return a `Reading`: the count, the value and the origin taken
   together, as `AudioParams` does on the audio thread. Plain values and lists
   hold state that is not a parameter.
+- `seam-params`: typed parameter handles. `ParamSet::bind` checks a `Float`, a
+  `Bool` or a `Choice<E>` against its declaration once, by key, and refuses a
+  missing key, another kind or a choice whose labels are not the enum's.
+  `value` and `UiParams::write` take any handle and read or write its type, a
+  choice as the plugin's own enum; a `ParamId` still reads as the stored `f32`.
+  `Changes` asks once per block whether any of a group of parameters moved.
 - `seam-undo`: an undo history that polls once per tick. One gesture is one
   step, transactions group steps, and host automation, restores and learned
   writes never record. A restore clears the history, and the history is bounded

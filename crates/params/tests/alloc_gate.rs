@@ -1,9 +1,12 @@
 //! The audio-thread path of seam-params does not allocate: the host write,
-//! the learned write and the reads around them.
+//! the learned write, the reads around them and the group check.
 
 seam_testkit::install_alloc_gate!();
 
-use seam_params::{HostEvent, Kind, ParamDecl, ParamSetBuilder, Range};
+use seam_params::{
+    Bool, Changes, Choice, Choices, Float, Handle, HostEvent, Kind, ParamDecl, ParamSet,
+    ParamSetBuilder, Range,
+};
 use seam_testkit::alloc::assert_no_allocations;
 
 const LABELS: [&str; 4] = ["a", "b", "c", "d"];
@@ -49,6 +52,57 @@ fn host_and_learned_writes_do_not_allocate() {
                     audio.learned_write(id, normalized);
                     sum += f64::from(audio.value(id)) + set.normalized(id);
                     sum += set.changes(id) as f64;
+                }
+            }
+        }
+        std::hint::black_box(sum);
+    });
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Letter(usize);
+
+impl Choices for Letter {
+    const LABELS: &'static [&'static str] = &LABELS;
+
+    fn from_index(index: usize) -> Self {
+        Letter(index.min(LABELS.len() - 1))
+    }
+
+    fn index(self) -> usize {
+        self.0
+    }
+}
+
+#[test]
+fn typed_reads_and_the_group_check_do_not_allocate() {
+    let set = ParamSet::from_decls([
+        ParamDecl::new(
+            "freq",
+            "freq",
+            Kind::continuous(20.0, 20_000.0, 0.0, None),
+            20.0,
+        ),
+        ParamDecl::new("on", "on", Kind::Bool, 0.0),
+        ParamDecl::new("mode", "mode", Kind::Choice(&LABELS), 0.0),
+    ])
+    .expect("valid");
+    let freq: Float = set.bind("freq").expect("continuous");
+    let on: Bool = set.bind("on").expect("a bool");
+    let mode: Choice<Letter> = set.bind("mode").expect("the same labels");
+    let audio = set.audio();
+    let mut group: Changes<4> = Changes::new([freq.id(), on.id(), mode.id()]);
+
+    assert_no_allocations("typed reads behind the group check", || {
+        let mut sum = 0.0_f32;
+        for step in 0..64_u16 {
+            audio.host_write(on.id(), f64::from(step % 2));
+            audio.host_write(mode.id(), f64::from(step % 4) / 3.0);
+            for _ in 0..2 {
+                if group.moved(&audio) {
+                    sum += audio.value(freq);
+                    sum += f32::from(u8::from(audio.value(on)));
+                    sum += audio.value(mode).index() as f32;
                 }
             }
         }

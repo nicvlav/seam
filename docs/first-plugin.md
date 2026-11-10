@@ -64,7 +64,7 @@ hash of the key), its range and text, the save, and the page's typed hook.
 ```rust
 const PARAMS: &[ParamDecl] = &[
     ParamDecl::new(GAIN, "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0).with_unit("dB"),
-    ParamDecl::new(MODE, "Mode", Kind::Choice(&["Clean", "Warm", "Hot"]), 0.0),
+    ParamDecl::new(MODE, "Mode", Kind::Choice(Mode::LABELS), 0.0),
     ParamDecl::new(BYPASS, "Bypass", Kind::Bool, 0.0).as_bypass(),
 ];
 ```
@@ -76,9 +76,12 @@ const PARAMS: &[ParamDecl] = &[
   from -60 dB to 12 dB in steps of 0.1 dB, linearly.
   [`Range::new`](../crates/params/src/decl.rs) says what each argument may be.
 - The store keeps real units (dB, not 0 to 1). A host speaks in 0 to 1
-  positions, and Seam converts both ways at its boundary. Every kind reads as
-  an `f32`: a choice as its index, 0, 1 or 2 here, and a bool as 0 or 1.
-- A choice's names are its list, and the host sees them as the parameter's text.
+  positions, and Seam converts both ways at its boundary. Every kind is stored
+  as an `f32`: a choice as its index, 0, 1 or 2 here, and a bool as 0 or 1.
+  Plugin code reads through handles instead, below.
+- A choice's names are its labels, and the host sees them as the parameter's
+  text. The mode's come from the enum that names its values, so the two cannot
+  drift apart.
 - `as_bypass` tells the exporter this parameter is the host's bypass. The
   processor still implements it: the host only learns which parameter it is.
 - The key is the parameter's identity for good. The saved block stores the
@@ -86,6 +89,43 @@ const PARAMS: &[ParamDecl] = &[
   the plugin ships, though the display name may. Adding a parameter later is
   safe: a block saved before it loads with the new parameter at its default
   ([`SavedState::load`](../crates/host/src/state.rs)).
+
+Plugin code holds each parameter as a typed
+[handle](../crates/params/src/handle.rs), bound to its declaration once. `Mode`
+names the choice's values, in the order of its labels:
+
+```rust
+impl Choices for Mode {
+    const LABELS: &'static [&'static str] = &["Clean", "Warm", "Hot"];
+```
+
+`from_index` must give a mode for any index, since the audio thread calls it;
+`Hot` takes every index past the last. The handles sit in a struct of their
+own, bound in one function:
+
+```rust
+struct GainParams {
+    gain: Float,
+    mode: Choice<Mode>,
+    bypass: Bool,
+}
+
+impl GainParams {
+    fn bind(set: &ParamSet) -> Result<Self, BindError> {
+        Ok(GainParams {
+            gain: set.bind(GAIN)?,
+            mode: set.bind(MODE)?,
+            bypass: set.bind(BYPASS)?,
+        })
+    }
+}
+```
+
+`ParamSet::bind` looks the key up and checks the declaration's kind, and a
+choice's labels, against the field's type, once. A read through the handle
+then returns the gain in dB as an `f32`, the mode as a `Mode` and the bypass as
+a `bool`, with no lookup or threshold. A key with a typo, or a handle of the
+wrong kind, fails the first time the plugin is built, in any test.
 
 ## 2. Write the processor
 
@@ -95,16 +135,19 @@ const PARAMS: &[ParamDecl] = &[
 block's MIDI events.
 
 `GainProcessor` keeps the parameters' values in plain fields and reads them
-again only when one moved. Each parameter has a change counter, so `retune`
-sums the three counters and compares the sum with the last one it saw:
+again only when one moved. It holds a copy of the handles and a
+[`Changes`](../crates/params/src/changes.rs) of the three parameters, which
+remembers their change counts and answers whether any took a write since it
+last asked:
 
 ```rust
-let seen = set
-    .changes(self.gain_id)
-    .wrapping_add(set.changes(self.mode_id))
-    .wrapping_add(set.changes(self.bypass_id));
-if self.seen == Some(seen) {
-    return;
+fn retune(&mut self) {
+    if !self.changes.moved(&self.audio) {
+        return;
+    }
+    self.gain = 10.0_f32.powf(self.audio.value(self.params.gain) / 20.0);
+    self.mode = self.audio.value(self.params.mode);
+    self.bypassed = self.audio.value(self.params.bypass);
 }
 ```
 
@@ -122,10 +165,12 @@ start, so a change steps there, and a large one can click.
 constants name the plugin (`INFO`) and list its `PARAMS`. `new` builds
 everything the plugin owns; `activate` builds a fresh processor each time the
 host activates it, so nothing the audio thread touches is allocated in a block.
-`new` starts with the parameters, the session and the saved state over both:
+`new` starts with the parameters and their handles, then the session and the
+saved state over both:
 
 ```rust
 let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid declarations");
+let params = GainParams::bind(&set).expect("each handle matches its declaration");
 let session = Session::new(&set);
 let saved = Arc::new(SavedState::new(&set, &session));
 ```
@@ -232,9 +277,9 @@ participant, so its mappings save under their own key. The processor calls
 `learn.process(block.events)` at the top of `process`. Learned writes then
 land before the parameters are read, in the block the controller arrived in.
 
-To learn, the plugin calls `Learn::arm` on the gain's id with
-`Takes::CONTROLLER`. The next controller the processor sees is captured on the
-audio thread, and the next tick's poll commits it.
+To learn, the plugin calls `Learn::arm` on the gain's id, its handle's `id()`,
+with `Takes::CONTROLLER`. The next controller the processor sees is captured on
+the audio thread, and the next tick's poll commits it.
 
 The plugin declares `midi_input: true` in its `INFO`. Open: no exporter
 delivers MIDI events yet, so learn is exercised by driving the processor

@@ -29,8 +29,8 @@ use crate::host_events::{HostEventDrain, HostQueue};
 use crate::program::ProgramParams;
 use crate::ui::UiParams;
 use crate::{
-    Kind, Origin, ParamDecl, ParamId, RESERVED_HOST_IDS, Reading, RestoreClock, audio_thread,
-    host_id,
+    Handle, Kind, Origin, ParamDecl, ParamId, RESERVED_HOST_IDS, Reading, RestoreClock,
+    audio_thread, host_id,
 };
 
 /// The longest key, in bytes: AAX truncates longer ones, which would merge
@@ -574,14 +574,18 @@ impl ParamSet {
         self.bypass
     }
 
-    /// Returns the current value, in real units. The
-    /// [crate overview](crate#examples) shows it read on the audio thread.
+    /// Returns the current value as `handle` reads it: the stored `f32`, in
+    /// real units, for a [`ParamId`] or a [`Float`](crate::Float), a `bool`
+    /// for a [`Bool`](crate::Bool), the plugin's enum for a
+    /// [`Choice`](crate::Choice). The [crate overview](crate#examples) shows
+    /// it read on the audio thread.
     ///
     /// A reader that keeps a count, as a [`Watch`](crate::Watch) does, reads
     /// both through [`read`](Self::read).
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn value(&self, id: ParamId) -> f32 {
-        cell(&self.values, id).load(Ordering::Relaxed).value()
+    pub fn value<H: Handle>(&self, handle: H) -> H::Value {
+        let stored = cell(&self.values, handle.id()).load(Ordering::Relaxed);
+        handle.decode(stored.value())
     }
 
     /// Returns the change count, then the value and the origin of the write
@@ -829,10 +833,11 @@ impl AudioParams {
         &self.set
     }
 
-    /// Returns the current value, in real units, as [`ParamSet::value`] does.
+    /// Returns the current value as `handle` reads it, as
+    /// [`ParamSet::value`] does.
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn value(&self, id: ParamId) -> f32 {
-        self.set.value(id)
+    pub fn value<H: Handle>(&self, handle: H) -> H::Value {
+        self.set.value(handle)
     }
 
     /// Returns the change count, as [`ParamSet::changes`] does. The
