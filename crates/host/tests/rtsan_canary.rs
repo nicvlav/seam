@@ -76,7 +76,7 @@ impl Plugin for Canary {
 #[test]
 fn an_allocation_inside_the_marked_process_aborts() {
     let host = TestHost::<Canary>::new();
-    assert!(host.activate(48_000.0, 64, Layout::STEREO));
+    assert_eq!(host.activate(48_000.0, 64, Layout::STEREO), Ok(()));
     let (mut left, mut right) = ([1.0_f32; 64], [1.0_f32; 64]);
     host.process_in_place(&mut [&mut left, &mut right], 64);
     // Reached only when the sanitizer let the allocation through.
