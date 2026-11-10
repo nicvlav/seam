@@ -1,9 +1,11 @@
-# Transfer from the C++ Seam
+# The decision record
 
-What the C++/JUCE Seam (`nicvlav/seam-cpp`, v0.7.0, commit `149005a`)
-guaranteed, stated as invariants with the reason each exists, in the order the
-Rust crates need them. No code carries over; these rules do. They were read from
-the code and its tests, not its docs, which had drifted in at least 25 places.
+Every decision Seam has taken and every rule its code keeps, each with its
+reason. It began as the transfer from the C++/JUCE Seam (`nicvlav/seam-cpp`,
+v0.7.0, commit `149005a`): what that library guaranteed, stated as invariants
+with the reason each exists, in the order the Rust crates need them. No code
+carries over; these rules do. They were read from the code and its tests, not
+its docs, which had drifted in at least 25 places.
 
 ## Overview
 
@@ -19,18 +21,19 @@ listens, so each write states its origin and the side effects follow from it.
 each one in a line: the question, what the Rust Seam does, and a status. Under
 the table, one section per decision gives its full text: the question, what the
 C++ Seam did, what Rust does, and what else was considered. How a decision was
-reached and changed is in [decision-history.md](decision-history.md), which its
-section links to. A status of "decided" means the owner decided or confirmed the
-choice. "To confirm" means the owner has not confirmed it yet, and its history
-says when a later change moved its behaviour. "Held" means the work does not
-need the decision yet, and its section keeps the recommendation. A decision that
-names CLAP governs an exporter not built yet (D68). The rules (P, U, S, L, H, B)
-state each invariant the code keeps and the reason for it. To find the code
-behind a decision or a rule, read `docs/decision-index.md`, which maps each id
-to the files, items and tests that implement it, and which
-`scripts/check-decision-index.py` keeps true. Code and comments never cite an
-id: they state the reason in words, and `scripts/check-comment-tags.py` enforces
-that.
+reached and changed, up to the first commit on `main`, is in
+[decision-history.md](decision-history.md), which its section links to; a later
+change is in the commits that touched the section. A status of "decided" means
+the owner decided or confirmed the choice. "To confirm" means the owner has not
+confirmed it yet, and its history says when a later change moved its behaviour.
+"Held" means the work does not need the decision yet, and its section keeps the
+recommendation. A decision that names CLAP governs an exporter not built yet
+(D68). The rules (P, U, S, L, H, B) state each invariant the code keeps and the
+reason for it. To find the code behind a decision or a rule, read
+`docs/decision-index.md`, which maps each id to the files, items and tests that
+implement it, and which `scripts/check-decision-index.py` keeps true. Code and
+comments never cite an id: they state the reason in words, and
+`scripts/check-comment-tags.py` enforces that.
 
 | Id | Question | Decision | Status |
 | --- | --- | --- | --- |

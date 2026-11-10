@@ -22,7 +22,7 @@ is quicker to write well.
 
 Seam succeeds the C++/JUCE Seam (`nicvlav/seam-cpp`, final release v0.7.0).
 None of its code came over; its contracts did, in
-[docs/transfer-from-seam-juce.md](docs/transfer-from-seam-juce.md).
+[docs/decisions.md](docs/decisions.md).
 
 ## Status
 

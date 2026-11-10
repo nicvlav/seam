@@ -127,7 +127,7 @@ Several senses:
 - **Held back**: while a gesture is open on a parameter, its surfaces do not
   show host writes, restores, learned writes or syncs. They show at the first
   poll after the close ([the
-  rule](transfer-from-seam-juce.md#p12-an-open-gesture-holds-back-host-shaped-writes-from-surfaces)).
+  rule](decisions.md#p12-an-open-gesture-holds-back-host-shaped-writes-from-surfaces)).
 - **Held by the user**: [`Target::held`](../crates/learn/src/target.rs) says the
   user holds the target's control. Learn then closes its burst and leaves the
   newest value waiting until they let go.
@@ -138,7 +138,7 @@ Several senses:
   ([mappings/session.rs](../crates/learn/src/mappings/session.rs)).
 - **Held address bytes**: the NRPN address bytes learn's parser keeps, per group
   and channel, until an address change or a reset forgets them ([the
-  decision](transfer-from-seam-juce.md#d70-learns-reading-of-midi-10-pairs)).
+  decision](decisions.md#d70-learns-reading-of-midi-10-pairs)).
 - **Held by the page**: a page holds its writes and calls until the native
   side's snapshot arrives, then sends them in the order it made them
   ([held.ts](../page/src/held.ts)).
@@ -149,7 +149,7 @@ Several senses:
   ([ui.rs](../crates/session/src/ui.rs)).
 - **Held**, a decision's status: the work does not need the decision yet, so its
   section keeps a recommendation ([the decision
-  record](transfer-from-seam-juce.md#overview)).
+  record](decisions.md#overview)).
 
 ### Learned write
 
