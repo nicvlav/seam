@@ -6,3 +6,6 @@ __pycache__/
 /bench/build-clang
 /fuzz/target
 /fuzz/artifacts
+/build/
+.vscode/
+/plans/
