@@ -4,18 +4,19 @@ Every behaviour change carries a test. A bug fix starts with a test that fails
 for the bug, seen failing before the fix and passing after it. Every test file
 starts with a `//!` line that says what it tests: a test crate is a crate, and
 `missing_docs` fails one without that line under CI's `-D warnings`. Each
-command below is marked with where CI runs it ([CI lanes](#ci-lanes)); the
-nightly and weekly workflows are started by hand.
+command below is marked with where CI runs it ([CI lanes](#ci-lanes)): on a
+pull request, in the full run, or in the nightly or weekly workflow. All but
+the pull request's are started by hand.
 
 ```sh
 cargo test --workspace --all-features                                # pull request: everything, debug
 cargo test --workspace --all-features --release --test alloc_gate   # pull request: allocation gates, optimised
-cargo test --workspace --all-features --release                      # pull request: everything, optimised, doc tests included
-cargo clippy --workspace --all-targets --all-features --release -- -D warnings   # pull request: with debug assertions off
+cargo test --workspace --all-features --release                      # full run: everything, optimised, doc tests included
+cargo clippy --workspace --all-targets --all-features --release -- -D warnings   # full run: with debug assertions off
 python3 scripts/check-core-deps.py   # pull request; `python` on Windows, where python3 is the Store stub
 cargo test -p xtask --no-default-features   # pull request: the Rust reader the next two checks use
 python3 scripts/check-comment-tags.py                                # pull request
-python scripts/check-example-coverage.py   # pull request; needs a nightly compiler (NIGHTLY names it)
+python scripts/check-example-coverage.py   # full run; needs a nightly compiler (NIGHTLY names it)
 python3 scripts/check-decision-index.py                              # pull request
 python3 scripts/test-checks.py       # pull request: the check scripts refuse their bad input
 python3 scripts/check-shape-append-only.py origin/main   # pull request, against its base: the shape file only gains lines
@@ -33,18 +34,29 @@ cd page && npm ci && npm run typecheck && npm test                   # pull requ
 
 ## CI lanes
 
-A pull request runs `.github/workflows/ci.yml` once it is ready for review. A
-draft runs nothing, and `main` is not tested again after a merge: the squash of
-a branch rebased onto `main` is the tree its pull request tested. On a pull
-request the macOS leg of `rust` takes two steps, Clippy with all features and
-Test; started by hand, the workflow takes every step on both systems. The JUCE
-adapter has its own workflow (`juce-adapter.yml`).
+`.github/workflows/ci.yml` runs in two sizes.
 
-The long lanes (`nightly.yml`, `weekly.yml`) and the macOS build of the JUCE
-adapter have no schedule yet. They are started by hand, from any branch, so the
-runner minutes go to the pull request gate. Each long lane's command is in the
-list above and runs on a developer's machine, except the real-time sanitizer,
-which needs Linux.
+**A pull request** takes a thin gate, in about three minutes: what a
+developer's own Windows machine cannot show, and the checks that cost seconds.
+Those are `linux`, the macOS leg of `rust` (two steps: Clippy with all
+features, and Test), `core builds alone`, `loom models`, `benchmarks`, `page`,
+`seam.h` and `protocol shape history`. It runs once the pull request is ready
+for review. A draft runs nothing, and `main` is not tested again after a
+merge: the squash of a branch rebased onto `main` is the tree its pull request
+tested. So before a pull request, the commands above marked for it are run on
+the developer's machine, where they cover Windows.
+
+**The full run** is the same workflow started by hand, from any branch. It
+takes every lane in the table, the Windows leg of `rust`, every step of both
+legs, and the larger property-test count. Start one for a change the thin gate
+cannot judge, such as one to the exporters or to release-only code, and for
+the commit a release is cut from.
+
+The JUCE adapter's workflow (`juce-adapter.yml`) and the long lanes
+(`nightly.yml`, `weekly.yml`) are started by hand too, and have no schedule
+yet, so the runner minutes go to the pull request gate. Each long lane's
+command is in the list above and runs on a developer's machine, except the
+real-time sanitizer, which needs Linux.
 
 | Lane | What it proves |
 | --- | --- |
@@ -57,7 +69,7 @@ which needs Linux.
 | `rust`: Gate matrix (release) | The example EQ through both exporters allocates nothing and equals the processor driven directly, across block sizes, sample rates and layouts (section 2). |
 | `rust`: Docs | Every doc builds with no warning, broken link included. |
 | `doc examples` (Windows, pinned nightly) | Every struct, enum, trait, function and macro a user can reach has a Rust example, in every library crate under `crates/` (see [Doc examples](#doc-examples)). |
-| `linux` | The core, the bridge, the C interface and the example EQ through it build, pass clippy and pass their tests, gates and matrix on Linux, and the VST3 module refuses to compile there, with its message. |
+| `linux` | The code is formatted, and the core, the bridge, the C interface and the example EQ through it build, pass clippy and pass their tests, gates and matrix on Linux, and the VST3 module refuses to compile there, with its message. |
 | `seam.h` | The header compiles as C11 and C++11 for x86_64 and aarch64, so its size and offset assertions hold for both. |
 | `cross check` (aarch64 Linux, aarch64 Android) | The core, the bridge and the C interface type-check for those targets. Nothing is linked or run. |
 | `cargo deny` | Every dependency of the workspace has a licence `deny.toml` lists, no advisory applies (two, in the benchmark harness, are named there), no source is outside crates.io. It does not read `fuzz/`, which is outside the workspace and whose libFuzzer is under NCSA. |
@@ -77,7 +89,7 @@ which needs Linux.
 | `loom models` | The lock-free hand-offs are correct under every interleaving their atomics allow, and `scripts/run-loom.py` fails unless every model ran (section 3). |
 | `page`: Typecheck, Test | The page compiles against the committed generated types, and its tests pass. |
 | `JUCE adapter` (macOS, started by hand) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
-| `JUCE adapter` (Windows, on a pull request that changes `adapters/`, `crates/host/` or `examples/eq/`) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `plugin validators (windows)` lane passes Seam's own. |
+| `JUCE adapter` (Windows, started by hand) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `plugin validators (windows)` lane passes Seam's own. |
 | Nightly: `miri` | `seam-host`'s tests, the core crates' unit tests and some integration tests find no undefined behaviour under Stacked Borrows and Tree Borrows (see [Miri](#miri)). |
 | Nightly: `rtsan` (Linux) | A canary that allocates inside a marked call aborts, and the allocation gates and the gate matrix pass under RealtimeSanitizer. Not run yet; see [Real-time sanitizer](#real-time-sanitizer). |
 | Nightly: `fuzz` | Each of four `cargo-fuzz` targets ran ten minutes with no crash, no panic and no broken fixpoint (see [Fuzzing](#fuzzing)). |
