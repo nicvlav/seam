@@ -84,7 +84,8 @@ These are the checks a change most often trips. Run the scripts with `python3`
 (`python` on Windows), from a git checkout with `git` on the path: the comment
 check reads the files git tracks. CI runs more, the release allocation gates
 and the loom models among them: [docs/testing.md](docs/testing.md) lists every
-lane and what it proves.
+lane and what it proves. [CONTRIBUTING.md](CONTRIBUTING.md) says how a change
+reaches `main`.
 
 ## Licence
 
