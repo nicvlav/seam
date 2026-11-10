@@ -12,12 +12,17 @@ keeps one commit per change, each building and passing its tests.
 - **Description.** What and why, the checks run, review notes and `Closes #N`.
   None of that goes in the commit.
 - **Draft until ready.** CI runs once a pull request is ready for review, and
-  every run spends runner minutes. Run the checks in the README's [Develop
-  section](README.md#develop) first, and push when the branch is ready.
+  every run spends runner minutes. Its lanes are a thin gate: Linux, macOS and
+  the checks that cost seconds. So run the checks in the README's [Develop
+  section](README.md#develop) on your own machine first, and push when the
+  branch is ready. A change the thin gate cannot judge, such as one to an
+  exporter, gets the full run: `gh workflow run ci.yml --ref <branch>`.
 - **Docs move with the code.** A change to behaviour updates the decision
   record and its index. A change a plugin author sees adds a line under
   `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 - **Plans stay out.** Working plans and tickets are not committed.
+  [ROADMAP.md](ROADMAP.md) holds the big picture, and changes in a pull
+  request of its own.
 
 ## The merge
 
