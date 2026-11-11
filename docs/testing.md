@@ -670,7 +670,9 @@ the report. It says nothing about Windows- and macOS-only code.
 `seam-learn` and `seam-example-eq` under valgrind with iai-callgrind and prints
 instruction counts, which do not vary with the machine's load. Given a base
 revision it records the base's counts, then fails if any count at the current
-revision is more than 2 % higher. A base without the benchmarks is run alone. On
+revision is more than 2 % higher. A benchmark function is what is counted, so
+each hands back the state its setup made, and freeing it falls outside the
+count. A base without the benchmarks is run alone. On
 a pull request they cover the EQ's block, a host write, learn's dispatch and UMP
 decoding. Instruction counts say nothing about time or cache behaviour. The
 runner's version must equal the `iai-callgrind` dependency's.

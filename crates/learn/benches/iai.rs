@@ -82,9 +82,9 @@ fn block() -> EventList {
 
 #[library_benchmark]
 #[bench::first_block(mapped(), block())]
-fn dispatch(state: (Learn, LearnAudio), events: EventList) {
-    let (_learn, mut audio) = state;
-    audio.process(black_box(&events));
+fn dispatch(mut state: (Learn, LearnAudio), events: EventList) -> ((Learn, LearnAudio), EventList) {
+    state.1.process(black_box(&events));
+    (state, events)
 }
 
 library_benchmark_group!(name = learn; benchmarks = dispatch);
