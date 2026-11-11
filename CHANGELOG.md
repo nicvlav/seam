@@ -73,6 +73,16 @@ delivered to a plugin through an exporter.
   built for the limit. A plugin that is `Send` is lent to each main-thread call
   in turn, and a call that meets another thread's loan waits a bounded time
   before it is refused.
+- `seam-host`: Seam builds each instance's parts. `Plugin::Params` names the
+  struct that declares the parameters a host is shown; an exporter declares it,
+  builds the set, the session and the saved state over it, and hands
+  `Plugin::new` the parameters and the `Parts`. A declaration refused fails the
+  instance, with the reason in the fault report. `Parts::undo` and
+  `Parts::midi_learn` turn undo and learn on, and `Parts::tick` ticks them and
+  the session in one call, which a plugin that keeps its parts makes from
+  `idle`; an exporter reports one that does not, once. A plugin declares its
+  saved-state migration as `Plugin::SCHEMA_VERSION` and `Plugin::migrate`.
+  `Parts::for_plugin` builds a plugin's parts with no host, for tests.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
   main-thread timer.
 - The C interface (`export_cabi!`) and its generated header, `include/seam.h`,

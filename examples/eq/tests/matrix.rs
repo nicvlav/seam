@@ -24,14 +24,21 @@
 
 seam_testkit::install_alloc_gate!();
 
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-use seam_example_eq::{ExampleEq, PARAMS};
+use seam_example_eq::ExampleEq;
 use seam_host::cabi::TestHost as CHost;
 use seam_host::vst3::TestHost as Vst3Host;
 use seam_host::{Block, Event, EventList, Layout, Plugin, ProcessSetup, Processor};
-use seam_params::{audio_thread, host_id};
+use seam_params::{ParamDecl, audio_thread, host_id};
 use seam_testkit::alloc::assert_no_allocations;
+
+mod common;
+use common::{built, declarations};
+
+/// Every parameter's declaration, in the order hosts list them.
+static DECLARATIONS: LazyLock<Vec<ParamDecl>> = LazyLock::new(declarations);
 
 const BLOCK_SIZES: [usize; 8] = [1, 2, 31, 32, 64, 512, 4_096, 8_192];
 const RATES: [f64; 6] = [44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0];
@@ -90,7 +97,7 @@ struct Queue {
 
 fn queues(rng: &mut Rng, frames: usize, density: usize) -> Vec<Queue> {
     let mut chosen = Vec::new();
-    for parameter in 0..PARAMS.len() {
+    for parameter in 0..DECLARATIONS.len() {
         if density == 0 || rng.below(density) != 0 {
             continue;
         }
@@ -120,8 +127,7 @@ struct Direct {
 
 impl Direct {
     fn open(layout: Layout, rate: f64) -> Self {
-        let mut plugin = ExampleEq::new();
-        let saved = plugin.saved();
+        let (mut plugin, saved) = built();
         let processor = plugin.activate(&ProcessSetup {
             sample_rate: rate,
             max_frames: MAX_FRAMES,
@@ -145,7 +151,7 @@ impl Direct {
         let writes = set.audio();
         for queue in queues {
             let id = set
-                .by_host_id(host_id(PARAMS[queue.parameter].key))
+                .by_host_id(host_id(DECLARATIONS[queue.parameter].key))
                 .expect("declared");
             let (_, last) = *queue.points.last().expect("a point");
             writes.host_write(id, last);
@@ -210,7 +216,7 @@ impl Shell for Vst3 {
             .iter()
             .map(|queue| {
                 (
-                    host_id(PARAMS[queue.parameter].key),
+                    host_id(DECLARATIONS[queue.parameter].key),
                     queue.points.as_slice(),
                 )
             })
@@ -232,7 +238,7 @@ impl Shell for CInterface {
         let host = CHost::<ExampleEq>::new();
         let max_frames = u32::try_from(max_frames).expect("small");
         assert_eq!(host.activate(rate, max_frames, layout), Ok(()));
-        for (index, decl) in PARAMS.iter().enumerate() {
+        for (index, decl) in DECLARATIONS.iter().enumerate() {
             let info = host
                 .parameter(u32::try_from(index).expect("small"))
                 .expect("listed");

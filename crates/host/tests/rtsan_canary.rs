@@ -6,15 +6,11 @@
 //! checks nothing: the marks are missing, or the sanitizer is not linked.
 #![cfg(all(seam_rtsan, feature = "cabi", feature = "test-host"))]
 
-use std::sync::Arc;
-
 use seam_host::cabi::TestHost;
 use seam_host::{
-    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status,
+    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
 };
-use seam_params::{Kind, ParamDecl, ParamSet};
-use seam_session::Session;
+use seam_params::{Declarer, Float, FloatDecl, Params};
 
 /// Allocates in every block, as no processor may.
 struct Allocates;
@@ -29,7 +25,19 @@ impl Processor for Allocates {
     }
 }
 
-struct Canary(Arc<SavedState>);
+struct Gain {
+    _gain: Float,
+}
+
+impl Params for Gain {
+    fn declare(p: &mut Declarer) -> Self {
+        Gain {
+            _gain: p.add(FloatDecl::new("gain", "Gain", 0.0..=1.0, 0.0)),
+        }
+    }
+}
+
+struct Canary;
 
 impl Plugin for Canary {
     const INFO: PluginInfo = PluginInfo {
@@ -51,21 +59,11 @@ impl Plugin for Canary {
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = &[ParamDecl::new(
-        "gain",
-        "Gain",
-        Kind::continuous(0.0, 1.0, 0.0, None),
-        0.0,
-    )];
+    type Params = Gain;
     type Processor = Allocates;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(Self::PARAMS.iter().copied()).expect("valid");
-        Canary(Arc::new(SavedState::new(&set, &Session::new(&set))))
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+    fn new(_: Gain, _: Parts) -> Self {
+        Canary
     }
 
     fn activate(&mut self, _setup: &ProcessSetup) -> Allocates {

@@ -1,6 +1,7 @@
 //! The exporter through its COM interfaces, as a host drives it.
 
 use std::cell::{Cell, RefCell};
+use std::error::Error;
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -24,9 +25,9 @@ use ::vst3::Steinberg::{
 };
 use ::vst3::{Class, ComPtr, ComWrapper, Interface};
 use seam_params::{
-    AudioParams, Gesture, Kind, ParamDecl, ParamId, ParamSet, ProgramParams, UiParams, host_id,
+    AudioParams, Declarer, Gesture, Kind, ParamDecl, ParamId, Params, ProgramParams, host_id,
 };
-use seam_session::Session;
+use serde_json::{Map, Value as Json};
 
 use super::component::Component;
 use super::test_host::{Recorder, Stream};
@@ -34,8 +35,8 @@ use super::{HostCall, RESTART_LATENCY, RESTART_VALUES, Refused, TestHost, plugin
 use crate::engine::timer::{detached, pump};
 use crate::faults::{thread_faults, written};
 use crate::{
-    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
-    SavedState, Status, Tail,
+    AuCodes, Block, Category, Feature, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status, Tail,
 };
 
 const PARAMS: &[ParamDecl] = &[
@@ -49,6 +50,16 @@ const PARAMS: &[ParamDecl] = &[
     ParamDecl::new("mode", "Mode", Kind::Choice(&["A", "B", "C"]), 1.0),
     ParamDecl::new("bypass", "Bypass", Kind::Bool, 0.0).as_bypass(),
 ];
+
+/// The test plugins' parameters, declared from [`PARAMS`].
+struct Table;
+
+impl Params for Table {
+    fn declare(p: &mut Declarer) -> Self {
+        p.extend(PARAMS.iter().copied());
+        Table
+    }
+}
 
 /// What the probe was asked to do and what it saw, shared by the plugin and
 /// its processor, which a test host runs on the test's own thread.
@@ -81,16 +92,16 @@ fn probe<R>(f: impl FnOnce(&mut ProbeState) -> R) -> R {
     PROBE.with(|state| f(&mut state.borrow_mut()))
 }
 
+/// Keeps its parts, and ticks them.
 struct Probe {
-    saved: Arc<SavedState>,
-    ui: UiParams,
+    parts: Parts,
     program: ProgramParams,
     held: Option<Gesture>,
 }
 
 impl Probe {
     fn id(&self, key: &str) -> ParamId {
-        self.saved.set().id(key).expect("declared")
+        self.parts.set().id(key).expect("declared")
     }
 }
 
@@ -157,24 +168,17 @@ impl Plugin for Probe {
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = ProbeProcessor;
 
-    fn new() -> Self {
+    fn new(_: Table, parts: Parts) -> Self {
         // Each test's probe starts afresh, even on a thread another used.
         probe(|state| *state = ProbeState::default());
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let session = Session::new(&set);
         Probe {
-            saved: Arc::new(SavedState::new(&set, &session)),
-            ui: set.take_ui().expect("the first UI handle"),
-            program: set.program(),
+            program: parts.set().program(),
+            parts,
             held: None,
         }
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> ProbeProcessor {
@@ -184,7 +188,7 @@ impl Plugin for Probe {
         );
         probe(|state| state.setups.push(*setup));
         ProbeProcessor {
-            params: self.saved.set().audio(),
+            params: self.parts.set().audio(),
             gain: self.id("gain"),
             drops: probe(|state| Arc::clone(&state.processor_drops)),
             panic_on_drop: probe(|state| state.panic_in_processor_drop),
@@ -207,14 +211,15 @@ impl Plugin for Probe {
     fn idle(&mut self) {
         probe(|state| state.idles += 1);
         assert!(!probe(|state| state.panic_in_idle), "an idle call's bug");
+        self.parts.tick();
         if let Some((key, value)) = probe(|state| state.edit.take()) {
-            assert!(self.ui.write(self.id(key), value));
+            assert!(self.parts.params().write(self.id(key), value));
         }
         if let Some((key, value)) = probe(|state| state.sync.take()) {
             self.program.sync(self.id(key), value);
         }
         if probe(|state| state.hold) && self.held.is_none() {
-            let gesture = self.ui.begin(self.id("gain"));
+            let gesture = self.parts.params().begin(self.id("gain"));
             gesture.write(3.0);
             self.held = Some(gesture);
         }
@@ -712,7 +717,7 @@ fn a_main_thread_call_from_another_thread_is_refused() {
 }
 
 /// A plugin with one layout, whose processor adds 1 to every channel.
-struct Shaped<const INPUTS: usize, const OUTPUTS: usize>(Arc<SavedState>);
+struct Shaped<const INPUTS: usize, const OUTPUTS: usize>;
 
 struct ShapedProcessor;
 
@@ -751,17 +756,11 @@ impl<const INPUTS: usize, const OUTPUTS: usize> Plugin for Shaped<INPUTS, OUTPUT
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = ShapedProcessor;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let session = Session::new(&set);
-        Shaped(Arc::new(SavedState::new(&set, &session)))
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+    fn new(_: Table, _: Parts) -> Self {
+        Shaped
     }
 
     fn activate(&mut self, _setup: &ProcessSetup) -> ShapedProcessor {
@@ -1643,33 +1642,27 @@ thread_local! {
 
 /// A plugin with one session participant, which its tick applies.
 struct WithSession {
-    saved: Arc<SavedState>,
-    ui: seam_session::SessionUi,
+    parts: Parts,
     _participant: Rc<RefCell<Kept>>,
     _registration: seam_session::Registration,
 }
 
 impl Plugin for WithSession {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = ShapedProcessor;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let session = Session::new(&set);
-        let ui = session.take_ui().expect("the first UI handle");
+    fn new(_: Table, parts: Parts) -> Self {
         let participant = Rc::new(RefCell::new(Kept(KEPT.with(Rc::clone))));
-        let registration = ui.register("kept", &participant).expect("registered");
+        let registration = parts
+            .session()
+            .register("kept", &participant)
+            .expect("registered");
         WithSession {
-            saved: Arc::new(SavedState::new(&set, &session)),
-            ui,
+            parts,
             _participant: participant,
             _registration: registration,
         }
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> ShapedProcessor {
@@ -1678,7 +1671,7 @@ impl Plugin for WithSession {
 
     fn idle(&mut self) {
         TICKS.with(|ticks| ticks.set(ticks.get() + 1));
-        self.ui.tick();
+        self.parts.tick();
     }
 }
 
@@ -2002,7 +1995,7 @@ fn a_release_on_another_thread_detaches_the_timer() {
 }
 
 /// A plugin whose migration refuses every older block, with a reason.
-struct Stuck(Arc<SavedState>);
+struct Stuck;
 
 struct StuckProcessor;
 
@@ -2014,18 +2007,16 @@ impl Processor for StuckProcessor {
 
 impl Plugin for Stuck {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
+    const SCHEMA_VERSION: u64 = 1;
     type Processor = StuckProcessor;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let saved = SavedState::new(&set, &Session::new(&set))
-            .with_migration(1, |_, _| Err("no whole steps".into()));
-        Stuck(Arc::new(saved))
+    fn new(_: Table, _: Parts) -> Self {
+        Stuck
     }
 
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+    fn migrate(_: u64, _: &mut Map<String, Json>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Err("no whole steps".into())
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> StuckProcessor {
@@ -2062,4 +2053,48 @@ fn the_first_refused_load_writes_the_reason_and_is_no_fault_through_the_vst3_exp
     );
     assert_eq!(written(), Vec::<String>::new(), "and said once");
     assert_eq!(thread_faults(), faults, "a refused load is no fault");
+}
+
+/// Declares one key twice, which the set refuses.
+struct Twice;
+
+impl Params for Twice {
+    fn declare(p: &mut Declarer) -> Self {
+        p.extend([PARAMS[0], PARAMS[0]]);
+        Twice
+    }
+}
+
+/// A plugin whose declarations are refused, so no instance is built.
+struct Unbuilt;
+
+impl Plugin for Unbuilt {
+    const INFO: PluginInfo = Probe::INFO;
+    type Params = Twice;
+    type Processor = ShapedProcessor;
+
+    fn new(_: Twice, _: Parts) -> Self {
+        unreachable!("never built")
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> ShapedProcessor {
+        unreachable!("never built")
+    }
+}
+
+#[test]
+fn a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter() {
+    let faults = thread_faults();
+    written();
+    let component = ComWrapper::new(Component::<Unbuilt>::new(false));
+    let plugin = component.to_com_ptr::<IComponent>().expect("a component");
+    // SAFETY: the component was just made and `plugin` holds it;
+    // `initialize` takes a null context.
+    let initialized = unsafe { plugin.initialize(std::ptr::null_mut()) };
+    assert_eq!(initialized, kInternalError, "no instance");
+    assert_eq!(thread_faults(), faults + 1, "the refusal counts as a fault");
+    let lines = written();
+    let refusal = "seam: Probe: no instance was built, since a declaration was refused: \
+                   key \"gain\" is declared twice.";
+    assert!(lines.iter().any(|line| line == refusal), "{lines:?}");
 }

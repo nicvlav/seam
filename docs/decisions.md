@@ -116,7 +116,7 @@ comments never cite an id: they state the reason in words, and
 | D77 | [How deep may a session section nest? (S1, S4, H2)](#d77-how-deep-a-session-section-may-nest) | 125 levels (`seam_session::MAX_SECTION_DEPTH`). A deeper capture is refused as it is taken, so a save never writes a block the same build cannot load. A capture that would grow the block past `MAX_STATE_BYTES` is refused too, against a budget the saved state sets whenever it is made, and a load whose block would save back past it is refused whole. | decided |
 | D78 | [How do a page and a native side of different protocol versions find out? (B1, B4)](#d78-protocol-versions) | The native side answers every `ready`: with a snapshot when it speaks the page's version, and otherwise with a `reject` carrying its own version and a reason, which fails the page. No native side exists yet; the decoding and the page's half are built. | decided |
 | D79 | [What does the page client do while the native side has not answered, and when a hook's command changes? (B1, B5)](#d79-the-page-client-before-the-native-side-answers) | The client sends `ready` again every second until a snapshot or a reject arrives, it fails, or it is disposed. `useCommand` keys its pending count and its last result and error by the command's name. The page holds its writes until it is answered, so each `ready` may start a new page session. | decided |
-| D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | `SavedState::with_migration(version, migrate)`: a block of an older plugin version (D84) is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads, or to refuse with its reason (D85). A save keeps the unknown parameter and top-level keys the older build does not read. | decided |
+| D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | It declares `Plugin::SCHEMA_VERSION` and `Plugin::migrate`, which Seam attaches to the saved state it builds: a block of an older plugin version (D84) is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads, or to refuse with its reason (D85). A save keeps the unknown parameter and top-level keys the older build does not read. | decided |
 | D81 | [Does a late apply made while a panic unwinds leave the session owing a pass? (S6, S10, D55)](#d81-a-registration-made-while-a-panic-unwinds) | No. Only a panic that began inside a pass or a late apply leaves the pass owed, for the next tick to run again; a registration made from a destructor during another panic owes none, so it clears no undo history. | decided |
 | D82 | [When do a restore and an unmap run a learn target's own code? (L8, L9, D54, D71)](#d82-when-learn-runs-a-targets-own-code) | Last: after learn has settled its table, published it and told the session, so a target whose `end` panics leaves no earlier mapping routing, in learn or on the audio side, and learn usable. | decided |
 | D83 | [Do a page control's `onDrag` and `setValue` differ? (B2)](#d83-a-controls-drag-and-one-shot-set) | Only in the gesture `onDragStart` and `onDragEnd` put around a drag: they are one function, so a `setValue` during a drag joins it. | decided |
@@ -127,6 +127,7 @@ comments never cite an id: they state the reason in words, and
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
+| D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts and calls `Parts::tick` from `idle`; an exporter reports, once, a plugin that keeps them and does not. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -892,8 +893,8 @@ processor back.
 applicable: the C++ Seam had no plugin trait.
 
 **Rust.** No. The exporter calls the plugin and drops it on its main thread
-only, so a plugin owns its undo `History`, its `SessionUi`, its `Learn` and its
-watches, none of which is `Send`. It creates it there too.
+only, so a plugin owns its `Parts`, its undo `History` and its watches, none of
+which is `Send` (D91). It creates it there too.
 
 Only a plugin that is `Send` leaves the main thread, through the C interface,
 which binds it to no thread (D62). For the instance's whole life, the interface
@@ -901,11 +902,12 @@ lends the plugin to one main-thread call at a time, on whichever thread the call
 arrives. A call that meets another waits its turn, up to a bound, and a tick
 that meets one skips. The plugin drops on the thread that destroys it.
 
-`Plugin::saved` hands the exporter the plugin's `Arc<SavedState>`, which is
-`Send + Sync`, once after `new`; the host's save and load calls, on whatever
-thread they arrive, go through it and never touch the plugin, and the exporter
-takes the plugin's parameter set from it (`SavedState::set`), so it never builds
-a second one from `PARAMS` (D52). Both exporters assert this to their hosts with
+Seam builds the plugin's `Arc<SavedState>`, which is `Send + Sync`, with its
+parts, and the exporter keeps it (D91). The host's save and load calls, on
+whatever thread they arrive, go through it and never touch the plugin, and the
+set the host is shown is the one it saves (`SavedState::set`, D52). A plugin
+that is `Send` keeps its parameters and drops its parts. Both exporters assert
+this to their hosts with
 `unsafe` in the boundary module they share (`MainThread`).
 
 **Alternatives.** The alternatives were a `Send` plugin beside a separate
@@ -924,8 +926,9 @@ can. `ParamSet::take_ui`, `ProgramParams::load`, `Value::new`, `List::new` and
 `Session::new` take it from the set, undo's `History::new` from the `UiParams`,
 and `SavedState::new` and `Learn::attach` panic when the session was made from
 another set, so every history, value, list, session and load of one plugin
-shares one clock by construction. Two sessions on one set are not caught: the
-saved block saves only the one it was given.
+shares one clock by construction. Seam builds a plugin's set, session and
+saved state together (D91). Two sessions on one set are not caught: the saved
+block saves only the one it was given.
 
 **Alternatives.** The alternatives were a check the plugin calls, or a builder
 in `seam-host` that wires the pieces.
@@ -942,7 +945,8 @@ editor and ran only while one was open, at 30 Hz idle and 90 Hz in a burst
 (`seam_ReconcilePump.h:20-35`).
 
 **Rust.** One main-thread timer per instance, at 60 Hz for the instance's life,
-editor open or not, calls `Plugin::idle`; the editor never ticks. VST3 gives a
+editor open or not, calls `Plugin::idle`, which ticks the plugin's parts (D91);
+the editor never ticks. VST3 gives a
 component no idle call without an editor, so its exporter runs its own, from
 `initialize` to release, on the thread `initialize` binds (D59): a message-only
 window's timer on Windows, about 64 Hz, and a Core Foundation run loop timer in
@@ -1814,7 +1818,9 @@ the page, and a result kept across a change of name.
 **Question and C++ Seam.** How does a plugin upgrade a block an older version of
 it saved? (H1, H2) Not checked against C++.
 
-**Rust.** `SavedState::with_migration(version, migrate)`: `version` is the
+**Rust.** A plugin declares its migration on its trait: `Plugin::SCHEMA_VERSION`
+and `Plugin::migrate`, which Seam attaches to the saved state it builds (D91)
+through `SavedState::with_migration(version, migrate)`. `version` is the
 plugin's own schema version, `pluginStateVersion`, apart from Seam's frame
 (D84), and a plugin with no migration is at 0. A save writes it, or the version
 of the block it last loaded when that is higher, so a newer build's block that
@@ -1832,7 +1838,8 @@ what the block lacks and never overwrites a key the block holds, which may be
 newer than anything it derives. A migration that cannot upgrade the block
 returns its reason, and the load fails with it and changes nothing (D85); a
 block of the plugin's version or a newer one loads as it is (H2). It runs inside
-the load, on the loading thread, so it touches only the block.
+the load, on the loading thread, so it touches only the block, and
+`Plugin::migrate` has no `self`.
 
 One hook keyed by the block's version, not one per section; learn's section
 carries its own schema (L9).
@@ -2088,7 +2095,8 @@ default past its labels, with `DeclError::DefaultOutsideRange`; a
 The table path stays: `ParamDecl`, `Kind`, `ParamSetBuilder` and
 `ParamSet::from_decls` keep their signatures and the rules they apply, and
 `Declarer::extend` declares a table, for a test plugin or one whose
-parameters come from data. `Plugin::PARAMS` still asks for a table. Since
+parameters come from data. A plugin names its struct as `Plugin::Params`,
+and Seam declares it when it builds an instance (D91). Since
 the builder shares the typed declarations' rules, it applies the ones a row
 breaks on its own before the ones only the rows before it show, so a row
 that breaks two rules is refused for the one of its own: a repeated key
@@ -2105,6 +2113,53 @@ and a typed declaration that snaps its default as a table row does, which
 hides a typo.
 
 [History](decision-history.md#d90-how-a-plugin-declares-its-parameters)
+
+### D91. Who builds a plugin's parts
+
+**Question and C++ Seam.** Who builds a plugin's parameter set, session and
+saved state, and how does the plugin get them? (D51, D52, D53, D90) Not
+applicable: the C++ Seam's plugins built them in their own constructors, as a
+JUCE `AudioProcessor` does.
+
+**Rust.** Seam does, once per instance, and moves them into the plugin.
+`Plugin::Params` names the struct that declares the parameters a host is shown
+(D90). An exporter calls `Parts::for_plugin::<P>()`, which declares the set
+with `ParamSet::declare`, makes the session and the saved state over it,
+attaching the plugin's migration (D80), and hands `Plugin::new` the parameters
+and the `Parts`. The exporter keeps the set and the saved state, which are
+`Send + Sync` (D51). A declaration refused fails the build: the exporter writes
+a line with the plugin's name and the reason, then panics inside its guard, so
+the host is refused the instance as for a panic in `new` (D60, D75).
+`juce_settings` reads the keys from a set declared the same way.
+
+The plugin owns its `Parts`. They hold the main thread's handles: the set's
+and the session's UI handles, and undo's history and learn once the plugin
+turns them on with `undo` and `midi_learn`. So a plugin that keeps them is not
+`Send`, and one that must be drops them and keeps its parameters, as the
+example EQ does. Learn sits in a shared cell inside the parts, since the
+session holds it as a participant; `Parts::learn` lends it, and plugin code
+never names `Rc` or `RefCell`. `midi_learn` panics for a plugin that declares
+no MIDI input, since no controller would reach learn.
+
+`Parts::tick` is the tick's one call, from `Plugin::idle`, in the one order
+that works: learn's poll, so a mapping it commits reaches the same tick's
+save; the session's tick, which applies a restore (D13); then the history's
+(D20). When nothing changed it allocates nothing and does no work that grows
+with the number of parameters. A plugin that keeps its parts and lets an idle
+pass without ticking them never applies a restored session, so the engine
+reports it, once, as a fault. The parts and the engine share a tick count,
+which the engine holds weakly, so a plugin that dropped its parts is never
+reported.
+
+**Alternatives.** The alternatives were each plugin building its parts and
+handing the saved state back through a getter, `Plugin::saved`, which wrote
+the same construction in every plugin and tied nothing to the table the trait
+named; and the engine owning the parts and ticking them, lending them to each
+call. Through the C interface a `Send` plugin's calls may arrive on different
+threads, and a clone of a handle the plugin kept on the first would then be
+used on another, so that is unsound.
+
+[History](decision-history.md#d91-who-builds-a-plugins-parts)
 
 ## How to read this
 

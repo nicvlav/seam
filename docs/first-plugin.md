@@ -56,44 +56,60 @@ repository.
 
 ## 1. Declare the parameters
 
-A parameter is declared once, as a [`ParamDecl`](../crates/params/src/decl.rs):
-a key, a display name, a [`Kind`](../crates/params/src/decl.rs) and a default
-in real units. Everything else follows from the declaration: the host's id (a
-hash of the key), its range and text, the save, and the page's typed hook.
+A parameter is declared once, where the plugin holds it. The gain's sit in a
+struct of their own, and its [`Params`](../crates/params/src/declare.rs)
+implementation declares each one and keeps what it is handed:
 
 ```rust
-const PARAMS: &[ParamDecl] = &[
-    ParamDecl::new(GAIN, "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0).with_unit("dB"),
-    ParamDecl::new(MODE, "Mode", Kind::Choice(Mode::LABELS), 0.0),
-    ParamDecl::new(BYPASS, "Bypass", Kind::Bool, 0.0).as_bypass(),
-];
+pub struct GainParams {
+    gain: Float,
+    mode: Choice<Mode>,
+    bypass: Bool,
+}
+
+impl Params for GainParams {
+    fn declare(p: &mut Declarer) -> Self {
+        GainParams {
+            gain: p.add(
+                FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0)
+                    .with_step(0.1)
+                    .with_unit("dB"),
+            ),
+            mode: p.add(ChoiceDecl::new("mode", "Mode", Mode::Clean)),
+            bypass: p.add(BoolDecl::new("bypass", "Bypass", false).as_bypass()),
+        }
+    }
+}
 ```
 
-- `Kind::continuous(start, end, interval, skew_centre)` reads as JUCE's
-  `NormalisableRange (start, end, interval)`, where an interval of 0 means no
-  steps, plus the value at the middle of the control's travel, as
-  `setSkewForCentre` takes it; `None` is a linear control. So the gain runs
-  from -60 dB to 12 dB in steps of 0.1 dB, linearly.
-  [`Range::new`](../crates/params/src/decl.rs) says what each argument may be.
+Each declaration is a key, a display name, a range or a set of choices, and a
+default in real units. Everything else follows from it: the host's id (a hash
+of the key), its range and text, the save, and the page's typed hook.
+
+- A [`FloatDecl`](../crates/params/src/declare.rs) reads as JUCE's
+  `NormalisableRange (start, end, interval)`: a range, ends included, and
+  `with_step`, where 0, the default, means no steps. `with_skew_centre` puts a
+  value at the middle of the control's travel, as `setSkewForCentre` does. So
+  the gain runs from -60 dB to 12 dB in steps of 0.1 dB, linearly. A default
+  outside the range is refused, not moved into it.
+- The declaration's type is the parameter's: `p.add` hands back a `Float` for
+  a `FloatDecl`, a `Bool` for a `BoolDecl` and a `Choice<Mode>` for a
+  `ChoiceDecl`, so a field of another kind does not compile.
 - The store keeps real units (dB, not 0 to 1). A host speaks in 0 to 1
-  positions, and Seam converts both ways at its boundary. Every kind is stored
-  as an `f32`: a choice as its index, 0, 1 or 2 here, and a bool as 0 or 1.
-  Plugin code reads through typed parameters instead, below.
+  positions, and Seam converts both ways at its boundary.
 - A choice's names are its labels, and the host sees them as the parameter's
   text. The mode's come from the enum that names its values, so the two cannot
   drift apart.
 - `as_bypass` tells the exporter this parameter is the host's bypass. The
   processor still implements it: the host only learns which parameter it is.
+- Hosts list the parameters in the order `declare` adds them.
 - The key is the parameter's identity for good. The saved block stores the
   value under it and the host's id is its hash, so a key never changes once
   the plugin ships, though the display name may. Adding a parameter later is
   safe: a block saved before it loads with the new parameter at its default
   ([`SavedState::load`](../crates/host/src/state.rs)).
 
-Plugin code holds each parameter as a [typed
-parameter](../crates/params/src/param.rs), `Float`, `Bool` or `Choice`, bound
-to its declaration once. `Mode` names the choice's values, in the order of its
-labels:
+`Mode` names the choice's values, in the order of its labels:
 
 ```rust
 impl Choices for Mode {
@@ -101,33 +117,14 @@ impl Choices for Mode {
 ```
 
 `from_index` must give a mode for any index, since the audio thread calls it;
-`Hot` takes every index past the last. The parameters sit in a struct of their
-own, bound in one function:
+`Hot` takes every index past the last.
 
-```rust
-struct GainParams {
-    gain: Float,
-    mode: Choice<Mode>,
-    bypass: Bool,
-}
-
-impl GainParams {
-    fn bind(set: &ParamSet) -> Result<Self, BindError> {
-        Ok(GainParams {
-            gain: set.bind(GAIN)?,
-            mode: set.bind(MODE)?,
-            bypass: set.bind(BYPASS)?,
-        })
-    }
-}
-```
-
-`ParamSet::bind` looks the key up and checks the declaration's kind, and a
-choice's labels, against the field's type, once. Each parameter then carries
+Each field is a [typed parameter](../crates/params/src/param.rs) that carries
 its store: `get` returns the gain in dB as an `f32`, the mode as a `Mode` and
 the bypass as a `bool`, on any thread, with no lookup or threshold. A clone is
-the same parameter, sharing the store. A key with a typo, or a field of the
-wrong kind, fails the first time the plugin is built, in any test.
+the same parameter, sharing the store. Seam calls `declare` when it builds an
+instance, and a declaration it refuses, such as a key two parameters share,
+fails that build with the reason, in any test.
 
 ## 2. Write the processor
 
@@ -162,43 +159,44 @@ The loop itself is plain DSP.
 Open: Seam has no smoothing yet. The gain is read once per block, at its
 start, so a change steps there, and a large one can click.
 
-## 3. The plugin and its saved state
+## 3. The plugin and its parts
 
 [`Plugin`](../crates/host/src/plugin.rs) is the main thread's half. Its
-constants name the plugin (`INFO`) and list its `PARAMS`. `new` builds
-everything the plugin owns; `activate` builds a fresh processor each time the
-host activates it, so nothing the audio thread touches is allocated in a block.
-`new` starts with the parameters, declared and bound, then the session and the
-saved state over both:
+constants name the plugin (`INFO`), and its `Params` is the struct above.
+Seam declares it, builds the parameter set, the session and the saved state
+over it, and hands the parameters and those
+[`Parts`](../crates/host/src/parts.rs) to `new`. `new` keeps what the plugin
+uses; `activate` builds a fresh processor each time the host activates it, so
+nothing the audio thread touches is allocated in a block:
 
 ```rust
-let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid declarations");
-let params = GainParams::bind(&set).expect("each parameter matches its declaration");
-let session = Session::new(&set);
-let saved = Arc::new(SavedState::new(&set, &session));
+fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
+    GainProcessor::new(self.params.clone(), self.parts.learn_audio())
+}
 ```
 
-`new` returns `Self`, not a `Result`, so a failure here is a bug in the
-plugin, and `expect` panics with its message. `saved` hands the exporter the
-[`SavedState`](../crates/host/src/state.rs), and the exporter does every host
-save and load through it without touching the plugin. The saved block is JSON:
-Seam's version and the plugin's own, the parameters' values, and one keyed
-section per session participant. A later version of the plugin that renames or
-rescales a parameter raises its own version with
-[`SavedState::with_migration`](../crates/host/src/state.rs), which upgrades an
-older block as it loads.
+The host saves and loads through the saved state in the parts, on threads of
+its own, without touching the plugin. The saved block is JSON: Seam's version
+and the plugin's own, the parameters' values, and one keyed section per
+session participant. A later version of the plugin that renames or rescales a
+parameter raises its `SCHEMA_VERSION` and upgrades an older block in its
+`migrate`, as it loads.
+
+The parts hold the main thread's handles, so a plugin that keeps them is not
+`Send`, and runs on the thread that created it. The example EQ keeps only its
+parameters and drops its parts, so it stays `Send`.
 
 ## 4. Undo
 
-A `History` records changes to what you enroll in it:
+Undo is one call in `new`, which turns it on with every parameter enrolled:
 
 ```rust
-let history = History::new(&ui, Bound::default()).expect("the first history");
-history.enroll_params();
+let history = parts.undo(Bound::default());
 ```
 
-`ui` is the [`UiParams`](../crates/params/src/ui.rs) handle, the one an editor
-writes parameters through. Only its writes record, as a user's: a host's
+The `History` it returns records changes to what is enrolled in it. Only
+writes through the parts' [`UiParams`](../crates/params/src/ui.rs) handle,
+the one an editor writes parameters through, record, as a user's: a host's
 automation, a load and a learned controller never do, so undo never fights
 the host. A drag is one [gesture](glossary.md#gesture) and so one undo step,
 and so is each lone `write`, a click say, which is a gesture of one value. The
@@ -239,8 +237,8 @@ assert_eq!(plugin.undo(), Ok(true));
 assert_eq!(plugin.label(), "Untitled");
 ```
 
-The plugin registers the participant under a stable key, `"label"`, and the
-session saves it there. Three details are easy to miss:
+The plugin registers the participant with `parts.session()` under a stable
+key, `"label"`, and the session saves it there. Three details are easy to miss:
 
 - The session holds a participant weakly, so the plugin keeps the `Rc` alive.
 - A save writes the last capture, so after a change the plugin calls
@@ -253,59 +251,47 @@ case for it.
 
 ## 6. MIDI learn
 
-Learn adds three lines to `new`:
+Learn is one more call in `new`:
 
 ```rust
-let (learn, _) = Learn::new(&set, Config::default());
-let learn = Rc::new(RefCell::new(learn));
-Learn::attach(&learn, &session_ui).expect("a free key");
+parts
+    .midi_learn(Config::default())
+    .expect("learn's key is free");
 ```
 
-and one to `activate`:
+It registers learn's own participant, so its mappings save under their own
+key; the call fails only when that key is taken. `activate` above hands each
+fresh processor learn's audio side, a
+[`LearnAudio`](../crates/learn/src/audio.rs), from `parts.learn_audio()`. The
+processor calls `learn.process(block.events)` at the top of `process`.
+Learned writes then land before the parameters are read, in the block the
+controller arrived in.
 
-```rust
-let learn = self.learn.borrow_mut().replace_audio();
-```
+To learn, the plugin calls `Learn::arm`, through `parts.learn()`, on the
+gain's id, the parameter's `id()`, with `Takes::CONTROLLER`. The next
+controller the processor sees is captured on the audio thread, and the next
+tick commits it.
 
-The saved state is an `Arc`, a `shared_ptr` whose count is atomic, because the
-host saves and loads on threads of its own; learn is shared with the session
-on the main thread only, so an `Rc`, the same without the atomics, will do,
-and its `RefCell` lends it mutably to one borrower at a time, checked at run
-time.
+The plugin declares `midi_input: true` in its `INFO`; learn refuses a plugin
+that does not. Open: no exporter delivers MIDI events yet, so learn is
+exercised by driving the processor directly, as the tests below do.
 
-`Learn::new` also returns an audio side, which `new` drops: `activate` takes a
-fresh one each time with `replace_audio`, and hands the processor that
-[`LearnAudio`](../crates/learn/src/audio.rs). `attach` registers learn's own
-participant, so its mappings save under their own key. The processor calls
-`learn.process(block.events)` at the top of `process`. Learned writes then
-land before the parameters are read, in the block the controller arrived in.
-
-To learn, the plugin calls `Learn::arm` on the gain's id, the parameter's
-`id()`, with `Takes::CONTROLLER`. The next controller the processor sees is
-captured on the audio thread, and the next tick's poll commits it.
-
-The plugin declares `midi_input: true` in its `INFO`. Open: no exporter
-delivers MIDI events yet, so learn is exercised by driving the processor
-directly, as the tests below do.
-
-## 7. The idle tick, and its order
+## 7. The idle tick
 
 The exporter calls `Plugin::idle` about 60 times a second on the main thread.
 Nothing of the plugin's runs there unless `idle` calls it:
 
 ```rust
 fn idle(&mut self) {
-    // Learn first: a mapping its poll commits reaches the session at the
-    // session's next tick, which is this one.
-    let _learned = self.learn.borrow_mut().poll();
-    self.session.tick();
-    self.history.tick();
+    self.parts.tick();
     self.label_moved();
 }
 ```
 
-[`Plugin::idle`](../crates/host/src/plugin.rs) owns the order and its
-reasons; the history's place in it does not matter.
+[`Parts::tick`](../crates/host/src/parts.rs) runs learn, the session and the
+history in the one order that works, and owns the reasons for it. A plugin
+that keeps its parts and forgets the call never sees a project's saved session
+applied, so the exporter reports it as a fault.
 
 ## 8. Test it through a host
 
@@ -318,8 +304,19 @@ changes given by host id, in the host's 0 to 1 (`normalize` converts dB first),
 reads the modes' names through `parameter` and `text`, and carries the saved
 block through `save` and `load`.
 
-Learn and undo are driven on the plugin itself, since a host cannot reach them:
-the test arms the gain, feeds a controller through the processor, calls `idle`,
+Learn and undo are driven on the plugin itself, since a host cannot reach them.
+The test builds it as an exporter does, keeping the saved state a host would
+save and load through:
+
+```rust
+fn built() -> (Gain, Arc<SavedState>) {
+    let (params, parts) = Parts::for_plugin::<Gain>().expect("valid declarations");
+    let saved = Arc::clone(parts.saved());
+    (Gain::new(params, parts), saved)
+}
+```
+
+Then it arms the gain, feeds a controller through the processor, calls `idle`,
 and saves and reloads to check the mapping survives. Run the example's tests,
 this guide's check among them, with:
 

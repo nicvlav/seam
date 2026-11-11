@@ -757,6 +757,19 @@ default and still wrote each parameter four times. Refusing a default outside
 its range, writing a float's range as a range, and fixing ids when the set is
 frozen were choices made while planning, told to the owner that day.
 
+### D91. Who builds a plugin's parts
+
+[The decision](decisions.md#d91-who-builds-a-plugins-parts)
+
+The owner decided on 2026-11-10 that `Plugin::new` takes the parts Seam built
+and `Plugin::saved` goes, and, with D90, that a plugin declares its parameters
+in a function, so `Plugin::PARAMS` went too. That the plugin owns its parts and
+ticks them, rather than the engine, was a choice made while planning, told to
+the owner that day. Built on 2026-11-11, with three choices made while building
+it that wait for the owner: the fault for a plugin that keeps its parts and
+does not tick them, the line a refused declaration writes, and learn's refusal
+of a plugin that declares no MIDI input.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

@@ -2,9 +2,9 @@
 //! that is saved and undoable, and a gain that a MIDI controller can be
 //! learned to.
 //!
-//! It shows how a plugin joins Seam's parts: parameters, saved state, undo,
-//! the session, learn and the VST3 export. The guide `docs/first-plugin.md`
-//! walks through it.
+//! It shows a plugin that uses the parts Seam builds for it: parameters,
+//! saved state, undo, the session, learn and the VST3 export. The guide
+//! `docs/first-plugin.md` walks through it.
 //!
 //! Open: no exporter delivers MIDI events yet, so learn works only when a
 //! test drives the processor directly.
@@ -14,35 +14,20 @@ seam_host::export_vst3!(Gain);
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use seam_host::{
-    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status,
+    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
 };
-use seam_learn::{Config, Learn, LearnAudio, LearnError, Takes};
+use seam_learn::{Config, LearnAudio, LearnError, Takes};
 use seam_params::{
-    BindError, Bool, Changes, Choice, Choices, Float, Kind, ParamDecl, ParamSet, UiParams, Value,
+    Bool, BoolDecl, Changes, Choice, ChoiceDecl, Choices, Declarer, Float, FloatDecl, Params,
+    UiParams, Value,
 };
-use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
+use seam_session::{ApplyError, Participant, Registration, Section};
 use seam_undo::{Bound, History, HistoryError};
-
-/// The gain parameter's key.
-pub const GAIN: &str = "gain";
-/// The mode parameter's key.
-pub const MODE: &str = "mode";
-/// The bypass parameter's key.
-pub const BYPASS: &str = "bypass";
 
 const LABEL_KEY: &str = "label";
 const DEFAULT_LABEL: &str = "Untitled";
-
-/// Every parameter, in the order hosts list them.
-const PARAMS: &[ParamDecl] = &[
-    ParamDecl::new(GAIN, "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0).with_unit("dB"),
-    ParamDecl::new(MODE, "Mode", Kind::Choice(Mode::LABELS), 0.0),
-    ParamDecl::new(BYPASS, "Bypass", Kind::Bool, 0.0).as_bypass(),
-];
 
 /// What each mode does to the sound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,21 +56,26 @@ impl Choices for Mode {
     }
 }
 
-/// The parameters as the plugin reads them, each bound to its declaration.
+/// The parameters, in the order hosts list them, each declared where it is
+/// held.
 #[derive(Debug, Clone)]
-struct GainParams {
+pub struct GainParams {
     gain: Float,
     mode: Choice<Mode>,
     bypass: Bool,
 }
 
-impl GainParams {
-    fn bind(set: &ParamSet) -> Result<Self, BindError> {
-        Ok(GainParams {
-            gain: set.bind(GAIN)?,
-            mode: set.bind(MODE)?,
-            bypass: set.bind(BYPASS)?,
-        })
+impl Params for GainParams {
+    fn declare(p: &mut Declarer) -> Self {
+        GainParams {
+            gain: p.add(
+                FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0)
+                    .with_step(0.1)
+                    .with_unit("dB"),
+            ),
+            mode: p.add(ChoiceDecl::new("mode", "Mode", Mode::Clean)),
+            bypass: p.add(BoolDecl::new("bypass", "Bypass", false).as_bypass()),
+        }
     }
 }
 
@@ -113,12 +103,9 @@ impl Participant for LabelSection {
 /// The plugin, on the main thread.
 #[derive(Debug)]
 pub struct Gain {
-    saved: Arc<SavedState>,
+    parts: Parts,
     params: GainParams,
-    ui: UiParams,
-    session: SessionUi,
     history: History,
-    learn: Rc<RefCell<Learn>>,
     label: Value<String>,
     /// The session holds its participant weakly, so the plugin keeps it alive.
     _label_section: Rc<RefCell<LabelSection>>,
@@ -140,7 +127,7 @@ impl Gain {
 
     /// The parameter handle for an editor's writes, which undo records.
     pub fn ui(&self) -> &UiParams {
-        &self.ui
+        self.parts.params()
     }
 
     /// Undoes the last step; false when there was none.
@@ -170,15 +157,15 @@ impl Gain {
     ///
     /// # Errors
     ///
-    /// As [`Learn::arm`].
+    /// As [`Learn::arm`](seam_learn::Learn::arm).
     pub fn learn_gain(&mut self) -> Result<(), LearnError> {
         let gain = self.params.gain.id();
-        self.learn.borrow_mut().arm(gain, Takes::CONTROLLER)
+        self.parts.learn().arm(gain, Takes::CONTROLLER)
     }
 
     /// Whether a controller is learned to the gain.
     pub fn gain_is_learned(&self) -> bool {
-        self.learn.borrow().mapping(self.params.gain.id()).is_some()
+        self.parts.learn().mapping(self.params.gain.id()).is_some()
     }
 
     /// Tells the session the label moved, so the next save writes it.
@@ -212,38 +199,28 @@ impl Plugin for Gain {
         midi_output: false,
     };
 
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = GainParams;
 
     type Processor = GainProcessor;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid declarations");
-        let params = GainParams::bind(&set).expect("each parameter matches its declaration");
-        let session = Session::new(&set);
-        let saved = Arc::new(SavedState::new(&set, &session));
-        let session_ui = session.take_ui().expect("the first session UI handle");
-        let ui = set.take_ui().expect("the first UI handle");
+    fn new(params: GainParams, mut parts: Parts) -> Self {
+        let history = parts.undo(Bound::default());
+        parts
+            .midi_learn(Config::default())
+            .expect("learn's key is free");
 
-        let history = History::new(&ui, Bound::default()).expect("the first history");
-        history.enroll_params();
-        let label = Value::new(DEFAULT_LABEL.to_owned(), &set);
+        let label = Value::new(DEFAULT_LABEL.to_owned(), parts.set());
         history.enroll(&label, "Rename").expect("a new value");
         let label_section = Rc::new(RefCell::new(LabelSection(label.clone())));
-        let label_registration = session_ui
+        let label_registration = parts
+            .session()
             .register(LABEL_KEY, &label_section)
             .expect("a free key");
 
-        let (learn, _) = Learn::new(&set, Config::default());
-        let learn = Rc::new(RefCell::new(learn));
-        Learn::attach(&learn, &session_ui).expect("a free key");
-
         Gain {
-            saved,
+            parts,
             params,
-            ui,
-            session: session_ui,
             history,
-            learn,
             label_seen: label.changes(),
             label,
             _label_section: label_section,
@@ -251,21 +228,12 @@ impl Plugin for Gain {
         }
     }
 
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
-    }
-
     fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
-        let learn = self.learn.borrow_mut().replace_audio();
-        GainProcessor::new(self.params.clone(), learn)
+        GainProcessor::new(self.params.clone(), self.parts.learn_audio())
     }
 
     fn idle(&mut self) {
-        // Learn first: a mapping its poll commits reaches the session at the
-        // session's next tick, which is this one.
-        let _learned = self.learn.borrow_mut().poll();
-        self.session.tick();
-        self.history.tick();
+        self.parts.tick();
         self.label_moved();
     }
 }

@@ -6,9 +6,11 @@
 //! module natively, and the `cabi` module as a C ABI plus a generated header.
 //! One generic JUCE adapter turns that into AU, AUv3, AAX and hosting.
 //!
-//! The audio thread gets each block as a [`Block`] in [`Processor::process`]
-//! and reads its parameters from the [`ParamSet`](seam_params::ParamSet) that
-//! [`SavedState::set`] holds.
+//! Seam builds each instance's [`Parts`], its parameter set, session and
+//! saved state, from the plugin's declarations, and hands them to
+//! [`Plugin::new`]. The audio thread gets each block as a [`Block`] in
+//! [`Processor::process`], and reads the parameters the plugin handed its
+//! processor.
 //!
 //! What a host reads before creating an instance is [`PluginInfo`].
 //! [`SavedState`] is the saved block, the plugin's parameters and session as
@@ -29,28 +31,36 @@
 //!
 //! A plugin is one [`Plugin`] impl and one export macro at the root of its
 //! crate: `export_vst3!` for a VST3 module, or `export_cabi!` for the JUCE
-//! adapter's static library. [`Plugin::idle`]'s example adds undo, the
-//! session and MIDI learn.
+//! adapter's static library. [`Plugin::idle`]'s example adds undo and MIDI
+//! learn.
 //!
 //! ```no_run
-//! use std::sync::Arc;
-//!
 //! use seam_host::{
-//!     AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
+//!     AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
 //!     Status,
 //! };
-//! use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet};
-//! use seam_session::Session;
+//! use seam_params::{Declarer, Float, FloatDecl, Params};
+//!
+//! /// The parameters, each declared where it is held.
+//! #[derive(Clone)]
+//! struct GainParams {
+//!     gain: Float,
+//! }
+//!
+//! impl Params for GainParams {
+//!     fn declare(p: &mut Declarer) -> Self {
+//!         GainParams {
+//!             gain: p.add(FloatDecl::new("gain", "Gain", -24.0..=24.0, 0.0).with_unit("dB")),
+//!         }
+//!     }
+//! }
 //!
 //! /// The audio-thread half: scales every channel by the gain.
-//! struct Level {
-//!     params: AudioParams,
-//!     gain: ParamId,
-//! }
+//! struct Level(GainParams);
 //!
 //! impl Processor for Level {
 //!     fn process(&mut self, block: Block<'_, '_>) -> Status {
-//!         let gain = 10.0_f32.powf(self.params.value(self.gain) / 20.0);
+//!         let gain = 10.0_f32.powf(self.0.gain.get() / 20.0);
 //!         for channel in block.channels.iter_mut() {
 //!             for sample in channel.iter_mut() {
 //!                 *sample *= gain;
@@ -60,9 +70,9 @@
 //!     }
 //! }
 //!
-//! /// The main-thread half: it holds the saved state, and the parameter set in it.
+//! /// The main-thread half: it keeps the parameters Seam declared for it.
 //! struct Gain {
-//!     saved: Arc<SavedState>,
+//!     params: GainParams,
 //! }
 //!
 //! impl Plugin for Gain {
@@ -83,26 +93,16 @@
 //!         midi_input: false,
 //!         midi_output: false,
 //!     };
-//!     const PARAMS: &'static [ParamDecl] = &[
-//!         ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0)
-//!             .with_unit("dB"),
-//!     ];
+//!     type Params = GainParams;
 //!     type Processor = Level;
 //!
-//!     fn new() -> Self {
-//!         let set = ParamSet::from_decls(Self::PARAMS.iter().copied())
-//!             .expect("valid declarations");
-//!         Gain { saved: Arc::new(SavedState::new(&set, &Session::new(&set))) }
-//!     }
-//!
-//!     fn saved(&self) -> Arc<SavedState> {
-//!         Arc::clone(&self.saved)
+//!     fn new(params: GainParams, _parts: Parts) -> Self {
+//!         Gain { params }
 //!     }
 //!
 //!     // Everything the audio thread will touch is built here, on the main thread.
 //!     fn activate(&mut self, _setup: &ProcessSetup) -> Level {
-//!         let set = self.saved.set();
-//!         Level { params: set.audio(), gain: set.id("gain").expect("declared") }
+//!         Level(self.params.clone())
 //!     }
 //! }
 //!
@@ -118,6 +118,7 @@
 
 mod audio;
 mod info;
+mod parts;
 mod plugin;
 mod state;
 
@@ -157,5 +158,6 @@ pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
 pub use info::{AuCodes, Category, Feature, Layout, PluginInfo};
+pub use parts::Parts;
 pub use plugin::{Plugin, Processor, Tail};
 pub use state::{LoadError, MAX_STATE_BYTES, STATE_VERSION, SavedState};

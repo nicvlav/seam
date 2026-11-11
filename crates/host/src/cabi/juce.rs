@@ -3,6 +3,8 @@
 use std::fmt::Write as _;
 use std::ops::RangeInclusive;
 
+use seam_params::ParamSet;
+
 use crate::{Category, Plugin};
 
 /// The VST3 id JUCE's wrapper gives the bypass parameter it adds itself
@@ -34,11 +36,11 @@ const JUCE_MIDI_CONTROLLER_IDS: RangeInclusive<u32> = 0x6d63_6d00..=0x6d63_6d00 
 ///
 /// # Panics
 ///
-/// When two of `P`'s keys share the VST3 id JUCE derives from them
-/// ([`juce_param_id`]), or one has an id JUCE gives a parameter of its own:
-/// its bypass, its program list, and for a plugin that takes MIDI input, its
-/// MIDI controllers. JUCE would list only one of them, silently in a release
-/// build.
+/// When `P`'s declarations are refused. When two of `P`'s keys share the
+/// VST3 id JUCE derives from them ([`juce_param_id`]), or one has an id JUCE
+/// gives a parameter of its own: its bypass, its program list, and for a
+/// plugin that takes MIDI input, its MIDI controllers. JUCE would list only
+/// one of them, silently in a release build.
 ///
 /// # Examples
 ///
@@ -52,7 +54,9 @@ const JUCE_MIDI_CONTROLLER_IDS: RangeInclusive<u32> = 0x6d63_6d00..=0x6d63_6d00 
 /// assert!(cmake.contains("set(SEAM_PLUGIN_MANUFACTURER_CODE \"Exmp\")"));
 /// ```
 pub fn juce_settings<P: Plugin>(source: &str) -> String {
-    check_juce_ids(P::PARAMS.iter().map(|decl| decl.key), P::INFO.midi_input);
+    let (set, _) = ParamSet::declare::<P::Params>()
+        .unwrap_or_else(|error| panic!("{}: a declaration was refused: {error}", P::INFO.name));
+    check_juce_ids(set.ids().map(|id| set.decl(id).key), P::INFO.midi_input);
     let info = &P::INFO;
     let mut out = String::new();
     let _ = writeln!(

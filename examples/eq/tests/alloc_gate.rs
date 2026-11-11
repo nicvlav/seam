@@ -10,10 +10,12 @@ use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
 use seam_params::host_id;
 use seam_testkit::alloc::assert_no_allocations;
 
+mod common;
+use common::built;
+
 #[test]
 fn processing_and_retuning_never_allocate() {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     let set = saved.set();
     let program = set.program();
     let gain = set.id("mid.gain").expect("declared");

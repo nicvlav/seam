@@ -39,8 +39,9 @@ use timer::{Handle, Timer, abandon};
 #[cfg(feature = "cabi")]
 use crate::boundary::Patience;
 use crate::boundary::{AudioSlot, Lent, MainThread, Refused};
-use crate::faults::{Fault, Faults};
-use crate::{Layout, MAX_FRAMES, Plugin, SavedState, Tail};
+use crate::faults::{Fault, Faults, report_refused_declarations};
+use crate::parts::TickWatch;
+use crate::{Layout, MAX_FRAMES, Parts, Plugin, SavedState, Tail};
 
 /// What `tail` answers for a plugin whose output falls silent with its
 /// input; VST3's `kNoTail` and the C interface's `SEAM_TAIL_NONE`.
@@ -239,6 +240,9 @@ pub(crate) struct Main<P: Plugin, H> {
     /// Inside a tick: a release from one of the host's callbacks then
     /// leaks the engine, since the tick is still using it.
     ticking: Cell<bool>,
+    /// Tells a plugin that keeps its parts and lets a tick pass without
+    /// ticking them.
+    ticks: TickWatch,
     timer: RefCell<Option<Timer>>,
 }
 
@@ -336,8 +340,9 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     ///
     /// # Panics
     ///
-    /// When the plugin's parameter set has its host event drain taken: the
-    /// exporter owns it.
+    /// When the plugin's declarations are refused, once the reason is
+    /// reported as [`faults`](crate::faults) says, so the shell's guard
+    /// refuses the instance.
     pub(crate) fn new(host: Option<H>) -> Box<Self> {
         Self::build(host, MainThread::bound)
     }
@@ -359,11 +364,14 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         H: Send,
     {
         // SAFETY: of the main-thread state, the plugin and the host link
-        // are `Send` (the bounds above). So are the event drain and the
-        // `Cell`s and `RefCell`s around them. The one part that is not, the
-        // timer slot, stays `None`: `start_timer` starts none for state no
-        // thread owns. The state goes from thread to thread one loan at a
-        // time, and drops wherever the engine does.
+        // are `Send` (the bounds above), so the plugin holds no `Parts`,
+        // which are not. So are the event drain, the tick watch's weak
+        // count, and the `Cell`s and `RefCell`s around them. The one part
+        // that is not, the timer slot, stays `None`: `start_timer` starts
+        // none for state no thread owns. `build` hands the parts to the
+        // plugin on this thread and keeps none of them. The state goes from
+        // thread to thread one loan at a time, and drops wherever the engine
+        // does.
         Self::build(host, |main| unsafe { MainThread::unbound(main, patience) })
     }
 
@@ -371,12 +379,18 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         host: Option<H>,
         bind: impl FnOnce(Main<P, H>) -> MainThread<Main<P, H>>,
     ) -> Box<Self> {
-        let plugin = P::new();
-        let saved = plugin.saved();
-        let set = Arc::clone(saved.set());
+        let (params, parts) = Parts::for_plugin::<P>().unwrap_or_else(|error| {
+            report_refused_declarations(P::INFO.name, &error);
+            panic!("{}: a declaration was refused: {error}", P::INFO.name)
+        });
+        // Only what is `Send` is kept here: the parts go to the plugin.
+        let set = Arc::clone(parts.set());
+        let saved = Arc::clone(parts.saved());
+        let ticks = parts.watch();
         let drain = set
             .take_host_event_drain()
-            .expect("the exporter takes the set's host event drain; a plugin never does");
+            .expect("a set Seam just built still has its host event drain");
+        let plugin = P::new(params, parts);
         let layout = const { first_layout(P::INFO.layouts) };
         let answers = Answers::new(layout, &plugin);
         let main = Main {
@@ -388,6 +402,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             setup: Cell::new(None),
             active: Cell::new(false),
             ticking: Cell::new(false),
+            ticks,
             timer: RefCell::new(None),
         };
         let automation = Automation::new(set.len(), H::QUEUES);
@@ -671,7 +686,9 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         });
     }
 
-    /// The plugin's idle call, then what it did, told to the host.
+    /// The plugin's idle call, then what it did, told to the host. A plugin
+    /// that holds its parts and did not tick them in that call is counted
+    /// as a fault, once.
     ///
     /// A tick that a host's nested message loop delivers from inside one of the
     /// host's callbacks does nothing. The outer tick is still running, and the
@@ -687,6 +704,9 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             // A host's callback into the plugin from inside one of its own:
             // the next tick runs instead.
             Err(_) => return,
+        }
+        if main.ticks.missed() {
+            self.faults.record(Fault::Unticked);
         }
         self.tell_host(main);
     }

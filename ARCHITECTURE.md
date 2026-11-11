@@ -34,11 +34,12 @@ reading how Seam works inside, start with
   reserves are in `reservation.rs`, and the section it saves is
   `mappings/session.rs`.
 - `crates/ump`: Universal MIDI Packets, the event list MIDI travels in.
-- `crates/host`: the `Plugin` trait, the saved block (`SavedState`), and the
-  exporters behind features: `vst3`, and `cabi` (the C interface and generated
-  `include/seam.h`). The exporters are thin shells over one core, `engine`,
-  which holds the plugin's life and builds with no feature. CLAP is planned,
-  not built.
+- `crates/host`: the `Plugin` trait, the [parts](docs/glossary.md#parts) Seam
+  builds for each instance (`parts.rs`), the saved block (`SavedState`), and
+  the exporters behind features: `vst3`, and `cabi` (the C interface and
+  generated `include/seam.h`). The exporters are thin shells over one core,
+  `engine`, which holds the plugin's life and builds with no feature. CLAP is
+  planned, not built.
 - `crates/bridge`: the page protocol and the TypeScript generated from it.
 - `crates/testkit`: test tools: allocation gate, latches, expected assertions,
   drift check.
@@ -60,12 +61,14 @@ reading how Seam works inside, start with
 Read these in order to change what happens to a block.
 
 1. A plugin implements `Plugin` (`crates/host/src/plugin.rs`): its `INFO`, its
-   `PARAMS`, a saved state, and `activate`, which builds the `Processor`.
+   `Params`, `new`, which takes the parameters and the `Parts` Seam built from
+   them (`parts.rs`), and `activate`, which builds the `Processor`.
    `examples/eq/src/lib.rs` is a whole one, `examples/eq/src/params.rs` its
    parameters; `examples/gain/src/lib.rs` adds undo, a saved value and learn.
 2. An exporter (`vst3/component.rs`, `cabi/instance.rs`) turns the host's calls
    into calls on `Engine` (`crates/host/src/engine/mod.rs`), which holds the
-   instance's life: [activation](docs/glossary.md#activation), the
+   instance's life: building the plugin,
+   [activation](docs/glossary.md#activation), the
    [tick](docs/glossary.md#tick), what the host is told, teardown. The table
    below maps each entry point to its `Engine` method.
 3. A [block](docs/glossary.md#block) is `Engine::process` (`engine/process.rs`).
@@ -182,8 +185,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   at activation, takes it back at deactivation. A tick calls `Plugin::idle`
   about 60 times a second and then tells the host of the plugin's
   [edits](docs/glossary.md#edit). A session restore applies to its participants
-  on the plugin's idle, when that ticks its `SessionUi`; `Plugin::idle` says
-  what else it ticks, and in what order. The JUCE adapter ticks through JUCE on
+  on the plugin's idle, when that ticks its parts; `Parts::tick` says what it
+  ticks, and in what order. An exporter reports a plugin that keeps its parts
+  and does not tick them. The JUCE adapter ticks through JUCE on
   every platform. The VST3 exporter runs its own timer on Windows and macOS, and
   refuses to build for any other platform. There nothing would tick it: no edit
   would reach the host, and a load would never apply session sections to their
@@ -209,9 +213,7 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 
 ## Decided, not built
 
-- Dependency edges: `host` on `learn`, so an exporter refuses a plugin that uses
-  learn without declaring MIDI input; and a shell crate, `seam-webview`, on
-  `bridge` and wry.
+- Dependency edges: a shell crate, `seam-webview`, on `bridge` and wry.
 - The page path: wry inside a plugin window, Tauri for the standalone.
   `seam-webview` holds the wry glue (the IPC handler, the custom-scheme asset
   server, opening the page in a window). A release build serves the page from

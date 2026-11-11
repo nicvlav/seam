@@ -313,7 +313,7 @@ move its line here; when a decision gains code, add one.
 - `crates/bridge/src/typescript.rs`: `param_map`
 - `crates/host/src/cabi/abi.rs`: `SeamParamInfo::host_id`
 - `crates/host/src/cabi/juce.rs`: `juce_param_id`
-- `crates/host/src/plugin.rs`: `PARAMS`
+- `crates/host/src/plugin.rs`: `Plugin::Params`
 - `crates/host/src/vst3/mod.rs`: module
 - `crates/params/src/decl.rs`: `ParamId`
 - `crates/params/src/host_id.rs`: module
@@ -514,9 +514,11 @@ move its line here; when a decision gains code, add one.
 
 - `crates/host/src/boundary.rs`: module, `MainThread`
 - `crates/host/src/cabi/mod.rs`: `plugin_moving`, `Table`
-- `crates/host/src/engine/mod.rs`: `Engine::new`, `Engine::new_unbound`
+- `crates/host/src/engine/mod.rs`: `Engine::new`, `Engine::new_unbound`, `Engine::build`
+- `crates/host/src/parts.rs`: `Parts`
 - `crates/host/src/plugin.rs`: `Plugin`, `Plugin::new`
 - `crates/host/src/state.rs`: `SavedState::set`
+- `examples/eq/src/lib.rs`: `ExampleEq`
 - test `crates/host/src/cabi/tests.rs`: `the_exported_table_lends_a_send_plugin_to_any_thread_and_keeps_any_other_where_it_was_made`
 - test `crates/host/tests/plugin.rs`: module, `a_plugin_owning_main_thread_state_saves_and_loads_from_another_thread`
 
@@ -548,6 +550,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/cabi/abi.rs`: `SeamPlugin::idle`
 - `crates/host/src/cabi/mod.rs`: module
 - `crates/host/src/plugin.rs`: `Plugin::idle`
+- `crates/host/src/parts.rs`: `Parts::tick`
 - `crates/host/src/engine/mod.rs`: `Engine::start_timer`, `Engine::ticker`
 - `crates/host/src/engine/timer.rs`: module, `Timer`, `abandon`
 - `crates/host/src/vst3/component.rs`: `Component::initialize`
@@ -845,7 +848,10 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d80-upgrading-an-older-saved-block)
 
+- `crates/host/src/parts.rs`: `Parts::for_plugin`
+- `crates/host/src/plugin.rs`: `Plugin::SCHEMA_VERSION`, `Plugin::migrate`
 - `crates/host/src/state.rs`: `STATE_VERSION`, `LastLoad::versions`, `Migration`, `SavedState::with_migration`, `SavedState::save`, `SavedState::load`, `Unknown`
+- test `crates/host/src/engine/tests.rs`: `Renamed`, `the_plugin_s_migration_upgrades_an_older_block`
 - test `crates/host/tests/state.rs`: `an_older_block_is_migrated_before_it_loads_and_one_that_cannot_be_changes_nothing`, `a_newer_builds_block_keeps_its_version_and_values_through_an_older_builds_save`, `a_fresh_state_and_one_that_loaded_an_older_block_save_their_own_version`, `unknown_top_level_keys_are_kept_saved_after_extra_in_key_order_and_replaced_by_the_next_load`, `a_block_within_the_limit_that_would_save_back_past_it_is_refused_and_changes_nothing`, `the_migration_runs_only_for_a_block_of_an_older_plugin_version_and_gets_that_version`
 
 ### D81. A registration made while a panic unwinds
@@ -923,7 +929,8 @@ move its line here; when a decision gains code, add one.
 - `crates/params/src/changes.rs`: module, `Changes`, `Changes::new`, `Changes::moved`, `stamp`, `mix`
 - `crates/params/src/ui.rs`: `UiParams::write`, `UiParams::user_write_cell`
 - `examples/gain/src/lib.rs`: `Mode`, `GainParams`, `GainProcessor::retune`
-- `examples/eq/src/lib.rs`: `EqParams`, `BandParams`, `EqProcessor::retune`
+- `examples/eq/src/lib.rs`: `EqProcessor::retune`
+- `examples/eq/src/params.rs`: `EqParams`, `BandParams`
 - test `crates/params/tests/typed.rs`: module, `a_parameter_bound_to_another_kind_is_refused_with_its_key`, `a_key_nothing_is_declared_under_is_refused_by_name`, `a_choice_whose_enum_has_other_labels_is_refused_with_its_key`, `each_parameter_reads_with_get_what_the_ui_wrote`, `a_typed_parameter_and_its_id_read_one_store`, `a_parameter_outlives_its_set_and_still_reads_its_store`, `a_clone_is_the_same_parameter_and_two_parameters_are_not`, `a_write_through_another_sets_ui_is_a_contract_panic_and_changes_nothing`, `a_group_moves_once_per_write_to_a_member_and_never_for_another`, `a_group_asked_about_other_parameters_than_last_time_moves`, `reads_and_the_group_check_run_under_the_audio_thread_mark`, `dropping_a_typed_parameter_under_the_audio_thread_mark_is_a_contract_panic`, `typed_parameters_and_a_group_check_cross_threads_whatever_the_enum`
 - test `crates/params/src/changes.rs`: `no_two_small_groups_share_an_identity`
 - test `crates/params/src/param.rs`: `the_last_parameter_dropped_frees_its_store_after_the_set_has_gone`, `decoding_is_total_and_inverts_encoding_on_stored_values`
@@ -941,6 +948,23 @@ move its line here; when a decision gains code, add one.
 - test `crates/params/tests/declare.rs`: module, `each_declaration_makes_the_parameter_a_person_would_declare_by_hand`, `a_struct_lists_in_the_builders_order_and_each_id_is_its_keys`, `a_key_is_refused_by_the_rules_a_table_row_meets`, `what_only_the_whole_set_shows_is_refused_when_it_is_built`, `a_group_and_a_choices_labels_are_refused_by_their_rules`, `a_range_and_a_default_are_refused_by_their_rules`, `the_first_refusal_wins_and_declare_runs_to_its_end`, `one_key_in_two_nested_structs_is_refused_when_the_set_is_built`, `asking_for_an_id_inside_declare_is_a_contract_panic`, `extend_over_a_table_gives_the_set_from_decls_gives`, `a_struct_of_no_parameters_makes_an_empty_set`, `a_declared_parameter_reads_writes_and_reports_changes`, `checked_names_the_rule_a_declaration_breaks`
 - test `crates/params/src/declare/refusals.rs`: module, `RangeBackwards`, `DefaultOutside`, `EmptyKey`, `KeyWithSlash`, `KeyTooLong`, `OneLabel`, `LabelsDifferInCase`, `FloatGivenBool`, `ChoiceGivenOtherEnum`, `BypassOnFloat`
 - test `crates/params/src/declare/rules.rs`: `whitespace_is_read_as_trim_reads_it`, `the_key_length_rule_states_the_longest_key`, `a_char_is_split_off_as_str_chars_reads_it`
+
+### D91. Who builds a plugin's parts
+
+[Record section](decisions.md#d91-who-builds-a-plugins-parts)
+
+- `crates/host/src/cabi/juce.rs`: `juce_settings`
+- `crates/host/src/engine/mod.rs`: `Engine::build`, `Engine::tick`, `Main::ticks`
+- `crates/host/src/faults.rs`: module, `Fault::Unticked`, `report_refused_declarations`
+- `crates/host/src/parts.rs`: module, `Parts`, `Parts::for_plugin`, `Parts::undo`, `Parts::midi_learn`, `Parts::learn`, `Parts::learn_audio`, `Parts::tick`, `Parts::watch`, `TickWatch`, `TickWatch::missed`
+- `crates/host/src/plugin.rs`: `Plugin`, `Plugin::Params`, `Plugin::new`, `Plugin::idle`
+- `examples/eq/src/lib.rs`: `ExampleEq`
+- `examples/eq/src/params.rs`: `EqParams`, `BandParams::declare`
+- `examples/gain/src/lib.rs`: `Gain`, `GainParams`
+- test `crates/host/src/cabi/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter`
+- test `crates/host/src/engine/tests.rs`: `Forgetful`, `the_parameters_new_is_handed_are_the_ones_the_host_writes`, `a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once`
+- test `crates/host/src/vst3/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter`
+- test `crates/host/tests/plugin.rs`: `one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture`, `learn_is_refused_to_a_plugin_that_takes_no_midi`
 
 ## Parameters
 
@@ -1543,7 +1567,7 @@ move its line here; when a decision gains code, add one.
 
 - `Cargo.toml`: `float_roundtrip`
 - `crates/host/src/lib.rs`: module
-- `crates/host/src/plugin.rs`: `Plugin::saved`
+- `crates/host/src/parts.rs`: `Parts::saved`
 - `crates/host/src/state.rs`: module, `STATE_VERSION`, `SEAM_VERSION`, `PLUGIN_VERSION`, `SavedState::save`, `SavedState::with_migration`
 - `crates/host/src/vst3/mod.rs`: module
 - test `crates/host/tests/state.rs`: module, `a_block_is_version_parameters_extra_in_that_order_with_each_value_typed_by_kind`, `save_load_save_gives_the_same_bytes_on_linear_skewed_and_stepped_ranges`, `a_save_racing_loads_writes_one_block_or_the_other_never_a_mix`, `save_load_save_is_a_fixpoint_for_any_double_in_a_section_or_a_kept_key`
@@ -1557,7 +1581,7 @@ move its line here; when a decision gains code, add one.
 - `adapters/juce/SeamPluginProcessor.cpp`: `PluginProcessor::setStateInformation`
 - `crates/host/src/cabi/abi.rs`: `SeamPlugin::load`
 - `crates/host/src/cabi/mod.rs`: `load`
-- `crates/host/src/plugin.rs`: `Plugin::saved`
+- `crates/host/src/parts.rs`: `Parts::saved`
 - `crates/host/src/state.rs`: `SavedState::load`, `versions`, `whole`
 - `crates/host/src/vst3/component.rs`: `Component::setState`
 - `crates/host/src/vst3/stream.rs`: `read_all`

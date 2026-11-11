@@ -1,21 +1,44 @@
 //! A plugin for the fuzz targets that load saved state: parameters of every
 //! kind and two session participants, one that takes strings only and one
-//! that takes anything. The plugin keeps its session handle, and
-//! [`Plugin::idle`] ticks it, so a target that ticks after a load makes the
-//! restored sections reach the participants.
+//! that takes anything. The plugin keeps its parts, and [`Plugin::idle`]
+//! ticks them, so a target that ticks after a load makes the restored
+//! sections reach the participants.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status,
+    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    SavedState, Status,
 };
-use seam_params::{Kind, ParamDecl, ParamSetBuilder};
-use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
+use seam_params::{Declarer, Kind, ParamDecl, Params};
+use seam_session::{ApplyError, Participant, Registration, Section, SessionUi};
 
 const MODES: &[&str] = &["low", "band", "high"];
+
+/// Parameters of every kind.
+const PARAMS: &[ParamDecl] = &[
+    decl(
+        "freq",
+        Kind::continuous(20.0, 20_000.0, 0.0, Some(1_000.0)),
+        1_000.0,
+    ),
+    decl("gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0),
+    decl("on", Kind::Bool, 1.0),
+    decl("mode", Kind::Choice(MODES), 1.0),
+    decl("steps", Kind::continuous(0.0, 10.0, 3.0, None), 3.0),
+];
+
+/// The plugin's parameters, declared from [`PARAMS`].
+pub struct Table;
+
+impl Params for Table {
+    fn declare(p: &mut Declarer) -> Self {
+        p.extend(PARAMS.iter().copied());
+        Table
+    }
+}
 
 const fn decl(key: &'static str, kind: Kind, default: f32) -> ParamDecl {
     ParamDecl::new(key, key, kind, default)
@@ -86,14 +109,24 @@ impl<P: Participant + 'static> Held<P> {
 
 /// The fuzzed plugin.
 pub struct Fuzzed {
-    saved: Arc<SavedState>,
-    /// Held so the registrations stay live, and ticked from `idle`.
-    ui: SessionUi,
+    /// Ticked from `idle`.
+    parts: Parts,
     notes: Held<Notes>,
     _anything: Held<Anything>,
 }
 
 impl Fuzzed {
+    /// Builds the plugin as an exporter does.
+    pub fn built() -> Self {
+        let (params, parts) = Parts::for_plugin::<Fuzzed>().expect("valid declarations");
+        Fuzzed::new(params, parts)
+    }
+
+    /// The saved state a host's save and load go through.
+    pub fn saved(&self) -> &Arc<SavedState> {
+        self.parts.saved()
+    }
+
     /// The text the notes participant holds.
     pub fn notes(&self) -> String {
         self.notes.participant.borrow().0.clone()
@@ -127,41 +160,20 @@ impl Plugin for Fuzzed {
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = &[
-        decl(
-            "freq",
-            Kind::continuous(20.0, 20_000.0, 0.0, Some(1_000.0)),
-            1_000.0,
-        ),
-        decl("gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0),
-        decl("on", Kind::Bool, 1.0),
-        decl("mode", Kind::Choice(MODES), 1.0),
-        decl("steps", Kind::continuous(0.0, 10.0, 3.0, None), 3.0),
-    ];
+    type Params = Table;
     type Processor = Silent;
 
-    fn new() -> Self {
-        let mut builder = ParamSetBuilder::new();
-        for &decl in Self::PARAMS {
-            builder.add(decl).expect("valid");
-        }
-        let set = builder.build();
-        let session = Session::new(&set);
-        let ui = session.take_ui().expect("the first UI handle");
+    fn new(_: Table, parts: Parts) -> Self {
+        let ui = parts.session();
         Fuzzed {
-            saved: Arc::new(SavedState::new(&set, &session)),
-            notes: Held::new(&ui, "notes", Notes(String::new())),
-            _anything: Held::new(&ui, "anything", Anything(Section::Null)),
-            ui,
+            notes: Held::new(ui, "notes", Notes(String::new())),
+            _anything: Held::new(ui, "anything", Anything(Section::Null)),
+            parts,
         }
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
     }
 
     fn idle(&mut self) {
-        self.ui.tick();
+        self.parts.tick();
     }
 
     fn activate(&mut self, _setup: &ProcessSetup) -> Silent {
@@ -175,12 +187,12 @@ mod tests {
 
     #[test]
     fn a_loaded_section_reaches_its_participant_after_a_tick() {
-        let mut first = Fuzzed::new();
+        let mut first = Fuzzed::built();
         first.set_notes("hello");
         first.idle();
         let block = first.saved().save();
 
-        let mut second = Fuzzed::new();
+        let mut second = Fuzzed::built();
         assert!(second.saved().load(&block).is_ok());
         second.idle();
         assert_eq!(second.notes(), "hello");

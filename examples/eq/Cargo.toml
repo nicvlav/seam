@@ -32,7 +32,6 @@ cabi = ["seam-host/cabi"]
 [dependencies]
 seam-host.workspace = true
 seam-params.workspace = true
-seam-session.workspace = true
 
 [dev-dependencies]
 seam-host = { workspace = true, features = ["vst3", "cabi", "test-host"] }

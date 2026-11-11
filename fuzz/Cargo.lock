@@ -36,6 +36,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "crossbeam-utils"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -239,10 +245,24 @@ name = "seam-host"
 version = "0.1.0"
 dependencies = [
  "loom",
+ "seam-learn",
+ "seam-params",
+ "seam-session",
+ "seam-ump",
+ "seam-undo",
+ "serde_json",
+]
+
+[[package]]
+name = "seam-learn"
+version = "0.1.0"
+dependencies = [
+ "loom",
  "seam-params",
  "seam-session",
  "seam-ump",
  "serde_json",
+ "triple_buffer",
 ]
 
 [[package]]
@@ -263,6 +283,13 @@ dependencies = [
 [[package]]
 name = "seam-ump"
 version = "0.1.0"
+
+[[package]]
+name = "seam-undo"
+version = "0.1.0"
+dependencies = [
+ "seam-params",
+]
 
 [[package]]
 name = "serde"
@@ -406,6 +433,15 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "triple_buffer"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e875ab7068a75b74f419da453927e05527c36f0001b3c7aad3ce443640683487"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]

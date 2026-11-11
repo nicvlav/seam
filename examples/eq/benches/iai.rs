@@ -8,7 +8,7 @@ use std::hint::black_box;
 
 use iai_callgrind::{library_benchmark, library_benchmark_group, main};
 use seam_example_eq::ExampleEq;
-use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, EventList, Layout, Parts, Plugin, ProcessSetup, Processor};
 use seam_params::{AudioParams, ParamId};
 
 const FRAMES: usize = 256;
@@ -25,9 +25,9 @@ struct Rig {
 
 /// An active EQ with a block already processed, so every filter is tuned.
 fn rig() -> Rig {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
-    let set = saved.set();
+    let (params, parts) = Parts::for_plugin::<ExampleEq>().expect("valid declarations");
+    let set = std::sync::Arc::clone(parts.set());
+    let mut plugin = ExampleEq::new(params, parts);
     let processor = plugin.activate(&ProcessSetup {
         sample_rate: 48_000.0,
         max_frames: FRAMES,
