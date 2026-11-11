@@ -770,6 +770,17 @@ it that wait for the owner: the fault for a plugin that keeps its parts and
 does not tick them, the line a refused declaration writes, and learn's refusal
 of a plugin that declares no MIDI input.
 
+### D92. When a saved plain value is captured
+
+[The decision](decisions.md#d92-when-a-saved-plain-value-is-captured)
+
+The owner decided on 2026-11-10 that a value saved through `Parts::save` is
+captured at the tick, not at the write. Skipping a restore's write, so that a
+load is captured once, was a choice made while planning, told to the owner
+that day. Built on 2026-11-11, with one choice made while building it that
+waits for the owner: a value serde cannot write as JSON fails a debug
+assertion, and saves nothing in a release build.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

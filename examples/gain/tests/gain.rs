@@ -81,6 +81,8 @@ fn the_host_sees_three_named_modes_and_one_bypass() {
 fn the_label_saves_and_loads_back() {
     let (mut plugin, saved) = built();
     plugin.set_label("Drum bus");
+    // The label is captured for the save at the next tick.
+    plugin.idle();
     let block = saved.save();
 
     // Through the exporter, as a host reopening the project.
@@ -94,7 +96,11 @@ fn the_label_saves_and_loads_back() {
     assert_eq!(reopened.label(), "Untitled");
     reopened.idle();
     assert_eq!(reopened.label(), "Drum bus");
-    assert_eq!(reopened.undo(), Ok(false), "a load leaves nothing to undo");
+    assert_eq!(
+        reopened.history().undo(),
+        Ok(false),
+        "a load leaves nothing to undo"
+    );
 }
 
 #[test]
@@ -104,35 +110,36 @@ fn undo_and_redo_restore_the_label_and_its_saved_state() {
     plugin.idle();
     plugin.set_label("Lead vocals");
 
-    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.label(), "Vocals");
+    plugin.idle();
     let saved = String::from_utf8(saved.save()).expect("UTF-8");
     assert!(saved.contains(r#""label":"Vocals""#), "{saved}");
 
-    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.label(), "Untitled");
-    assert_eq!(plugin.redo(), Ok(true));
+    assert_eq!(plugin.history().redo(), Ok(true));
     assert_eq!(plugin.label(), "Vocals");
 }
 
 #[test]
 fn two_lone_writes_are_two_steps_and_the_labels_sets_between_ticks_are_one() {
-    let (mut plugin, _) = built();
+    let (plugin, _) = built();
     let gain = plugin.ui().set().id(GAIN).expect("declared");
 
     // Each lone write is a gesture of its own, so each is a step. Undo
     // records what changed since the last tick before it undoes.
     assert!(plugin.ui().write(gain, -6.0));
     assert!(plugin.ui().write(gain, -12.0));
-    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.ui().value(gain), -6.0);
 
     // The label's sets between two ticks are one step, the latest winning.
     plugin.set_label("Vocals");
     plugin.set_label("Lead vocals");
-    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.label(), "Untitled");
-    assert_eq!(plugin.undo(), Ok(true));
+    assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.ui().value(gain), 0.0);
 }
 

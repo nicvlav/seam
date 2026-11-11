@@ -305,9 +305,9 @@ target the plugin registers, written on the UI thread in [bursts](#burst)
 
 One call of [`Plugin::idle`](../crates/host/src/plugin.rs), about 60 times a
 second on the main thread for the instance's life, editor open or not. "Once per
-UI tick" means from that call: `Learn::poll`, `SessionUi::tick` and
-`History::tick` run there, through
-[`Parts::tick`](../crates/host/src/parts.rs).
+UI tick" means from that call: `Learn::poll`, `SessionUi::tick`,
+`History::tick` and the capture of the values `Parts::save` keeps saved run
+there, through [`Parts::tick`](../crates/host/src/parts.rs).
 
 ### Tier
 
