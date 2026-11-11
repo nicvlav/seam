@@ -14,22 +14,23 @@
     )
 )]
 
-use crate::{AudioParams, ParamId};
+use crate::Param;
 
-/// A group of up to `N` parameters and the change counts it last saw, so a
-/// processor asks once per block whether any of them moved.
+/// What a reader last saw of a group of parameters, so a processor asks once
+/// per block whether any of them moved.
 ///
 /// A processor keeps one per group of parameters it derives something from,
 /// a filter's coefficients say, and recomputes only when
-/// [`moved`](Self::moved) answers true. The group lives inline, so the check
-/// is a load per member and a compare: no allocation, lock or pointer to
-/// follow. [`Watch`](crate::Watch) is its UI-thread relative, for one
-/// parameter on one surface.
+/// [`moved`](Self::moved) answers true. It holds no parameter, only a stamp:
+/// the members come with each call, and may be of different kinds. The check
+/// is a load per member and a compare: no allocation or lock.
+/// [`Watch`](crate::Watch) is its UI-thread relative, for one parameter on
+/// one surface.
 ///
 /// # Examples
 ///
 /// ```
-/// use seam_params::{Changes, Float, Handle, Kind, ParamDecl, ParamSet};
+/// use seam_params::{Changes, Float, Kind, ParamDecl, ParamSet};
 ///
 /// let set = ParamSet::from_decls([
 ///     ParamDecl::new("freq", "Frequency", Kind::continuous(20.0, 20_000.0, 1.0, None), 1_000.0),
@@ -41,89 +42,70 @@ use crate::{AudioParams, ParamId};
 /// let mix: Float = set.bind("mix")?;
 /// let audio = set.audio();
 ///
-/// let mut filter: Changes<2> = Changes::new([freq.id(), q.id()]);
-/// assert!(filter.moved(&audio)); // the first check: tune from the defaults
-/// assert!(!filter.moved(&audio));
+/// let mut filter = Changes::new();
+/// assert!(filter.moved([&freq, &q])); // the first check: tune from the defaults
+/// assert!(!filter.moved([&freq, &q]));
 ///
 /// audio.host_write(mix.id(), 0.5); // outside the group
-/// assert!(!filter.moved(&audio));
+/// assert!(!filter.moved([&freq, &q]));
 /// audio.host_write(q.id(), 0.5);
-/// assert!(filter.moved(&audio));
-/// assert!(!filter.moved(&audio));
+/// assert!(filter.moved([&freq, &q]));
+/// assert!(!filter.moved([&freq, &q]));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Clone)]
-pub struct Changes<const N: usize> {
-    /// The members, in `ids[..len]`; the slots past them are unused.
-    ids: [ParamId; N],
-    len: usize,
-    /// The sum of the members' counts at the last check; `None` before it.
-    seen: Option<u64>,
+#[derive(Debug, Clone, Default)]
+pub struct Changes {
+    /// Which members, and the sum of their counts, at the last check; `None`
+    /// before it.
+    seen: Option<(u64, u64)>,
 }
 
-impl<const N: usize> Changes<N> {
-    /// Creates a group of the parameters `ids`, which has seen nothing yet,
-    /// so its first [`moved`](Self::moved) answers true.
+impl Changes {
+    /// Creates one that has seen nothing yet, so its first
+    /// [`moved`](Self::moved) answers true.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns whether any of `members` took a write since the last call, a
+    /// repeated value included. True at the first call, and when `members`
+    /// are other parameters than last time.
     ///
-    /// The type says how many it may hold, so a group's size may vary up to
-    /// `N`: a filter band with a gain and one without can share a type.
-    ///
-    /// # Panics
-    ///
-    /// When `ids` holds more than `N` parameters.
+    /// Atomics only: it never locks or allocates.
     ///
     /// # Examples
     ///
     /// ```
-    /// use seam_params::{Changes, Kind, ParamDecl, ParamSet};
+    /// use seam_params::{Bool, Changes, Float, Kind, ParamDecl, ParamSet};
     ///
-    /// let set = ParamSet::from_decls([ParamDecl::new("on", "On", Kind::Bool, 1.0)])?;
-    /// let on = set.id("on").ok_or("declared")?;
+    /// let set = ParamSet::from_decls([
+    ///     ParamDecl::new("gain", "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0),
+    ///     ParamDecl::new("on", "On", Kind::Bool, 1.0),
+    /// ])?;
+    /// let gain: Float = set.bind("gain")?;
+    /// let on: Bool = set.bind("on")?;
     ///
-    /// // Room for four, holding one.
-    /// let mut band: Changes<4> = Changes::new([on]);
-    /// assert!(band.moved(&set.audio()));
+    /// let mut band = Changes::new();
+    /// assert!(band.moved([&gain, &on])); // two kinds in one group
+    /// assert!(!band.moved([&gain, &on]));
+    /// assert!(band.moved([&gain])); // another group than last time
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[expect(
-        clippy::panic,
-        reason = "runs where the processor is built, off the audio thread; a group larger than its type is a bug in the plugin, documented under Panics"
-    )]
-    pub fn new(ids: impl IntoIterator<Item = ParamId>) -> Self {
-        let mut slots = [ParamId::from_index(0); N];
-        let mut len = 0;
-        for id in ids {
-            let Some(slot) = slots.get_mut(len) else {
-                panic!("a Changes<{N}> holds at most {N} parameters");
-            };
-            *slot = id;
-            len = len.saturating_add(1);
-        }
-        Changes {
-            ids: slots,
-            len,
-            seen: None,
-        }
-    }
-
-    fn members(&self) -> &[ParamId] {
-        self.ids.get(..self.len).unwrap_or_default()
-    }
-
-    /// Returns whether any parameter in the group took a write since the
-    /// last call, a repeated value included, and true at the first call.
-    /// [`Changes`] shows it answering.
-    ///
-    /// Atomics only: it never locks or allocates.
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn moved(&mut self, params: &AudioParams) -> bool {
-        let set = params.set();
-        // Each count only grows, so their sum moves whenever one does. It
-        // would come back round only after 2^64 writes.
-        let now = self
-            .members()
+    pub fn moved<const N: usize>(&mut self, members: [&dyn Param; N]) -> bool {
+        let now = members
             .iter()
-            .fold(0_u64, |sum, &id| sum.wrapping_add(set.changes(id)));
+            .fold((0_u64, 0_u64), |(identity, count), member| {
+                let (address, changes) = member.stamp();
+                // Each count only grows, so their sum moves whenever one
+                // does; it would come back round only after 2^64 writes. The
+                // identity mixes in each member's address, in order, so
+                // another group reads as a move.
+                (
+                    identity.rotate_left(7) ^ address as u64,
+                    count.wrapping_add(changes),
+                )
+            });
         if self.seen == Some(now) {
             return false;
         }

@@ -26,7 +26,7 @@ use seam_host::{
     AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
     SavedState, Status,
 };
-use seam_params::{AudioParams, BindError, Bool, Changes, Float, Handle, ParamDecl, ParamSet};
+use seam_params::{BindError, Bool, Changes, Float, ParamDecl, ParamSet};
 use seam_session::Session;
 
 use crate::dsp::{Biquad, Shape, coefficients, decibels_to_gain};
@@ -41,7 +41,7 @@ pub struct ExampleEq {
 }
 
 /// The parameters as the EQ reads them, each bound to its declaration.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct EqParams {
     bands: [BandParams; 6],
     output_on: Bool,
@@ -49,7 +49,7 @@ struct EqParams {
 }
 
 /// One band's shape and parameters; a high-pass has no gain.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct BandParams {
     shape: Shape,
     on: Bool,
@@ -109,7 +109,7 @@ impl Plugin for ExampleEq {
     fn new() -> Self {
         let set =
             ParamSet::from_decls(PARAMS.iter().copied()).expect("the EQ's declarations are valid");
-        let params = EqParams::bind(&set).expect("each handle matches its declaration");
+        let params = EqParams::bind(&set).expect("each parameter matches its declaration");
         let session = Session::new(&set);
         ExampleEq {
             saved: Arc::new(SavedState::new(&set, &session)),
@@ -122,7 +122,7 @@ impl Plugin for ExampleEq {
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> EqProcessor {
-        EqProcessor::new(self.saved.set(), self.params, setup.sample_rate)
+        EqProcessor::new(self.params.clone(), setup.sample_rate)
     }
 }
 
@@ -130,7 +130,6 @@ impl Plugin for ExampleEq {
 /// channels; any further channels pass through.
 #[derive(Debug)]
 pub struct EqProcessor {
-    audio: AudioParams,
     sample_rate: f64,
     bands: [BandState; 6],
     output: OutputState,
@@ -139,8 +138,8 @@ pub struct EqProcessor {
 #[derive(Debug)]
 struct BandState {
     params: BandParams,
-    /// Its parameters, which the filter's coefficients are made from.
-    changes: Changes<4>,
+    /// What the filter's coefficients were last made from.
+    changes: Changes,
     bypassed: bool,
     filter: Biquad,
 }
@@ -149,31 +148,26 @@ struct BandState {
 struct OutputState {
     on: Bool,
     gain_db: Float,
-    changes: Changes<2>,
+    changes: Changes,
     /// `None` while the output gain is off.
     gain: Option<f32>,
 }
 
 impl EqProcessor {
-    fn new(set: &Arc<ParamSet>, params: EqParams, sample_rate: f64) -> Self {
-        let bands = params.bands.map(|band| {
-            let ids = [band.on.id(), band.frequency.id(), band.q.id()];
-            BandState {
-                params: band,
-                changes: Changes::new(ids.into_iter().chain(band.gain.map(Handle::id))),
-                bypassed: false,
-                filter: Biquad::default(),
-            }
+    fn new(params: EqParams, sample_rate: f64) -> Self {
+        let bands = params.bands.map(|band| BandState {
+            params: band,
+            changes: Changes::new(),
+            bypassed: false,
+            filter: Biquad::default(),
         });
-        let (on, gain_db) = (params.output_on, params.output_gain);
         let mut processor = EqProcessor {
-            audio: set.audio(),
             sample_rate,
             bands,
             output: OutputState {
-                on,
-                gain_db,
-                changes: Changes::new([on.id(), gain_db.id()]),
+                on: params.output_on,
+                gain_db: params.output_gain,
+                changes: Changes::new(),
                 gain: None,
             },
         };
@@ -193,27 +187,32 @@ impl EqProcessor {
         )
     )]
     fn retune(&mut self) {
-        let audio = &self.audio;
         for band in &mut self.bands {
-            if !band.changes.moved(audio) {
+            let params = &band.params;
+            let (on, frequency, q) = (&params.on, &params.frequency, &params.q);
+            let moved = match &params.gain {
+                Some(gain) => band.changes.moved([on, frequency, q, gain]),
+                None => band.changes.moved([on, frequency, q]),
+            };
+            if !moved {
                 continue;
             }
-            let params = band.params;
-            band.bypassed = !audio.value(params.on);
-            let gain_db = params.gain.map_or(0.0, |gain| audio.value(gain));
+            band.bypassed = !on.get();
+            let gain_db = params.gain.as_ref().map_or(0.0, Float::get);
             band.filter.coefficients = coefficients(
                 params.shape,
                 gain_db,
-                audio.value(params.frequency),
-                audio.value(params.q),
+                frequency.get(),
+                q.get(),
                 self.sample_rate,
             );
         }
         let output = &mut self.output;
-        if output.changes.moved(audio) {
-            output.gain = audio
-                .value(output.on)
-                .then(|| decibels_to_gain(audio.value(output.gain_db)));
+        if output.changes.moved([&output.on, &output.gain_db]) {
+            output.gain = output
+                .on
+                .get()
+                .then(|| decibels_to_gain(output.gain_db.get()));
         }
     }
 }

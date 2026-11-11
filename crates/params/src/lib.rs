@@ -7,16 +7,16 @@
 //! a [gesture], whether undo records it, and when the UI shows it.
 //!
 //! - [`ParamSetBuilder`] checks [`ParamDecl`]s once and freezes them into a
-//!   [`ParamSet`], with one atomic value cell and change counter each.
+//!   [`ParamSet`], with one store each: an atomic value and change counter.
 //! - One handle per writer: [`AudioParams`] (host and [learned
 //!   writes][learned-write]), [`UiParams`] (user [`Gesture`]s, [`Edit`]s, undo
 //!   replays) and [`ProgramParams`] ([syncs][sync] and a saved state's
 //!   [`Load`], a [restore]).
-//! - A typed handle, [`Float`], [`Bool`] or [`Choice`], is a parameter as
-//!   plugin code holds it: [`ParamSet::bind`] checks it against the
-//!   declaration once, and each read returns an `f32`, a `bool` or the
-//!   plugin's own enum. [`Changes`] tells the audio thread when any of a group
-//!   moved.
+//! - A typed parameter, [`Float`], [`Bool`] or [`Choice`], is a parameter as
+//!   plugin code holds it: it carries its store, [`ParamSet::bind`] checks it
+//!   against the declaration once, and [`get`](Float::get) returns an `f32`, a
+//!   `bool` or the plugin's own enum, on any thread. [`Changes`] tells the
+//!   audio thread when any of a group moved.
 //! - [`Value`] and [`List`] hold plugin state that is not a parameter, and
 //!   undo enrols them.
 //! - A [`Watch`] (a [watch]) shows one parameter on a [surface]; a
@@ -38,28 +38,28 @@
 //!
 //! # Examples
 //!
-//! A processor holds the audio thread's handle and a typed handle per
-//! parameter, bound once when the plugin is built, and recomputes only when one
-//! moved. It holds [`AudioParams`], not an `Arc<ParamSet>`, so a debug build
-//! catches a drop on the audio thread that would free the set.
+//! A processor holds a typed parameter for each one it reads, bound once when
+//! the plugin is built, and recomputes only when one moved. Each carries its
+//! store, so the processor needs no handle to the set. It is dropped off the
+//! audio thread, and a debug build catches a drop there, which could free a
+//! store.
 //!
 //! ```
-//! use seam_params::{AudioParams, Bool, Changes, Float, Handle, Kind, ParamDecl, ParamSet};
+//! use seam_params::{Bool, Changes, Float, Kind, ParamDecl, ParamSet};
 //!
 //! struct Processor {
-//!     audio: AudioParams,
 //!     gain: Float,
 //!     mute: Bool,
-//!     changes: Changes<2>,
+//!     changes: Changes,
 //!     factor: f32,
 //! }
 //!
 //! impl Processor {
 //!     /// Called once per block, on the audio thread.
 //!     fn retune(&mut self) {
-//!         if self.changes.moved(&self.audio) {
-//!             let decibels = self.audio.value(self.gain); // an f32, in dB
-//!             let muted = self.audio.value(self.mute); // a bool
+//!         if self.changes.moved([&self.gain, &self.mute]) {
+//!             let decibels = self.gain.get(); // an f32, in dB
+//!             let muted = self.mute.get(); // a bool
 //!             self.factor = if muted { 0.0 } else { 10.0_f32.powf(decibels / 20.0) };
 //!         }
 //!     }
@@ -72,18 +72,15 @@
 //!     ParamDecl::new("mute", "Mute", Kind::Bool, 0.0),
 //! ];
 //! let params = ParamSet::from_decls(PARAMS.iter().copied())?;
-//! let gain: Float = params.bind("gain")?;
-//! let mute: Bool = params.bind("mute")?;
 //! let mut processor = Processor {
-//!     audio: params.audio(),
-//!     gain,
-//!     mute,
-//!     changes: Changes::new([gain.id(), mute.id()]),
+//!     gain: params.bind("gain")?,
+//!     mute: params.bind("mute")?,
+//!     changes: Changes::new(),
 //!     factor: 1.0,
 //! };
 //!
 //! // The host automates the gain to the top of its range (0..1 is its scale).
-//! processor.audio.host_write(gain.id(), 1.0);
+//! params.audio().host_write(processor.gain.id(), 1.0);
 //! processor.retune();
 //! assert!((processor.factor - 15.848_932).abs() < 1e-3); // +24 dB
 //! # Ok(())
@@ -108,12 +105,12 @@ mod changes;
 mod clock;
 pub mod decl;
 mod events;
-mod handle;
 mod host_events;
 mod host_id;
 mod list;
 mod meta;
 mod origin;
+mod param;
 mod program;
 mod set;
 mod ui;
@@ -128,12 +125,12 @@ pub use clock::{
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
 pub use events::{GestureRecord, HostEvent};
-pub use handle::{Bind, BindError, Bool, Choice, Choices, Float, Handle};
 pub use host_events::HostEventDrain;
 pub use host_id::{RESERVED_HOST_IDS, host_id};
 pub use list::{Derived, List, ListCommit, ListTracker, TrackedList};
 pub use meta::fit_text;
 pub use origin::{Origin, Reading, UnknownOrigin};
+pub use param::{Bind, BindError, Bool, Choice, Choices, Float, Param, Writable};
 pub use program::{Load, ProgramParams};
 pub use set::{AudioParams, DeclError, MAX_KEY_LEN, ParamSet, ParamSetBuilder};
 pub use ui::{Edit, Gesture, GestureRecords, UiParams};

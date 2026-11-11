@@ -4,8 +4,8 @@
 seam_testkit::install_alloc_gate!();
 
 use seam_params::{
-    Bool, Changes, Choice, Choices, Float, Handle, HostEvent, Kind, ParamDecl, ParamSet,
-    ParamSetBuilder, Range,
+    Bool, Changes, Choice, Choices, Float, HostEvent, Kind, ParamDecl, ParamSet, ParamSetBuilder,
+    Range,
 };
 use seam_testkit::alloc::assert_no_allocations;
 
@@ -91,7 +91,7 @@ fn typed_reads_and_the_group_check_do_not_allocate() {
     let on: Bool = set.bind("on").expect("a bool");
     let mode: Choice<Letter> = set.bind("mode").expect("the same labels");
     let audio = set.audio();
-    let mut group: Changes<4> = Changes::new([freq.id(), on.id(), mode.id()]);
+    let mut group = Changes::new();
 
     assert_no_allocations("typed reads behind the group check", || {
         let mut sum = 0.0_f32;
@@ -99,10 +99,10 @@ fn typed_reads_and_the_group_check_do_not_allocate() {
             audio.host_write(on.id(), f64::from(step % 2));
             audio.host_write(mode.id(), f64::from(step % 4) / 3.0);
             for _ in 0..2 {
-                if group.moved(&audio) {
-                    sum += audio.value(freq);
-                    sum += f32::from(u8::from(audio.value(on)));
-                    sum += audio.value(mode).index() as f32;
+                if group.moved([&freq, &on, &mode]) {
+                    sum += freq.get();
+                    sum += f32::from(u8::from(on.get()));
+                    sum += mode.get().index() as f32;
                 }
             }
         }

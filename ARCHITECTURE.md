@@ -21,8 +21,8 @@ reading how Seam works inside, start with
 
 ## Codemap
 
-- `crates/params`: parameter declarations, typed
-  [handles](docs/glossary.md#handle), the value
+- `crates/params`: parameter declarations, [typed
+  parameters](docs/glossary.md#typed-parameter), the value
   [store](docs/glossary.md#store), write [origins](docs/glossary.md#origin),
   [gestures](docs/glossary.md#gesture), change counters.
 - `crates/undo`: undo history over parameters, plain values and lists.

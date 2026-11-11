@@ -22,8 +22,7 @@ use seam_host::{
 };
 use seam_learn::{Config, Learn, LearnAudio, LearnError, Takes};
 use seam_params::{
-    AudioParams, BindError, Bool, Changes, Choice, Choices, Float, Handle, Kind, ParamDecl,
-    ParamSet, UiParams, Value,
+    BindError, Bool, Changes, Choice, Choices, Float, Kind, ParamDecl, ParamSet, UiParams, Value,
 };
 use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
 use seam_undo::{Bound, History, HistoryError};
@@ -73,7 +72,7 @@ impl Choices for Mode {
 }
 
 /// The parameters as the plugin reads them, each bound to its declaration.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct GainParams {
     gain: Float,
     mode: Choice<Mode>,
@@ -219,7 +218,7 @@ impl Plugin for Gain {
 
     fn new() -> Self {
         let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid declarations");
-        let params = GainParams::bind(&set).expect("each handle matches its declaration");
+        let params = GainParams::bind(&set).expect("each parameter matches its declaration");
         let session = Session::new(&set);
         let saved = Arc::new(SavedState::new(&set, &session));
         let session_ui = session.take_ui().expect("the first session UI handle");
@@ -258,7 +257,7 @@ impl Plugin for Gain {
 
     fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
         let learn = self.learn.borrow_mut().replace_audio();
-        GainProcessor::new(self.saved.set(), self.params, learn)
+        GainProcessor::new(self.params.clone(), learn)
     }
 
     fn idle(&mut self) {
@@ -274,23 +273,21 @@ impl Plugin for Gain {
 /// The audio-thread half: a gain and a mode over the first two channels.
 #[derive(Debug)]
 pub struct GainProcessor {
-    audio: AudioParams,
     learn: LearnAudio,
     params: GainParams,
-    /// Every parameter the fields below are read from.
-    changes: Changes<3>,
+    /// What the fields below were last read from.
+    changes: Changes,
     gain: f32,
     mode: Mode,
     bypassed: bool,
 }
 
 impl GainProcessor {
-    fn new(set: &Arc<ParamSet>, params: GainParams, learn: LearnAudio) -> Self {
+    fn new(params: GainParams, learn: LearnAudio) -> Self {
         let mut processor = GainProcessor {
-            audio: set.audio(),
             learn,
             params,
-            changes: Changes::new([params.gain.id(), params.mode.id(), params.bypass.id()]),
+            changes: Changes::new(),
             gain: 1.0,
             mode: Mode::Clean,
             bypassed: false,
@@ -301,12 +298,13 @@ impl GainProcessor {
 
     /// Reads the parameters again when one moved. Atomics only.
     fn retune(&mut self) {
-        if !self.changes.moved(&self.audio) {
+        let GainParams { gain, mode, bypass } = &self.params;
+        if !self.changes.moved([gain, mode, bypass]) {
             return;
         }
-        self.gain = 10.0_f32.powf(self.audio.value(self.params.gain) / 20.0);
-        self.mode = self.audio.value(self.params.mode);
-        self.bypassed = self.audio.value(self.params.bypass);
+        self.gain = 10.0_f32.powf(gain.get() / 20.0);
+        self.mode = mode.get();
+        self.bypassed = bypass.get();
     }
 }
 

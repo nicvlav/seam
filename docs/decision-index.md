@@ -386,7 +386,8 @@ move its line here; when a decision gains code, add one.
 
 - `crates/params/src/lib.rs`: module
 - `crates/params/src/origin.rs`: `Origin::ALL`, `Reading`, `Reading::origin`
-- `crates/params/src/set.rs`: `ParamSet`, `ParamSet::read`, `ParamSet::values`
+- `crates/params/src/set.rs`: `ParamSet`, `ParamSet::read`, `ParamSet::cells`
+- `crates/params/src/set/param_cell.rs`: `ParamCell::read`
 - `crates/params/src/set/value_cell.rs`: module, `Packed`, `Packed::new`, `Packed::origin`, `ValueCell`
 - test `crates/params/src/origin.rs`: `every_origin_reads_back_from_its_number_and_no_other_byte_reads`
 - test `crates/params/src/set/tests.rs`: `loom_racing_writers_leave_one_writers_value_with_its_origin`
@@ -910,13 +911,16 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d89-how-plugin-code-names-a-parameter)
 
-- `crates/params/src/handle.rs`: module, `Handle`, `Float`, `Bool`, `Choice`, `Choices`, `Bind`, `BindError`, `ParamSet::bind`
+- `crates/params/src/param.rs`: module, `Float`, `Bool`, `Choice`, `Float::get`, `Bool::get`, `Choice::get`, `Choices`, `Param`, `Writable`, `Bind`, `BindError`, `ParamSet::bind`
+- `crates/params/src/set/param_cell.rs`: module, `ParamCell`
+- `crates/params/src/set.rs`: `ParamSet::cell`, `ParamSet::owns`
 - `crates/params/src/changes.rs`: module, `Changes`, `Changes::new`, `Changes::moved`
-- `crates/params/src/set.rs`: `ParamSet::value`, `AudioParams::value`
-- `crates/params/src/ui.rs`: `UiParams::value`, `UiParams::write`
+- `crates/params/src/ui.rs`: `UiParams::write`, `UiParams::user_write_cell`
 - `examples/gain/src/lib.rs`: `Mode`, `GainParams`, `GainProcessor::retune`
 - `examples/eq/src/lib.rs`: `EqParams`, `BandParams`, `EqProcessor::retune`
-- test `crates/params/tests/handles.rs`: module, `a_handle_bound_to_another_kind_is_refused_with_its_key`, `a_key_nothing_is_declared_under_is_refused_by_name`, `a_choice_whose_enum_has_other_labels_is_refused_with_its_key`, `each_handle_reads_back_through_the_audio_side_what_the_ui_wrote`, `a_parameter_id_is_the_untyped_handle`, `a_group_moves_once_per_write_to_a_member_and_never_for_another`, `the_group_check_and_typed_reads_run_under_the_audio_thread_mark`, `decoding_is_total_and_inverts_encoding_on_stored_values`
+- test `crates/params/tests/typed.rs`: module, `a_parameter_bound_to_another_kind_is_refused_with_its_key`, `a_key_nothing_is_declared_under_is_refused_by_name`, `a_choice_whose_enum_has_other_labels_is_refused_with_its_key`, `each_parameter_reads_with_get_what_the_ui_wrote`, `a_typed_parameter_and_its_id_read_one_store`, `a_parameter_outlives_its_set_and_still_reads_its_store`, `a_clone_is_the_same_parameter_and_two_parameters_are_not`, `a_write_through_another_sets_ui_is_a_contract_panic_and_changes_nothing`, `a_group_moves_once_per_write_to_a_member_and_never_for_another`, `a_group_asked_about_other_parameters_than_last_time_moves`, `reads_and_the_group_check_run_under_the_audio_thread_mark`, `dropping_a_typed_parameter_under_the_audio_thread_mark_is_a_contract_panic`
+- test `crates/params/src/param.rs`: `the_last_parameter_dropped_frees_its_store_after_the_set_has_gone`, `decoding_is_total_and_inverts_encoding_on_stored_values`
+- test `crates/params/tests/drops.rs`: `the_last_typed_parameter_drops_on_a_worker_after_its_set`
 - test `crates/params/tests/alloc_gate.rs`: `typed_reads_and_the_group_check_do_not_allocate`
 
 ## Parameters
@@ -926,7 +930,8 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#p1-one-store-per-parameter)
 
 - `crates/params/src/lib.rs`: module
-- `crates/params/src/set.rs`: module, `ParamSet`, `ParamSet::normalized`, `ParamSet::values`
+- `crates/params/src/set.rs`: module, `ParamSet`, `ParamSet::normalized`, `ParamSet::cells`
+- `crates/params/src/set/param_cell.rs`: module, `ParamCell`, `ParamCell::store_then_publish`
 - `crates/params/src/set/value_cell.rs`: module, `Packed::value`, `ValueCell`
 - test `crates/params/src/set/tests.rs`: `loom_racing_writers_leave_one_writers_value_with_its_origin`
 - test `crates/params/tests/set.rs`: module

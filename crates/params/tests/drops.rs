@@ -1,12 +1,13 @@
 //! What a list or a plain value lets go of drops after its lock is
-//! released, so an element's `Drop` may call the list or value it sat in.
+//! released, so an element's `Drop` may call the list or value it sat in;
+//! and a typed parameter's store goes with its last holder, on any thread.
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use seam_params::{List, Origin, ParamSet, Value};
+use seam_params::{Float, Kind, List, Origin, ParamDecl, ParamSet, Value};
 use seam_testkit::sync::PATIENCE;
 
 /// What an element's `Drop` calls.
@@ -214,5 +215,23 @@ fn a_write_whose_clone_panics_changes_nothing() {
         }
         drop(drag);
         element.reaches.stop();
+    });
+}
+
+#[test]
+fn the_last_typed_parameter_drops_on_a_worker_after_its_set() {
+    let set = ParamSet::from_decls([ParamDecl::new(
+        "gain",
+        "Gain",
+        Kind::continuous(-60.0, 12.0, 0.1, None),
+        0.0,
+    )])
+    .expect("valid");
+    let gain: Float = set.bind("gain").expect("continuous");
+    set.audio().host_write(gain.id(), 1.0);
+    drop(set);
+    finishes("a typed parameter", move || {
+        assert_eq!(gain.get(), 12.0, "the store outlived its set");
+        drop(gain);
     });
 }

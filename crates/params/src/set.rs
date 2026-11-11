@@ -29,8 +29,8 @@ use crate::host_events::{HostEventDrain, HostQueue};
 use crate::program::ProgramParams;
 use crate::ui::UiParams;
 use crate::{
-    Handle, Kind, Origin, ParamDecl, ParamId, RESERVED_HOST_IDS, Reading, RestoreClock,
-    audio_thread, host_id,
+    Kind, Origin, ParamDecl, ParamId, RESERVED_HOST_IDS, Reading, RestoreClock, audio_thread,
+    host_id,
 };
 
 /// The longest key, in bytes: AAX truncates longer ones, which would merge
@@ -565,17 +565,15 @@ impl ParamSet {
         self.bypass
     }
 
-    /// Returns the current value as `handle` reads it: the stored `f32`, in
-    /// real units, for a [`ParamId`] or a [`Float`](crate::Float), a `bool`
-    /// for a [`Bool`](crate::Bool), the plugin's enum for a
-    /// [`Choice`](crate::Choice). The [crate overview](crate#examples) shows
-    /// it read on the audio thread.
+    /// Returns the current value, in real units.
     ///
-    /// A reader that keeps a count, as a [`Watch`](crate::Watch) does, reads
-    /// both through [`read`](Self::read).
+    /// Plugin code holds a typed parameter instead, which reads its own value
+    /// as its own type: [`Float::get`](crate::Float::get). A reader that
+    /// keeps a count, as a [`Watch`](crate::Watch) does, reads both through
+    /// [`read`](Self::read).
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn value<H: Handle>(&self, handle: H) -> H::Value {
-        handle.decode(self.cell(handle.id()).value())
+    pub fn value(&self, id: ParamId) -> f32 {
+        self.cell(id).value()
     }
 
     /// Returns the change count, then the value and the origin of the write
@@ -734,6 +732,13 @@ impl ParamSet {
         cell(&self.cells, id)
     }
 
+    /// Whether `cell` is one of this set's, and not another set's.
+    pub(crate) fn owns(&self, cell: &Arc<ParamCell>) -> bool {
+        self.cells
+            .get(cell.id().index())
+            .is_some_and(|own| Arc::ptr_eq(own, cell))
+    }
+
     pub(crate) fn host(&self) -> &HostQueue {
         &self.host
     }
@@ -806,11 +811,10 @@ impl AudioParams {
         &self.set
     }
 
-    /// Returns the current value as `handle` reads it, as
-    /// [`ParamSet::value`] does.
+    /// Returns the current value, in real units, as [`ParamSet::value`] does.
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn value<H: Handle>(&self, handle: H) -> H::Value {
-        self.set.value(handle)
+    pub fn value(&self, id: ParamId) -> f32 {
+        self.set.value(id)
     }
 
     /// Returns the change count, as [`ParamSet::changes`] does. The

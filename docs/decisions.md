@@ -125,7 +125,7 @@ comments never cite an id: they state the reason in words, and
 | D86 | [How does `PluginInfo` hold the AU codes? (D64)](#d86-the-au-codes) | As one `AuCodes` with named `subtype` and `manufacturer` fields, so the two cannot be swapped unseen. | decided |
 | D87 | [How does `ProcessSetup` give the main bus? (D58)](#d87-the-main-bus-in-processsetup) | As one `layout: Layout`, the one of the plugin's layouts the host chose. | decided |
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
-| D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed handle, `Float`, `Bool` or `Choice<E>`, bound once by key with `ParamSet::bind`, which checks the declaration. A read returns an `f32`, a `bool` or the plugin's enum; `ParamId` is the untyped handle. `Changes` asks once per block whether any of a group moved. | to confirm |
+| D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1992,36 +1992,49 @@ variants each host would only half use.
 value? (P1, P10) Not applicable: the C++ Seam's plugins were JUCE's, and read
 their parameters through JUCE.
 
-**Rust.** Plugin code holds a parameter as a typed handle: `Float` for a
+**Rust.** Plugin code holds a parameter as a typed parameter: `Float` for a
 continuous one, `Bool`, or `Choice<E>` for an enum `E` that implements
 `Choices`, whose `LABELS` the declaration takes as `Kind::Choice(E::LABELS)`.
+Each carries its store: the parameter's one cell, which its set shares, with
+the value word and the change count first and the id and declaration behind
+them. `get` is one atomic load and a decode. It names no set and has no path
+that panics; for a choice it calls `Choices::from_index` on a saturated index,
+and that must be total too.
+
+A parameter is `Clone`, and a clone is the same parameter: equality is the
+store's identity, not the value. It is not `Copy`, since the last drop frees
+the store. So a debug build panics at a drop while the thread holds the
+audio-thread mark, as it does for `AudioParams`; a clone, an atomic increment,
+is allowed there.
+
 `ParamSet::bind` makes one from a key, once, when the plugin is built. It
 refuses with a `BindError` that names the key when nothing is declared under
 it, when the declaration is another kind, and when a choice's labels are not
-`E::LABELS`. Nothing is checked after that.
-
-Each handle implements `Handle`, whose `decode` turns the stored `f32` into the
-handle's value. It must give a value for any `f32` and never panic, since the
-audio thread calls it: a choice's index saturates, and `Choices::from_index`
-must be total too. `ParamSet::value`, `AudioParams::value` and
-`UiParams::value` take any handle and return its value, and `UiParams::write`
-takes a handle and its value. `ParamId` is itself the untyped handle, whose
-value is the stored `f32`, so every read and write that took an id still does
-and means what it meant. The rest of the API takes a `ParamId`, which a handle
-gives with `id()`. The table of `ParamDecl`s stays the one declaration; the
-struct of handles and its binding are written by hand.
+`E::LABELS`. Nothing is checked after that. A parameter's `id()` is its place
+in the set, by which every call that takes a `ParamId` names it, and `value`
+on the set and its handles takes a `ParamId` and returns the stored `f32`.
+`UiParams::write` takes a typed parameter, by reference, with a value of its
+type, or a `ParamId` with an `f32`, through one sealed trait. It refuses a
+parameter of another set: `false`, and a debug assertion. Declarations are
+still a table of `ParamDecl`s.
 
 A processor asks once per block whether any of a group of parameters moved
-with `Changes`. It holds up to `N` ids inline, with the sum of their change
-counts at its last check, so the check is a load per member and a compare.
+with `Changes`, which holds a stamp and no parameter. The members come with
+each call, as `moved([&gain, &mode])`, and may be of different kinds. The
+stamp is the sum of their change counts and a mix of their stores' addresses,
+so a call about other parameters than the last answers true. The check is a
+load per member and a compare.
 
 **Alternatives.** The alternatives were the id it was, looked up by string
-behind `expect` and decoded from an `f32` with a threshold per kind in every
-plugin; typed reads under names of their own beside the untyped ones, which
-doubled the API; a macro that writes the table, the struct and the binding
-from one list, left until the hand-written form reads badly; and a group check
-over a boxed list of ids, which puts a pointer to follow on the audio thread,
-or one that hands its last count back through an out-parameter.
+behind `expect` and decoded with a threshold per kind in every plugin; a handle
+that is an index into its set, which is read against that set, reads another
+parameter or panics when paired with another set, and cannot exist before its
+set does; typed reads under names of their own beside the untyped ones, which
+doubled the API; a `Changes` that holds its members, which ties it to one
+group's size; and a group check over a boxed list of ids, which puts a pointer
+to follow on the audio thread.
+
+[History](decision-history.md#d89-how-plugin-code-names-a-parameter)
 
 ## How to read this
 

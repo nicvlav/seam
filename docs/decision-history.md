@@ -733,6 +733,17 @@ Decided by the owner on 2026-11-07. The form before answered `bool`, true for
 for both, is the implementer's choice within the decision, confirmed by the
 owner on 2026-11-07. `save` followed the same day, answering a `Result` too.
 
+### D89. How plugin code names a parameter
+
+[The decision](decisions.md#d89-how-plugin-code-names-a-parameter)
+
+Decided by the owner on 2026-11-10. A first build that day made a handle an
+index into its set: a `Copy` id that knew its type, read against the set as
+`audio.value(handle)` through a `Handle` trait, with a `Changes<N>` that held
+its members' ids. Before it merged, the owner chose a parameter that carries
+its store and is read with `get`, one type whether a host is shown it or not,
+and the build was reworked to that on its branch.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish
