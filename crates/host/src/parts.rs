@@ -123,10 +123,11 @@ pub struct Parts {
 
 /// The parts a tick runs.
 ///
-/// Undo and learn are set once and never borrowed for longer than a call,
-/// and the saved values only while Seam's own code captures them. So code
-/// of the plugin's that runs inside the tick, a participant's apply say,
-/// can reach back into the [`Parts`] and finds nothing held.
+/// Undo and learn are set once, and the saved values are borrowed only
+/// while they are captured. So a participant's apply or capture, which runs
+/// inside the session's tick, can reach back into the [`Parts`] and finds
+/// nothing held. Learn is held across its poll, which runs a learn target's
+/// code.
 #[derive(Debug)]
 struct Ticked {
     session: SessionUi,
@@ -283,7 +284,8 @@ impl Parts {
     /// # Panics
     ///
     /// While learn is off ([`midi_learn`](Self::midi_learn) turns it on), or
-    /// while the guard from an earlier call is alive.
+    /// while learn is borrowed: the guard from an earlier call is alive, or a
+    /// learn target's code calls it while [`Driver::tick`] polls learn.
     pub fn learn(&self) -> impl DerefMut<Target = Learn> + '_ {
         self.ticked
             .learn
@@ -421,6 +423,8 @@ pub struct Driver {
 
 impl Driver {
     /// Returns the driver of `parts`.
+    ///
+    /// Thread: main.
     pub fn of(parts: &Parts) -> Driver {
         Driver {
             ticked: Rc::downgrade(&parts.ticked),
@@ -448,9 +452,10 @@ impl Driver {
     ///    applied, which that apply captured already. Until this step a save
     ///    holds the value from before the change.
     ///
-    /// Nothing of the parts is held while the plugin's own code runs inside
-    /// the tick, so a participant the plugin registered may call
-    /// [`Parts::save`] or [`Parts::sync`] from its apply.
+    /// Nothing of the parts is held while the session's tick runs, so a
+    /// participant the plugin registered may call [`Parts::save`] or
+    /// [`Parts::sync`] from its apply. Learn is held while it polls, so a
+    /// learn target's code may not reach learn through [`Parts::learn`].
     ///
     /// When nothing changed it allocates nothing, and its cost does not grow
     /// with the number of parameters; each saved value costs one atomic load.
@@ -459,7 +464,9 @@ impl Driver {
     ///
     /// # Panics
     ///
-    /// When learn is on and the guard [`Parts::learn`] returned is alive.
+    /// When learn is on and borrowed: the guard [`Parts::learn`] returned is
+    /// alive, or a learn target's code calls [`Parts::learn`] during the
+    /// poll.
     pub fn tick(&self) {
         if let Some(ticked) = self.ticked.upgrade() {
             ticked.tick();

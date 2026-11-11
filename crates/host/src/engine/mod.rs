@@ -378,24 +378,22 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         P: Send,
         H: Send,
     {
-        // SAFETY: of the main-thread state, the plugin and the host link
-        // are `Send` (the bounds above), so the plugin holds no `Parts`,
-        // which are not. So are the event drain and the `Cell`s and
-        // `RefCell`s around them. Everything that is not, the parts' driver
-        // and the timer slot, is in `on_thread`, which is `None` here and
-        // stays so: `start_timer` starts no timer without it. The driver
-        // `build` made is dropped here, on the thread that made it, and
-        // `build` hands the parts to the plugin on this thread and keeps
-        // none of them. The state goes from thread to thread one loan at a
-        // time, and drops wherever the engine does.
-        Self::build(host, |main| unsafe {
-            MainThread::unbound(
-                Main {
-                    on_thread: None,
-                    ..main
-                },
-                patience,
-            )
+        Self::build(host, |main| {
+            let main = Main {
+                on_thread: None,
+                ..main
+            };
+            // SAFETY: of the main-thread state, the plugin and the host link
+            // are `Send` (the bounds above), so the plugin holds no `Parts`,
+            // which are not. So are the event drain and the `Cell`s and
+            // `RefCell`s around them. Everything that is not, the parts'
+            // driver and the timer slot, is in `on_thread`, which is `None`
+            // here and stays so: `start_timer` starts no timer without it.
+            // The driver `build` made was dropped just above, on the thread
+            // that made it, and `build` hands the parts to the plugin on this
+            // thread and keeps none of them. The state goes from thread to
+            // thread one loan at a time, and drops wherever the engine does.
+            unsafe { MainThread::unbound(main, patience) }
         })
     }
 

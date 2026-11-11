@@ -89,7 +89,7 @@ comments never cite an id: they state the reason in words, and
 | D50 | [How does each activation's processor get learn's audio side? (L5)](#d50-learns-audio-side-per-activation) | `Learn::replace_audio()` makes a fresh one that reads the current mappings; the one handed out before keeps its last table and sees no later edit. | decided |
 | D51 | [Must a plugin be `Send`? (U5, S6, L7, H1)](#d51-whether-a-plugin-must-be-send) | No. The exporter calls the plugin and drops it on its main thread only. Only a plugin that is `Send` may leave that thread: the C interface binds it to no thread. | decided |
 | D52 | [Who makes the `RestoreClock`? (D19, D20, D39)](#d52-who-makes-the-restoreclock) | The `ParamSet`: `ParamSetBuilder::build` makes one, and nothing else can, so every history, value, list, session and load of one plugin shares one clock by construction. | decided |
-| D53 | [What ticks a plugin with no editor open? (U5, S6, L7, D47)](#d53-what-ticks-a-plugin-with-no-editor-open) | One main-thread timer per instance, at 60 Hz for the instance's life, editor open or not, calls `Plugin::idle`; the editor never ticks. The VST3 exporter and the JUCE adapter supply the timer; CLAP's exporter is to use the host's timer-support extension, and a CLAP host may lack timer support (still to settle). | decided |
+| D53 | [What ticks a plugin with no editor open? (U5, S6, L7, D47)](#d53-what-ticks-a-plugin-with-no-editor-open) | One main-thread timer per instance, at 60 Hz for the instance's life, editor open or not, ticks the plugin's parts and then calls `Plugin::idle`; the editor never ticks. The VST3 exporter and the JUCE adapter supply the timer; CLAP's exporter is to use the host's timer-support extension, and a CLAP host may lack timer support (still to settle). | decided |
 | D54 | [What does detaching a learn target do to its mapping? (L8, L9)](#d54-detaching-a-learn-target) | Holds it. `Learn::detach` ends an arm on the target, closes its open burst once and drops the target, and its mapping becomes a held entry under its key. `unmap` is what removes a mapping. | decided |
 | D55 | [What happens to a participant whose apply panics? (S7, D14)](#d55-a-participant-whose-apply-panics) | Catch and hold: the session contains the panic as it does a failed apply, and ignores the participant's captures until a later apply succeeds, so a half-built state is never saved. | decided |
 | D56 | [Which hash names a parameter to hosts, and which ids does D22 reserve? (D31, P10)](#d56-the-hash-that-names-a-parameter) | 32-bit FNV-1a over the key's UTF-8 bytes with the top bit cleared. The builder refuses a key whose id another key already has, or that falls in `0x7FFF_0000` to `0x7FFF_FFFF`, the ids D22's proxies take. | decided |
@@ -2151,8 +2151,9 @@ needs, so a plugin that dropped its parts is not ticked. `Driver::tick` runs in
 the one order that works: learn's poll, so a mapping it commits reaches the
 same tick's save; the session's tick, which applies a restore (D13); the
 history's (D20); then the capture of the saved plain values (D92). It holds
-nothing of the parts while the plugin's own code runs, so a participant may
-reach back into them from its apply. When nothing changed it allocates nothing
+nothing of the parts while the session's tick runs, so a participant may reach
+back into them from its apply; learn is held while it polls, as before. When
+nothing changed it allocates nothing
 and does no work that grows with the number of parameters. `idle` then sees a
 restore applied and a learned mapping committed. Both run inside the plugin's
 borrow, so a tick that meets the plugin busy in one of its calls runs neither.
