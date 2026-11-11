@@ -744,6 +744,19 @@ its members' ids. Before it merged, the owner chose a parameter that carries
 its store and is read with `get`, one type whether a host is shown it or not,
 and the build was reworked to that on its branch.
 
+### D90. How a plugin declares its parameters
+
+[The decision](decisions.md#d90-how-a-plugin-declares-its-parameters)
+
+Decided by the owner on 2026-11-10, when he was shown one small EQ declared
+four ways and chose the fourth: parameters declared in a function that
+returns them, typed declarations, and mistakes refused while compiling where
+they can be. A proposal of typed constants gathered in a list and bound by
+key was set aside the same day: it compiled only with an untyped choice
+default and still wrote each parameter four times. Refusing a default outside
+its range, writing a float's range as a range, and fixing ids when the set is
+frozen were choices made while planning, told to the owner that day.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

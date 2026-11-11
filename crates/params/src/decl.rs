@@ -310,14 +310,22 @@ pub enum RangeError {
     SkewCentreOutside,
 }
 
-impl std::fmt::Display for RangeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+impl RangeError {
+    /// The rule broken, in words; a `const fn`, so a refusal while compiling
+    /// can say it.
+    pub(crate) const fn rule(&self) -> &'static str {
+        match self {
             RangeError::NotFinite => "start and end must be finite",
             RangeError::StartNotBelowEnd => "start must be below end",
             RangeError::BadInterval => "the interval must be finite and not negative",
             RangeError::SkewCentreOutside => "the skew centre must be strictly inside the range",
-        })
+        }
+    }
+}
+
+impl std::fmt::Display for RangeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.rule())
     }
 }
 

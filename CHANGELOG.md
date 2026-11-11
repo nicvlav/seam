@@ -30,6 +30,15 @@ delivered to a plugin through an exporter.
   choice whose labels are not the enum's. `UiParams::write` takes a typed
   parameter with a value of its type, or a `ParamId` with an `f32`. `Changes`
   asks once per block whether any of the parameters it is given moved.
+- `seam-params`: parameters declared where they are held. A struct
+  implements `Params`, whose `declare` adds each parameter through a
+  `Declarer`; a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`,
+  hands back its kind of parameter, so a field of another kind does not
+  compile. `checked`, a `const fn`, refuses a bad key, group, choice labels,
+  range or default while compiling. `ParamSet::declare` builds the set and
+  returns the first declaration it refused, such as a key two parameters
+  share. A typed declaration refuses a default outside its range, where a
+  `ParamDecl` snaps it. `Declarer::extend` declares a plain table.
 - `seam-undo`: an undo history that polls once per tick. One gesture is one
   step, transactions group steps, and host automation, restores and learned
   writes never record. A restore clears the history, and the history is bounded

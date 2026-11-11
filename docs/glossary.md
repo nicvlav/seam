@@ -320,8 +320,10 @@ transaction is open joins it
 A parameter as plugin code holds it: a [`Float`, `Bool` or
 `Choice`](../crates/params/src/param.rs) that carries its [store](#store) and
 reads, with `get`, as the type its kind stands for: an `f32`, a `bool` or the
-plugin's enum. A clone is the same parameter. Its
-[`ParamId`](../crates/params/src/decl.rs) is its place in its set.
+plugin's enum. A clone is the same parameter. Declaring one with a
+[typed declaration](../crates/params/src/declare.rs) hands it back. Its
+[`ParamId`](../crates/params/src/decl.rs) is its place in its set, fixed when
+the set is built.
 
 ### Watch
 

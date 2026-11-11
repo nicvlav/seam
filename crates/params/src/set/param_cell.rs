@@ -1,8 +1,12 @@
 //! One parameter's cell: its value word and change count, which every read
 //! touches, then its id and declaration, which a typed read never does.
+//!
+//! A cell is made when its parameter is declared, before its set orders the
+//! parameters, so its id is filled in once, when the set is built.
 
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64 as SerialCounter;
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,28 +33,51 @@ pub(crate) struct ParamCell {
     /// Which cell this is, for as long as the process runs: unlike an
     /// address, a serial is never handed out twice.
     serial: u64,
-    id: ParamId,
+    /// Set once, by [`place`](Self::place), when the set is built.
+    id: OnceLock<ParamId>,
     decl: ParamDecl,
 }
 
 impl ParamCell {
-    /// A cell at its declaration's snapped default, as a restore's write.
-    pub(crate) fn new(id: ParamId, decl: ParamDecl) -> Self {
+    /// A cell at its declaration's snapped default, as a restore's write,
+    /// with no id until a set places it.
+    pub(crate) fn new(decl: ParamDecl) -> Self {
         ParamCell {
             value: ValueCell::new(Packed::new(decl.default_value(), Origin::Restore)),
             changes: AtomicU64::new(0),
             serial: SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            id,
+            id: OnceLock::new(),
             decl,
         }
+    }
+
+    /// Gives the cell its place in the set being built. A builder owns its
+    /// cells and is consumed by the build, so no cell is placed twice.
+    pub(crate) fn place(&self, id: ParamId) {
+        let first = self.id.set(id).is_ok();
+        debug_assert!(first, "a parameter was placed in two sets");
     }
 
     pub(crate) fn serial(&self) -> u64 {
         self.serial
     }
 
+    /// Its place in its set.
+    ///
+    /// Asking before the set is built is the caller's bug: a debug build
+    /// panics, and a release build returns an id past any set's end.
     pub(crate) fn id(&self) -> ParamId {
-        self.id
+        debug_assert!(
+            self.id.get().is_some(),
+            "a parameter has no id until its set is built: ask for it after ParamSet::declare returns"
+        );
+        self.placed().unwrap_or(ParamId::from_index(usize::MAX))
+    }
+
+    /// Its place in its set, or `None` before the set is built and for a
+    /// parameter no set took.
+    pub(crate) fn placed(&self) -> Option<ParamId> {
+        self.id.get().copied()
     }
 
     pub(crate) fn decl(&self) -> &ParamDecl {

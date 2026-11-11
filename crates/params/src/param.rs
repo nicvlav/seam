@@ -50,7 +50,7 @@ use crate::{Kind, ParamId, ParamSet, UiParams, audio_thread};
 /// assert_eq!(gain.get(), 12.0);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct Float(Arc<ParamCell>);
+pub struct Float(pub(crate) Arc<ParamCell>);
 
 /// A bool parameter, read as `bool`.
 ///
@@ -75,7 +75,7 @@ pub struct Float(Arc<ParamCell>);
 /// assert!(on.get());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct Bool(Arc<ParamCell>);
+pub struct Bool(pub(crate) Arc<ParamCell>);
 
 /// A choice parameter, read as the plugin's enum `E`, whose
 /// [`Choices::LABELS`] are the declaration's labels.
@@ -122,7 +122,7 @@ pub struct Bool(Arc<ParamCell>);
 /// assert_eq!(shape.get(), Shape::Saw);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub struct Choice<E>(Arc<ParamCell>, PhantomData<fn() -> E>);
+pub struct Choice<E>(pub(crate) Arc<ParamCell>, pub(crate) PhantomData<fn() -> E>);
 
 impl Float {
     /// Returns the value now, in real units. One atomic load: any thread.
@@ -133,6 +133,12 @@ impl Float {
 
     /// Returns its place in the set it was declared in, which the calls
     /// that take a [`ParamId`] name it by.
+    ///
+    /// # Panics
+    ///
+    /// In a build with `debug_assertions`, before its set is built: inside
+    /// [`Params::declare`](crate::Params::declare), where no parameter has
+    /// its place yet, and for one a refused declaration handed back.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -147,6 +153,10 @@ impl Bool {
     }
 
     /// Returns its place in the set it was declared in.
+    ///
+    /// # Panics
+    ///
+    /// As [`Float::id`] does, before its set is built.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -163,6 +173,10 @@ impl<E: Choices> Choice<E> {
 
 impl<E> Choice<E> {
     /// Returns its place in the set it was declared in.
+    ///
+    /// # Panics
+    ///
+    /// As [`Float::id`] does, before its set is built.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -229,12 +243,14 @@ impl<E> Drop for Choice<E> {
     }
 }
 
-/// The fields a typed parameter shows: which parameter, not its value.
+/// The fields a typed parameter shows: which parameter, not its value. The
+/// id is left out until its set is built.
 fn debug(f: &mut fmt::Formatter<'_>, name: &str, cell: &ParamCell) -> fmt::Result {
-    f.debug_struct(name)
-        .field("id", &cell.id())
-        .field("key", &cell.decl().key)
-        .finish()
+    let mut fields = f.debug_struct(name);
+    if let Some(id) = cell.placed() {
+        fields.field("id", &id);
+    }
+    fields.field("key", &cell.decl().key).finish()
 }
 
 impl fmt::Debug for Float {
