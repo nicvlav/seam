@@ -40,6 +40,14 @@ pub struct ExampleEq {
     params: EqParams,
 }
 
+// The C interface binds a plugin that is `Send` to no thread. One that
+// stopped being `Send` would be bound to its creating thread instead, with no
+// error, so this fails the build first.
+const _: () = {
+    const fn send<T: Send>() {}
+    send::<ExampleEq>();
+};
+
 /// The parameters as the EQ reads them, each bound to its declaration.
 #[derive(Debug, Clone)]
 struct EqParams {

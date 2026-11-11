@@ -14,7 +14,8 @@
     )
 )]
 
-use crate::Param;
+use crate::AnyParam;
+use crate::param::sealed::Token;
 
 /// What a reader last saw of a group of parameters, so a processor asks once
 /// per block whether any of them moved.
@@ -69,7 +70,8 @@ impl Changes {
 
     /// Returns whether any of `members` took a write since the last call, a
     /// repeated value included. True at the first call, and when `members`
-    /// are other parameters than last time.
+    /// are other parameters than last time, short of a collision in the mix
+    /// that tells groups apart, which is chance, about once in 2^64.
     ///
     /// Atomics only: it never locks or allocates.
     ///
@@ -92,24 +94,73 @@ impl Changes {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
-    pub fn moved<const N: usize>(&mut self, members: [&dyn Param; N]) -> bool {
-        let now = members
-            .iter()
-            .fold((0_u64, 0_u64), |(identity, count), member| {
-                let (address, changes) = member.stamp();
-                // Each count only grows, so their sum moves whenever one
-                // does; it would come back round only after 2^64 writes. The
-                // identity mixes in each member's address, in order, so
-                // another group reads as a move.
-                (
-                    identity.rotate_left(7) ^ address as u64,
-                    count.wrapping_add(changes),
-                )
-            });
+    pub fn moved<const N: usize>(&mut self, members: [&dyn AnyParam; N]) -> bool {
+        let now = stamp(&members);
         if self.seen == Some(now) {
             return false;
         }
         self.seen = Some(now);
         true
+    }
+}
+
+/// Which members, mixed in order, and the sum of their counts.
+fn stamp(members: &[&dyn AnyParam]) -> (u64, u64) {
+    members
+        .iter()
+        .fold((0_u64, 0_u64), |(identity, count), member| {
+            let (serial, changes) = member.stamp(Token(()));
+            // Each count only grows, so their sum moves whenever one does;
+            // it would come back round only after 2^64 writes.
+            (mix(identity, serial), count.wrapping_add(changes))
+        })
+}
+
+/// Mixes one more member's serial into a group's identity, so another group
+/// reads as a move.
+///
+/// The multiply carries every bit of the input upward and the shift folds the
+/// high half back down, so the identity is not linear in the serials: two
+/// groups share one only by chance, about once in 2^64. The added constant
+/// keeps a member numbered 0 from leaving the identity as it was.
+fn mix(identity: u64, member: u64) -> u64 {
+    let spread = (identity.rotate_left(5) ^ member)
+        .wrapping_add(0x9e37_79b9_7f4a_7c15)
+        .wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    spread ^ (spread >> 31)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    /// Whether every group of one or two of `members`, in either order, has
+    /// an identity of its own; the first two groups that share one if not.
+    fn shared_identity(members: &[u64]) -> Option<(Vec<u64>, Vec<u64>)> {
+        // The empty group's identity is the fold's start.
+        let mut seen: HashMap<u64, Vec<u64>> = HashMap::from([(0, Vec::new())]);
+        for &a in members {
+            let mut groups = vec![vec![a]];
+            groups.extend(members.iter().filter(|&&b| b != a).map(|&b| vec![a, b]));
+            for group in groups {
+                let identity = group.iter().fold(0, |identity, &m| mix(identity, m));
+                if let Some(other) = seen.insert(identity, group.clone()) {
+                    return Some((group, other));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "65,536 groups take minutes in the interpreter")]
+    fn no_two_small_groups_share_an_identity() {
+        // Members numbered in order, and members spaced as heap cells are.
+        let numbered: Vec<u64> = (0..256).collect();
+        assert_eq!(shared_identity(&numbered), None);
+        let spaced: Vec<u64> = (0..256).map(|i| 0x0000_01e4_5a3c_0000 + i * 192).collect();
+        assert_eq!(shared_identity(&spaced), None);
     }
 }

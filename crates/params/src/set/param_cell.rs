@@ -3,17 +3,22 @@
 
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64 as SerialCounter;
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::value_cell::{Packed, ValueCell};
 use crate::{Origin, ParamDecl, ParamId, Reading};
 
+/// The serial the next cell takes. Not a modelled atomic: it only hands out
+/// numbers, and orders nothing.
+static SERIALS: SerialCounter = SerialCounter::new(0);
+
 /// One parameter's store, shared by its set and by whatever holds it.
 ///
-/// `repr(C)` keeps the fields in this order. The value word and the count sit
-/// in the first 16 bytes, so a read that compares a count and loads the value
-/// touches one cache line and never the declaration behind them.
+/// `repr(C)` keeps the fields in this order: what a block reads (the value
+/// word, the count and the serial) sits together at the front, and the
+/// declaration, which no block read touches, behind it.
 #[repr(C)]
 #[derive(Debug)]
 pub(crate) struct ParamCell {
@@ -21,6 +26,9 @@ pub(crate) struct ParamCell {
     /// Moved by every write after its store; see
     /// [`store_then_publish`](Self::store_then_publish).
     changes: AtomicU64,
+    /// Which cell this is, for as long as the process runs: unlike an
+    /// address, a serial is never handed out twice.
+    serial: u64,
     id: ParamId,
     decl: ParamDecl,
 }
@@ -31,9 +39,14 @@ impl ParamCell {
         ParamCell {
             value: ValueCell::new(Packed::new(decl.default_value(), Origin::Restore)),
             changes: AtomicU64::new(0),
+            serial: SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             id,
             decl,
         }
+    }
+
+    pub(crate) fn serial(&self) -> u64 {
+        self.serial
     }
 
     pub(crate) fn id(&self) -> ParamId {

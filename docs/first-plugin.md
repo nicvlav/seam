@@ -138,9 +138,9 @@ block's MIDI events.
 
 `GainProcessor` keeps the parameters' values in plain fields and reads them
 again only when one moved. It holds a clone of the parameters and a
-[`Changes`](../crates/params/src/changes.rs), which remembers the change counts
-it last saw and answers whether any of the parameters it is given took a write
-since it last asked:
+[`Changes`](../crates/params/src/changes.rs), which keeps a stamp of the
+parameters it was last given and their change counts, and answers whether any
+of them took a write since it last asked:
 
 ```rust
 fn retune(&mut self) {

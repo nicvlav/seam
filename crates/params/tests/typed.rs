@@ -350,3 +350,32 @@ fn dropping_a_typed_parameter_under_the_audio_thread_mark_is_a_contract_panic() 
         drop(bypass);
     });
 }
+
+/// A choice of an enum that is neither `Send` nor `Sync`.
+#[derive(Debug, Clone, Copy)]
+struct Pointer {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl Choices for Pointer {
+    const LABELS: &'static [&'static str] = &["A", "B"];
+
+    fn from_index(_: usize) -> Self {
+        Pointer {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+
+    fn index(self) -> usize {
+        0
+    }
+}
+
+#[test]
+fn typed_parameters_and_a_group_check_cross_threads_whatever_the_enum() {
+    fn send_and_sync<T: Send + Sync>() {}
+    send_and_sync::<Float>();
+    send_and_sync::<Bool>();
+    send_and_sync::<Choice<Pointer>>();
+    send_and_sync::<Changes>();
+}

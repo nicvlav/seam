@@ -178,10 +178,13 @@ fn encode_bool(value: bool) -> f32 {
 }
 
 /// The value at the stored index. A choice stores whole indices; any other
-/// `f32` truncates, saturating at both ends, and NaN reads as 0.
+/// `f32` truncates, saturating at 0 and at the last label, and NaN reads as 0.
 fn decode_choice<E: Choices>(stored: f32) -> E {
-    // `as` from a float saturates and maps NaN to 0, so no index panics.
-    E::from_index(stored as usize)
+    // `as` from a float saturates and maps NaN to 0. The clamp keeps the
+    // index below the labels' count, so the audio thread never asks
+    // `from_index` for one past them, even if a store held one.
+    let last = E::LABELS.len().saturating_sub(1);
+    E::from_index((stored as usize).min(last))
 }
 
 fn encode_choice<E: Choices>(value: E) -> f32 {
@@ -345,10 +348,15 @@ pub trait Choices: Copy + 'static {
     fn index(self) -> usize;
 }
 
-mod sealed {
-    /// Keeps [`Param`](super::Param) and [`Writable`](super::Writable) to
-    /// the types this crate gives them.
+pub(crate) mod sealed {
+    /// Keeps [`AnyParam`](super::AnyParam) and
+    /// [`Writable`](super::Writable) to the types this crate gives them.
     pub trait Sealed {}
+
+    /// What the plumbing methods of those traits take, so only this crate
+    /// can call them: nothing outside it can make one.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Token(pub(crate) ());
 }
 
 impl sealed::Sealed for Float {}
@@ -366,8 +374,10 @@ impl sealed::Sealed for ParamId {}
 ///
 /// # Examples
 ///
+/// A group of two kinds, named once and checked each block.
+///
 /// ```
-/// use seam_params::{Bool, Float, Kind, Param, ParamDecl, ParamSet};
+/// use seam_params::{AnyParam, Bool, Changes, Float, Kind, ParamDecl, ParamSet};
 ///
 /// let set = ParamSet::from_decls([
 ///     ParamDecl::new("gain", "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0),
@@ -376,37 +386,38 @@ impl sealed::Sealed for ParamId {}
 /// let gain: Float = set.bind("gain")?;
 /// let on: Bool = set.bind("on")?;
 ///
-/// // Two kinds in one list.
-/// let members: [&dyn Param; 2] = [&gain, &on];
-/// assert_eq!(members.len(), 2);
+/// let band: [&dyn AnyParam; 2] = [&gain, &on];
+/// let mut changes = Changes::new();
+/// assert!(changes.moved(band));
+/// assert!(!changes.moved(band));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub trait Param: sealed::Sealed {
-    /// Returns which store this is, as an address, and how many writes it
-    /// has taken.
+pub trait AnyParam: sealed::Sealed {
+    /// Returns which store this is, as its cell's serial, and how many
+    /// writes it has taken.
     #[doc(hidden)]
-    fn stamp(&self) -> (usize, u64);
+    fn stamp(&self, token: sealed::Token) -> (u64, u64);
 }
 
 /// The stamp of the store `cell` is.
-fn stamp(cell: &Arc<ParamCell>) -> (usize, u64) {
-    (Arc::as_ptr(cell).addr(), cell.changes())
+fn stamp(cell: &ParamCell) -> (u64, u64) {
+    (cell.serial(), cell.changes())
 }
 
-impl Param for Float {
-    fn stamp(&self) -> (usize, u64) {
+impl AnyParam for Float {
+    fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
     }
 }
 
-impl Param for Bool {
-    fn stamp(&self) -> (usize, u64) {
+impl AnyParam for Bool {
+    fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
     }
 }
 
-impl<E> Param for Choice<E> {
-    fn stamp(&self) -> (usize, u64) {
+impl<E> AnyParam for Choice<E> {
+    fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
     }
 }
@@ -440,13 +451,13 @@ pub trait Writable: sealed::Sealed {
 
     /// Makes the user's write through `ui`.
     #[doc(hidden)]
-    fn write_through(self, ui: &UiParams, value: Self::Value) -> bool;
+    fn write_through(self, ui: &UiParams, value: Self::Value, token: sealed::Token) -> bool;
 }
 
 impl Writable for ParamId {
     type Value = f32;
 
-    fn write_through(self, ui: &UiParams, value: f32) -> bool {
+    fn write_through(self, ui: &UiParams, value: f32, _: sealed::Token) -> bool {
         ui.user_write(self, value)
     }
 }
@@ -454,7 +465,7 @@ impl Writable for ParamId {
 impl Writable for &Float {
     type Value = f32;
 
-    fn write_through(self, ui: &UiParams, value: f32) -> bool {
+    fn write_through(self, ui: &UiParams, value: f32, _: sealed::Token) -> bool {
         ui.user_write_cell(&self.0, value)
     }
 }
@@ -462,7 +473,7 @@ impl Writable for &Float {
 impl Writable for &Bool {
     type Value = bool;
 
-    fn write_through(self, ui: &UiParams, value: bool) -> bool {
+    fn write_through(self, ui: &UiParams, value: bool, _: sealed::Token) -> bool {
         ui.user_write_cell(&self.0, encode_bool(value))
     }
 }
@@ -470,7 +481,7 @@ impl Writable for &Bool {
 impl<E: Choices> Writable for &Choice<E> {
     type Value = E;
 
-    fn write_through(self, ui: &UiParams, value: E) -> bool {
+    fn write_through(self, ui: &UiParams, value: E, _: sealed::Token) -> bool {
         ui.user_write_cell(&self.0, encode_choice(value))
     }
 }

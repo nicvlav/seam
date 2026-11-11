@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::param::sealed::Token;
 use crate::set::ParamCell;
 use crate::{GestureRecord, Origin, ParamId, ParamSet, RestoreReader, Writable};
 
@@ -386,7 +387,7 @@ impl UiParams {
     /// # Ok::<(), seam_params::DeclError>(())
     /// ```
     pub fn write<P: Writable>(&self, param: P, value: P::Value) -> bool {
-        param.write_through(self, value)
+        param.write_through(self, value, Token(()))
     }
 
     /// [`write`](Self::write) for a [`ParamId`], with the stored `f32`.

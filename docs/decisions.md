@@ -1444,8 +1444,9 @@ an exporter raises around everything its `process` call runs, and around the
 other calls a host may make on the audio thread (the C interface's `set` and
 `reset`, VST3's `setProcessing`). Every call that locks asserts the mark is
 absent: `Value` and `List` calls, `Session` calls, `Load::restore` and the load
-hold an undo replay takes; so do the drops of `AudioParams`, `LearnAudio` and
-`HostEventDrain`, which must not free on the audio thread.
+hold an undo replay takes; so do the drops of `AudioParams`, `LearnAudio`,
+`HostEventDrain` and the typed parameters `Float`, `Bool` and `Choice`, which
+must not free on the audio thread. A typed parameter's clone is allowed there.
 
 A thread already unwinding is not checked, so a drop during a panic cannot turn
 it into an abort. A release build has neither the mark nor the checks. VST3's
@@ -2003,9 +2004,7 @@ and that must be total too.
 
 A parameter is `Clone`, and a clone is the same parameter: equality is the
 store's identity, not the value. It is not `Copy`, since the last drop frees
-the store. So a debug build panics at a drop while the thread holds the
-audio-thread mark, as it does for `AudioParams`; a clone, an atomic increment,
-is allowed there.
+the store, so its drop is checked against the audio-thread mark (D67).
 
 `ParamSet::bind` makes one from a key, once, when the plugin is built. It
 refuses with a `BindError` that names the key when nothing is declared under
@@ -2021,9 +2020,10 @@ still a table of `ParamDecl`s.
 A processor asks once per block whether any of a group of parameters moved
 with `Changes`, which holds a stamp and no parameter. The members come with
 each call, as `moved([&gain, &mode])`, and may be of different kinds. The
-stamp is the sum of their change counts and a mix of their stores' addresses,
-so a call about other parameters than the last answers true. The check is a
-load per member and a compare.
+stamp is the sum of their change counts and a mix of their stores' serials,
+numbers no two stores share in a process. So a call about other parameters
+than the last answers true, short of a collision in the mix, which is chance,
+about once in 2^64. The check is a load per member and a compare.
 
 **Alternatives.** The alternatives were the id it was, looked up by string
 behind `expect` and decoded with a threshold per kind in every plugin; a handle
