@@ -57,6 +57,16 @@ impl ParamId {
     pub const fn index(self) -> usize {
         self.0 as usize
     }
+
+    /// The id as stored in a word.
+    pub(crate) const fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// The id a word stored with [`raw`](Self::raw).
+    pub(crate) const fn from_raw(raw: u32) -> Self {
+        ParamId(raw)
+    }
 }
 
 /// What kind of value a parameter holds. Every kind stores its value as an

@@ -6,8 +6,8 @@
 
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64 as SerialCounter;
+use std::sync::atomic::{AtomicU32 as IdWord, Ordering as IdOrdering};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -17,6 +17,15 @@ use crate::{Origin, ParamDecl, ParamId, Reading};
 /// The serial the next cell takes. Not a modelled atomic: it only hands out
 /// numbers, and orders nothing.
 static SERIALS: SerialCounter = SerialCounter::new(0);
+
+/// The id word of a cell no set has placed: past any set's end, since a set
+/// never holds 2^32 parameters.
+///
+/// The word is not a modelled atomic either, and its loads are relaxed: it is
+/// written once, while the set is built, before the set or any parameter in
+/// it can reach another thread, and whatever hands them over orders that
+/// write before the other thread's reads.
+const UNPLACED: u32 = u32::MAX;
 
 /// One parameter's store, shared by its set and by whatever holds it.
 ///
@@ -33,8 +42,10 @@ pub(crate) struct ParamCell {
     /// Which cell this is, for as long as the process runs: unlike an
     /// address, a serial is never handed out twice.
     serial: u64,
-    /// Set once, by [`place`](Self::place), when the set is built.
-    id: OnceLock<ParamId>,
+    /// Its id's word, [`UNPLACED`] until [`place`](Self::place) sets it once,
+    /// when the set is built. Read on every call of a typed parameter's `id`,
+    /// so it is one plain load.
+    id: IdWord,
     decl: ParamDecl,
 }
 
@@ -46,7 +57,7 @@ impl ParamCell {
             value: ValueCell::new(Packed::new(decl.default_value(), Origin::Restore)),
             changes: AtomicU64::new(0),
             serial: SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            id: OnceLock::new(),
+            id: IdWord::new(UNPLACED),
             decl,
         }
     }
@@ -54,8 +65,8 @@ impl ParamCell {
     /// Gives the cell its place in the set being built. A builder owns its
     /// cells and is consumed by the build, so no cell is placed twice.
     pub(crate) fn place(&self, id: ParamId) {
-        let first = self.id.set(id).is_ok();
-        debug_assert!(first, "a parameter was placed in two sets");
+        let before = self.id.swap(id.raw(), IdOrdering::Relaxed);
+        debug_assert!(before == UNPLACED, "a parameter was placed in two sets");
     }
 
     pub(crate) fn serial(&self) -> u64 {
@@ -67,17 +78,19 @@ impl ParamCell {
     /// Asking before the set is built is the caller's bug: a debug build
     /// panics, and a release build returns an id past any set's end.
     pub(crate) fn id(&self) -> ParamId {
+        let raw = self.id.load(IdOrdering::Relaxed);
         debug_assert!(
-            self.id.get().is_some(),
+            raw != UNPLACED,
             "a parameter has no id until its set is built: ask for it after ParamSet::declare returns"
         );
-        self.placed().unwrap_or(ParamId::from_index(usize::MAX))
+        ParamId::from_raw(raw)
     }
 
     /// Its place in its set, or `None` before the set is built and for a
     /// parameter no set took.
     pub(crate) fn placed(&self) -> Option<ParamId> {
-        self.id.get().copied()
+        let raw = self.id.load(IdOrdering::Relaxed);
+        (raw != UNPLACED).then_some(ParamId::from_raw(raw))
     }
 
     pub(crate) fn decl(&self) -> &ParamDecl {
