@@ -407,7 +407,6 @@ dependencies = [
  "iai-callgrind",
  "seam-host",
  "seam-params",
- "seam-session",
  "seam-testkit",
  "serde_json",
 ]

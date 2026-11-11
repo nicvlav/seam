@@ -20,23 +20,19 @@ seam_host::export_vst3!(ExampleEq);
 #[cfg(feature = "cabi")]
 seam_host::export_cabi!(ExampleEq);
 
-use std::sync::Arc;
-
 use seam_host::{
-    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
-    SavedState, Status,
+    AuCodes, Block, Category, Feature, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status,
 };
-use seam_params::{BindError, Bool, Changes, Float, ParamDecl, ParamSet};
-use seam_session::Session;
+use seam_params::{Bool, Changes, Float};
 
-use crate::dsp::{Biquad, Shape, coefficients, decibels_to_gain};
-pub use crate::params::PARAMS;
-use crate::params::{BANDS, Band, OUTPUT_GAIN, OUTPUT_ON};
+use crate::dsp::{Biquad, coefficients, decibels_to_gain};
+use crate::params::{BandParams, EqParams};
 
-/// The plugin: its parameters and its saved state, on the main thread.
+/// The plugin: its parameters, on the main thread. It drops the rest of its
+/// parts, so it stays `Send`.
 #[derive(Debug)]
 pub struct ExampleEq {
-    saved: Arc<SavedState>,
     params: EqParams,
 }
 
@@ -47,47 +43,6 @@ const _: () = {
     const fn send<T: Send>() {}
     send::<ExampleEq>();
 };
-
-/// The parameters as the EQ reads them, each bound to its declaration.
-#[derive(Debug, Clone)]
-struct EqParams {
-    bands: [BandParams; 6],
-    output_on: Bool,
-    output_gain: Float,
-}
-
-/// One band's shape and parameters; a high-pass has no gain.
-#[derive(Debug, Clone)]
-struct BandParams {
-    shape: Shape,
-    on: Bool,
-    gain: Option<Float>,
-    frequency: Float,
-    q: Float,
-}
-
-impl EqParams {
-    fn bind(set: &ParamSet) -> Result<Self, BindError> {
-        let [hp, low, lowmid, mid, highmid, high] = BANDS.map(|band| BandParams::bind(set, band));
-        Ok(EqParams {
-            bands: [hp?, low?, lowmid?, mid?, highmid?, high?],
-            output_on: set.bind(OUTPUT_ON)?,
-            output_gain: set.bind(OUTPUT_GAIN)?,
-        })
-    }
-}
-
-impl BandParams {
-    fn bind(set: &ParamSet, band: Band) -> Result<Self, BindError> {
-        Ok(BandParams {
-            shape: band.shape,
-            on: set.bind(band.on)?,
-            gain: band.gain.map(|key| set.bind(key)).transpose()?,
-            frequency: set.bind(band.frequency)?,
-            q: set.bind(band.q)?,
-        })
-    }
-}
 
 impl Plugin for ExampleEq {
     const INFO: PluginInfo = PluginInfo {
@@ -110,23 +65,12 @@ impl Plugin for ExampleEq {
         midi_output: false,
     };
 
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = EqParams;
 
     type Processor = EqProcessor;
 
-    fn new() -> Self {
-        let set =
-            ParamSet::from_decls(PARAMS.iter().copied()).expect("the EQ's declarations are valid");
-        let params = EqParams::bind(&set).expect("each parameter matches its declaration");
-        let session = Session::new(&set);
-        ExampleEq {
-            saved: Arc::new(SavedState::new(&set, &session)),
-            params,
-        }
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
+    fn new(params: EqParams, _parts: Parts) -> Self {
+        ExampleEq { params }
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> EqProcessor {

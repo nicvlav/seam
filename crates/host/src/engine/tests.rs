@@ -1,25 +1,33 @@
 //! The engine's rules, each tested through every shell with one body.
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::error::Error;
 
 #[cfg(feature = "vst3")]
 use seam_params::host_id;
-use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet, audio_thread};
-use seam_session::Session;
+use seam_params::{Declarer, Float, FloatDecl, Params, audio_thread};
+use serde_json::{Map, Value as Json};
 
 use crate::faults::written;
 use crate::{
-    AuCodes, Block, Category, Layout, Plugin, PluginInfo, ProcessSetup, Processor, SavedState,
-    Status, Tail, boundary_faults,
+    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
+    Tail, boundary_faults,
 };
 
-const PARAMS: &[ParamDecl] = &[ParamDecl::new(
-    "gain",
-    "Gain",
-    Kind::continuous(0.0, 10.0, 0.0, None),
-    0.0,
-)];
+/// The parameters every plugin here declares: one gain, which hosts list
+/// first.
+#[derive(Clone)]
+struct Gain {
+    gain: Float,
+}
+
+impl Params for Gain {
+    fn declare(p: &mut Declarer) -> Self {
+        Gain {
+            gain: p.add(FloatDecl::new("gain", "Gain", 0.0..=10.0, 0.0)),
+        }
+    }
+}
 
 /// What the probe saw, shared by the plugin and its processor, which the
 /// tests run on the test's own thread.
@@ -45,20 +53,19 @@ fn seen<R>(f: impl FnOnce(&mut Seen) -> R) -> R {
     SEEN.with(|seen| f(&mut seen.borrow_mut()))
 }
 
-/// A plugin whose processor adds its gain parameter to every sample.
-struct Probe(Arc<SavedState>);
+/// A plugin whose processor adds its gain parameter to every sample. It
+/// keeps the parameters it is handed and drops its parts.
+struct Probe(Gain);
 
-struct Adder {
-    params: AudioParams,
-    gain: ParamId,
-}
+/// Reads the gain through the typed parameter `new` was handed.
+struct Adder(Gain);
 
 impl Processor for Adder {
     fn process(&mut self, block: Block<'_, '_>) -> Status {
         let marked = audio_thread::is_here();
         seen(|seen| seen.marked_blocks = Some(seen.marked_blocks.unwrap_or(true) && marked));
         assert!(!seen(|seen| seen.panic_in_process), "a processor's bug");
-        let add = self.params.value(self.gain);
+        let add = self.0.gain.get();
         for channel in block.channels.iter_mut() {
             for sample in &mut channel[..block.frames] {
                 *sample += add;
@@ -102,25 +109,17 @@ impl Plugin for Probe {
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Gain;
     type Processor = Adder;
 
-    fn new() -> Self {
+    fn new(params: Gain, _: Parts) -> Self {
         seen(|seen| *seen = Seen::default());
-        let set = ParamSet::from_decls([PARAMS[0]]).expect("valid");
-        Probe(Arc::new(SavedState::new(&set, &Session::new(&set))))
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+        Probe(params)
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> Adder {
         seen(|seen| seen.activations += 1);
-        Adder {
-            params: self.0.set().audio(),
-            gain: self.0.set().id("gain").expect("declared"),
-        }
+        Adder(self.0.clone())
     }
 
     fn deactivate(&mut self, processor: Adder) {
@@ -138,8 +137,6 @@ trait Shell {
     /// What the shell's host was answered when the plugin refused a call.
     type Refused: std::fmt::Debug + PartialEq;
     fn create() -> Self;
-    /// Creates the instance on another thread; this one calls it first.
-    fn create_elsewhere() -> Self;
     /// Activates in stereo at 48 kHz for blocks of up to 64 frames.
     fn activate(&mut self) -> Result<(), Self::Refused>;
     fn deactivate(&mut self);
@@ -170,17 +167,27 @@ trait Shell {
     fn expect_faults(&self, count: u64);
 }
 
+/// A shell's test host that can create an instance its plugin runs on
+/// another thread.
+trait Elsewhere: Shell {
+    /// Creates the instance on another thread; this one calls it first.
+    fn create_elsewhere() -> Self;
+}
+
 #[cfg(feature = "vst3")]
-impl Shell for crate::vst3::TestHost<Probe> {
+impl<P: Plugin> Elsewhere for crate::vst3::TestHost<P> {
+    fn create_elsewhere() -> Self {
+        Self::created_elsewhere()
+    }
+}
+
+#[cfg(feature = "vst3")]
+impl<P: Plugin> Shell for crate::vst3::TestHost<P> {
     type Refused = crate::vst3::Refused;
     const HOLDS_WRITES_WHILE_PROCESSING: bool = true;
 
     fn create() -> Self {
         Self::new()
-    }
-
-    fn create_elsewhere() -> Self {
-        Self::created_elsewhere()
     }
 
     fn activate(&mut self) -> Result<(), Self::Refused> {
@@ -252,16 +259,19 @@ impl Shell for crate::vst3::TestHost<Probe> {
 }
 
 #[cfg(feature = "cabi")]
-impl Shell for crate::cabi::TestHost<Probe> {
+impl<P: Plugin + Send> Elsewhere for crate::cabi::TestHost<P> {
+    fn create_elsewhere() -> Self {
+        Self::created_elsewhere()
+    }
+}
+
+#[cfg(feature = "cabi")]
+impl<P: Plugin> Shell for crate::cabi::TestHost<P> {
     type Refused = crate::cabi::Refused;
     const HOLDS_WRITES_WHILE_PROCESSING: bool = false;
 
     fn create() -> Self {
         Self::new()
-    }
-
-    fn create_elsewhere() -> Self {
-        Self::created_elsewhere()
     }
 
     fn activate(&mut self) -> Result<(), Self::Refused> {
@@ -344,21 +354,21 @@ fn on_another_thread(
     })
 }
 
-/// Runs a shared body through every shell built.
+/// Runs each shared body through every shell built, with `$plugin`.
 macro_rules! through_every_shell {
-    ($($body:ident),* $(,)?) => {
+    ($plugin:ident: $($body:ident),* $(,)?) => {
         $(
             mod $body {
                 #[cfg(feature = "vst3")]
                 #[test]
                 fn vst3() {
-                    super::$body::<crate::vst3::TestHost<super::Probe>>();
+                    super::$body::<crate::vst3::TestHost<super::$plugin>>();
                 }
 
                 #[cfg(feature = "cabi")]
                 #[test]
                 fn cabi() {
-                    super::$body::<crate::cabi::TestHost<super::Probe>>();
+                    super::$body::<crate::cabi::TestHost<super::$plugin>>();
                 }
             }
         )*
@@ -366,6 +376,8 @@ macro_rules! through_every_shell {
 }
 
 through_every_shell!(
+    Probe:
+    the_parameters_new_is_handed_are_the_ones_the_host_writes,
     a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first,
     an_activation_while_active_rebuilds_and_recovers_a_panicked_processor,
     a_block_with_no_processor_is_silent,
@@ -379,7 +391,18 @@ through_every_shell!(
     a_release_reports_the_faults_no_tick_reported,
 );
 
-fn a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first<S: Shell>() {
+fn the_parameters_new_is_handed_are_the_ones_the_host_writes<S: Shell>() {
+    let mut host = S::create();
+    host.write(0.5);
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(
+        host.play(1.0),
+        [6.0; 8],
+        "the processor read 5 through the plugin's own parameter"
+    );
+}
+
+fn a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first<S: Elsewhere>() {
     let mut host = S::create_elsewhere();
     host.write(0.5);
     assert_eq!(host.activate(), Ok(()), "the main thread is this one");
@@ -515,7 +538,7 @@ fn the_block_runs_marked_as_the_audio_thread_and_no_processor_drops_there<S: She
     assert_eq!(seen(|seen| (seen.drops, seen.drops_marked)), (2, 0));
 }
 
-fn created_on_one_thread_driven_from_a_second_and_played_on_a_third<S: Shell>() {
+fn created_on_one_thread_driven_from_a_second_and_played_on_a_third<S: Elsewhere>() {
     let mut host = S::create_elsewhere();
     host.write(0.5);
     assert_eq!(host.activate(), Ok(()));
@@ -592,4 +615,94 @@ fn a_release_reports_the_faults_no_tick_reported<S: Shell>() {
         lines.len() == 1 && lines[0].contains("the processor panicked"),
         "reported as the instance went: {lines:?}"
     );
+}
+
+/// Keeps its parts and never ticks them.
+struct Forgetful {
+    _parts: Parts,
+}
+
+impl Plugin for Forgetful {
+    const INFO: PluginInfo = Probe::INFO;
+    type Params = Gain;
+    type Processor = Adder;
+
+    fn new(_: Gain, parts: Parts) -> Self {
+        Forgetful { _parts: parts }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Adder {
+        unreachable!("never activated")
+    }
+}
+
+through_every_shell!(
+    Forgetful:
+    a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once,
+);
+
+fn a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once<S: Shell>() {
+    let mut host = S::create();
+    host.expect_faults(1);
+    written();
+    host.tick();
+    host.tick();
+    let lines = written();
+    assert!(
+        lines.len() == 1 && lines[0].contains("did not tick them"),
+        "reported at the next tick: {lines:?}"
+    );
+    for _ in 0..3 {
+        host.tick();
+    }
+    assert_eq!(written(), Vec::<String>::new(), "and counted once");
+}
+
+/// Version 1 of its schema renamed `level` to `gain`.
+struct Renamed(Gain);
+
+impl Plugin for Renamed {
+    const INFO: PluginInfo = Probe::INFO;
+    type Params = Gain;
+    const SCHEMA_VERSION: u64 = 1;
+    type Processor = Adder;
+
+    fn new(params: Gain, _: Parts) -> Self {
+        Renamed(params)
+    }
+
+    fn migrate(
+        from: u64,
+        block: &mut Map<String, Json>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if from < 1 {
+            let parameters = block
+                .get_mut("parameters")
+                .and_then(Json::as_object_mut)
+                .ok_or("the parameters are not an object")?;
+            if let Some(level) = parameters.remove("level") {
+                parameters.entry("gain").or_insert(level);
+            }
+        }
+        Ok(())
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Adder {
+        Adder(self.0.clone())
+    }
+}
+
+through_every_shell!(
+    Renamed:
+    the_plugin_s_migration_upgrades_an_older_block,
+);
+
+fn the_plugin_s_migration_upgrades_an_older_block<S: Shell>() {
+    let mut host = S::create();
+    let older = br#"{"seamStateVersion": 1, "parameters": {"level": 5}}"#;
+    assert_eq!(host.load(older), Ok(()));
+    assert_eq!(host.gain(), 0.5, "the renamed parameter took the value");
+    let saved: Json = serde_json::from_slice(&host.save()).expect("JSON");
+    assert_eq!(saved["pluginStateVersion"], 1, "saved at the new version");
+    assert_eq!(saved["parameters"]["gain"], 5.0);
 }

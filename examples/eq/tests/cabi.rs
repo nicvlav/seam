@@ -2,13 +2,13 @@
 //! parameter list, its saved state, and audio that matches the processor
 //! driven directly, sample for sample.
 
-use seam_example_eq::{ExampleEq, PARAMS};
+use seam_example_eq::ExampleEq;
 use seam_host::cabi::{KIND_BOOL, KIND_CONTINUOUS, TestHost};
 use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
 use seam_params::{Kind, host_id};
 
 mod common;
-use common::{Noise, bits};
+use common::{Noise, bits, built, declarations};
 
 const RATE: f64 = 48_000.0;
 const MAX_FRAMES: u32 = 512;
@@ -16,11 +16,12 @@ const MAX_FRAMES: u32 = 512;
 #[test]
 fn the_adapter_lists_every_parameter_with_its_key() {
     let host = TestHost::<ExampleEq>::new();
-    assert_eq!(host.parameter_count(), PARAMS.len());
+    let declarations = declarations();
+    assert_eq!(host.parameter_count(), declarations.len());
     assert_eq!(host.layouts(), [Layout::STEREO, Layout::MONO]);
-    for index in 0..PARAMS.len() as u32 {
+    for index in 0..declarations.len() as u32 {
         let info = host.parameter(index).expect("listed");
-        let decl = PARAMS
+        let decl = declarations
             .iter()
             .find(|decl| decl.key == info.key)
             .expect("a declared key");
@@ -46,8 +47,7 @@ fn the_adapter_lists_every_parameter_with_its_key() {
 fn audio_through_the_c_interface_matches_the_processor_driven_directly() {
     let host = TestHost::<ExampleEq>::new();
     assert_eq!(host.activate(RATE, MAX_FRAMES, Layout::STEREO), Ok(()));
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     let mut processor = plugin.activate(&ProcessSetup {
         sample_rate: RATE,
         max_frames: MAX_FRAMES as usize,
@@ -57,7 +57,7 @@ fn audio_through_the_c_interface_matches_the_processor_driven_directly() {
     });
     let writes = saved.set().audio();
     let (events, mut out_events) = (EventList::with_capacity(0), EventList::with_capacity(0));
-    let keys: Vec<String> = (0..PARAMS.len() as u32)
+    let keys: Vec<String> = (0..host.parameter_count() as u32)
         .map(|index| host.parameter(index).expect("listed").key)
         .collect();
 
@@ -105,7 +105,7 @@ fn audio_through_the_c_interface_matches_the_processor_driven_directly() {
 #[test]
 fn a_saved_block_through_the_c_interface_loads_through_vst3() {
     let adapter = TestHost::<ExampleEq>::new();
-    let index = (0..PARAMS.len() as u32)
+    let index = (0..adapter.parameter_count() as u32)
         .find(|&index| adapter.parameter(index).expect("listed").key == "mid.gain")
         .expect("declared");
     adapter.set(index, 0.75);

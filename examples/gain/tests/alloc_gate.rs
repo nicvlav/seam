@@ -5,12 +5,18 @@
 
 seam_testkit::install_alloc_gate!();
 
-use seam_example_gain::{BYPASS, GAIN, Gain, MODE};
+use std::sync::Arc;
+
+use seam_example_gain::Gain;
 use seam_host::vst3::TestHost;
-use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, EventList, Layout, Parts, Plugin, ProcessSetup, Processor};
 use seam_params::host_id;
 use seam_testkit::alloc::assert_no_allocations;
 use seam_ump::{ChannelVoice, Voice};
+
+const GAIN: &str = "gain";
+const MODE: &str = "mode";
+const BYPASS: &str = "bypass";
 
 /// Makes `events` hold one control change, at the block's first frame.
 fn control_change(events: &mut EventList, controller: u8, value: u8) {
@@ -28,9 +34,9 @@ fn control_change(events: &mut EventList, controller: u8, value: u8) {
 
 #[test]
 fn learning_and_a_learned_controller_never_allocate() {
-    let mut plugin = Gain::new();
-    let saved = plugin.saved();
-    let set = saved.set();
+    let (params, parts) = Parts::for_plugin::<Gain>().expect("valid declarations");
+    let set = Arc::clone(parts.set());
+    let mut plugin = Gain::new(params, parts);
     let program = set.program();
     let [gain, mode, bypass] = [GAIN, MODE, BYPASS].map(|key| set.id(key).expect("declared"));
     let mut processor = plugin.activate(&ProcessSetup {

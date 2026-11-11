@@ -1,12 +1,13 @@
 //! What each mode of the parity example computes, written to any `Write`.
 
 use std::io::{BufRead, Write};
+use std::sync::Arc;
 
+use seam_example_eq::ExampleEq;
 use seam_example_eq::dsp::{Shape, coefficients};
-use seam_example_eq::params::BANDS;
-use seam_example_eq::{ExampleEq, PARAMS};
-use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
-use seam_params::{Kind, ParamDecl, Range};
+use seam_example_eq::params::EqParams;
+use seam_host::{Block, EventList, Layout, Parts, Plugin, ProcessSetup, Processor};
+use seam_params::{Float, Kind, ParamDecl, ParamSet, Range};
 
 fn bits(value: f32) -> String {
     format!("{:08x}", value.to_bits())
@@ -16,11 +17,15 @@ fn bits64(value: f64) -> String {
     format!("{:016x}", value.to_bits())
 }
 
-fn decl(key: &str) -> &'static ParamDecl {
-    PARAMS
-        .iter()
-        .find(|decl| decl.key == key)
-        .expect("declared")
+/// The EQ's parameters, and the set they are declared in.
+fn declared() -> (Arc<ParamSet>, EqParams) {
+    ParamSet::declare::<EqParams>().expect("valid declarations")
+}
+
+/// Every parameter's declaration, in the order hosts list them.
+fn declarations() -> Vec<ParamDecl> {
+    let (set, _) = declared();
+    set.ids().map(|id| *set.decl(id)).collect()
 }
 
 fn range(decl: &ParamDecl) -> Option<Range> {
@@ -72,7 +77,7 @@ fn shape_name(shape: Shape) -> &'static str {
 }
 
 pub(crate) fn ranges(out: &mut impl Write) {
-    for decl in PARAMS {
+    for decl in &declarations() {
         let (kind, start, end, interval, centre) = match decl.kind {
             Kind::Continuous(range) => (
                 "continuous",
@@ -99,7 +104,7 @@ pub(crate) fn ranges(out: &mut impl Write) {
 }
 
 pub(crate) fn snap(out: &mut impl Write) {
-    for decl in PARAMS {
+    for decl in &declarations() {
         let Some(range) = range(decl) else { continue };
         for point in lattice_inputs(range) {
             for fraction in [0.0, 0.25, 0.5, 0.75] {
@@ -114,7 +119,7 @@ pub(crate) fn snap(out: &mut impl Write) {
 
 pub(crate) fn normalized(out: &mut impl Write) {
     let mut seeded = Seeded(0x9E37_79B9_7F4A_7C15);
-    for decl in PARAMS {
+    for decl in &declarations() {
         let even = (0..=4_096).map(|step| step as f32 / 4_096.0);
         let random: Vec<f32> = (0..4_096).map(|_| seeded.unit()).collect();
         for normalized in even.chain(random) {
@@ -130,8 +135,7 @@ pub(crate) fn normalized(out: &mut impl Write) {
 }
 
 /// Every lattice point of a stepped parameter, snapped.
-fn points(key: &str) -> Vec<f32> {
-    let decl = decl(key);
+fn points(decl: &ParamDecl) -> Vec<f32> {
     let range = range(decl).expect("stepped");
     lattice_inputs(range)
         .map(|input| decl.kind.snap(input).expect("finite"))
@@ -158,22 +162,27 @@ pub(crate) fn coefficients_grid(out: &mut impl Write) {
         )
         .expect("write a case");
     };
+    let (set, eq) = declared();
+    let decl = |param: &Float| *set.decl(param.id());
     for rate in [44_100.0, 48_000.0, 96_000.0] {
-        for band in BANDS {
-            let frequency = decl(band.frequency).default;
-            let q = decl(band.q).default;
-            let gain_points = band.gain.map_or_else(|| vec![0.0], points);
+        for band in &eq.bands {
+            let (frequency, q) = (decl(&band.frequency), decl(&band.q));
+            let gain_points = band
+                .gain
+                .as_ref()
+                .map_or_else(|| vec![0.0], |gain| points(&decl(gain)));
+            let (frequencies, qs) = (points(&frequency), points(&q));
+            let (frequency, q) = (frequency.default, q.default);
             for &gain in &gain_points {
                 print(band.shape, gain, frequency, q, rate);
             }
             let boost = if band.gain.is_some() { 6.0 } else { 0.0 };
-            for frequency in points(band.frequency) {
+            for &frequency in &frequencies {
                 print(band.shape, boost, frequency, q, rate);
             }
-            for q in points(band.q) {
+            for &q in &qs {
                 print(band.shape, boost, frequency, q, rate);
             }
-            let (frequencies, qs) = (points(band.frequency), points(band.q));
             for _ in 0..2_000 {
                 let gain = gain_points[seeded.pick(gain_points.len())];
                 let frequency = frequencies[seeded.pick(frequencies.len())];
@@ -198,9 +207,9 @@ impl Noise {
 }
 
 pub(crate) fn audio(input: impl BufRead, out: &mut impl Write) {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
-    let set = saved.set();
+    let (params, parts) = Parts::for_plugin::<ExampleEq>().expect("valid declarations");
+    let set = Arc::clone(parts.set());
+    let mut plugin = ExampleEq::new(params, parts);
     let audio = set.audio();
     let mut processor = None;
     let mut noise = Noise(0x1234_5678);

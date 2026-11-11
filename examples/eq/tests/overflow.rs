@@ -6,10 +6,18 @@
 
 seam_testkit::install_alloc_gate!();
 
-use seam_example_eq::{ExampleEq, PARAMS};
+use std::sync::LazyLock;
+
+use seam_example_eq::ExampleEq;
 use seam_host::vst3::TestHost;
-use seam_params::host_id;
+use seam_params::{ParamDecl, host_id};
 use seam_testkit::alloc::assert_no_allocations;
+
+mod common;
+use common::declarations;
+
+/// Every parameter's declaration, in the order hosts list them.
+static DECLARATIONS: LazyLock<Vec<ParamDecl>> = LazyLock::new(declarations);
 
 const FRAMES: usize = 4_096;
 const POINTS: usize = 64;
@@ -22,7 +30,7 @@ fn a_block_with_more_points_than_the_room_allocates_nothing_and_lands_each_last_
     assert_eq!(host.start(), Ok(()));
     let mut channels = [vec![0.1f32; FRAMES], vec![-0.1f32; FRAMES]];
     for round in 0..4usize {
-        let queues: Vec<Vec<(i32, f64)>> = (0..PARAMS.len())
+        let queues: Vec<Vec<(i32, f64)>> = (0..DECLARATIONS.len())
             .map(|parameter| {
                 (0..POINTS)
                     .map(|point| {
@@ -33,7 +41,7 @@ fn a_block_with_more_points_than_the_room_allocates_nothing_and_lands_each_last_
                     .collect()
             })
             .collect();
-        let sends: Vec<(u32, &[(i32, f64)])> = PARAMS
+        let sends: Vec<(u32, &[(i32, f64)])> = DECLARATIONS
             .iter()
             .zip(&queues)
             .map(|(decl, points)| (host_id(decl.key), points.as_slice()))
@@ -45,7 +53,7 @@ fn a_block_with_more_points_than_the_room_allocates_nothing_and_lands_each_last_
                 Ok(())
             );
         });
-        for (decl, points) in PARAMS.iter().zip(&queues) {
+        for (decl, points) in DECLARATIONS.iter().zip(&queues) {
             let (_, last) = *points.last().expect("points");
             let id = host_id(decl.key);
             // The last point landed, snapped as a host write snaps it.

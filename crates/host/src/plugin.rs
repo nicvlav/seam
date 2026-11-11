@@ -1,20 +1,21 @@
 //! The traits a plugin implements once for every format: [`Plugin`] on the
 //! main thread, and the [`Processor`] it builds for the audio thread.
 
-use std::sync::Arc;
+use std::error::Error;
 
-use seam_params::ParamDecl;
+use seam_params::Params;
+use serde_json::{Map, Value as Json};
 
 use crate::audio::{Block, ProcessSetup, Status};
 use crate::info::PluginInfo;
-use crate::state::SavedState;
+use crate::parts::Parts;
 
 /// A plugin, written once for every format.
 ///
 /// A plugin lives on its main thread: the exporter creates it, calls it and
 /// drops it there, one call at a time. It may therefore own state that is
-/// not `Send`: its undo history, the session's UI handle, learn, an `Rc`.
-/// Which thread runs what:
+/// not `Send`: its [`Parts`], its undo history, an `Rc`. Which thread runs
+/// what:
 ///
 /// - **Main thread:** every method here, and the plugin's drop. It is the
 ///   thread that initializes a VST3 instance or calls the C interface's
@@ -23,16 +24,17 @@ use crate::state::SavedState;
 ///   thread through the C interface. Where a method says "Thread: main",
 ///   each call, and the drop, may come on a different thread. Two never run
 ///   at once, and each sees what the one before did. Such a plugin holds
-///   nothing tied to a thread, such as a thread-local or a window handle.
-///   `cabi::SeamPlugin` states the C contract. Through VST3 it has a main
-///   thread, as above.
+///   nothing tied to a thread, such as a thread-local, a window handle or
+///   its [`Parts`]. `cabi::SeamPlugin` states the C contract. Through VST3
+///   it has a main thread, as above.
 /// - **Audio thread:** only the [`Processor`]'s `process` and `reset`. The
 ///   processor is built by [`activate`](Self::activate) and handed back to
 ///   [`deactivate`](Self::deactivate), so it never drops on the audio
 ///   thread.
 /// - **Whatever thread they arrive on:** the host's save and load calls,
-///   which go through [`saved`](Self::saved) and never touch the plugin, and
-///   the parameter set's reads and writes.
+///   which go through the saved state Seam built ([`Parts::saved`]) and
+///   never touch the plugin, a load's [`migrate`](Self::migrate), and the
+///   parameter set's reads and writes.
 ///
 /// A host that releases an instance on another thread, against these rules,
 /// leaks it, and the plugin is never dropped. A release from one of the
@@ -41,8 +43,14 @@ use crate::state::SavedState;
 ///
 /// What the exporters do for every plugin, so none writes it:
 ///
+/// - **Parts.** Seam declares the plugin's [`Params`](Self::Params), builds
+///   the parameter set, the session and the saved state over them, and hands
+///   the parameters and the [`Parts`] to [`new`](Self::new). The host lists
+///   that set, and saves and loads through that saved state. A declaration
+///   refused fails the instance's creation, with the reason in the fault
+///   report.
 /// - **Bypass.** A parameter declared with
-///   [`as_bypass`](seam_params::ParamDecl::as_bypass) is the one the host
+///   [`as_bypass`](seam_params::BoolDecl::as_bypass) is the one the host
 ///   drives as bypass, and the processor implements it. A plugin that
 ///   declares none leaves bypass to the host. None of Seam's exporters adds a
 ///   hidden parameter, though JUCE's VST3 wrapper does when the JUCE adapter
@@ -63,28 +71,45 @@ use crate::state::SavedState;
 ///
 /// # Examples
 ///
-/// A plugin with one parameter that passes audio through:
+/// A plugin with one parameter, a gain its processor applies:
 ///
 /// ```
-/// use std::sync::Arc;
-///
 /// use seam_host::{
-///     AuCodes, Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
-///     SavedState, Status,
+///     AuCodes, Block, Category, EventList, Layout, Parts, Plugin, PluginInfo, ProcessSetup,
+///     Processor, Status,
 /// };
-/// use seam_params::{Kind, ParamDecl, ParamSet};
-/// use seam_session::Session;
+/// use seam_params::{Declarer, Float, FloatDecl, Params};
 ///
-/// struct Passthrough;
+/// /// The parameters: declared here, and handed back to the plugin.
+/// #[derive(Clone)]
+/// struct GainParams {
+///     gain: Float,
+/// }
 ///
-/// impl Processor for Passthrough {
-///     fn process(&mut self, _block: Block<'_, '_>) -> Status {
+/// impl Params for GainParams {
+///     fn declare(p: &mut Declarer) -> Self {
+///         GainParams {
+///             gain: p.add(FloatDecl::new("gain", "Gain", -24.0..=24.0, 0.0).with_unit("dB")),
+///         }
+///     }
+/// }
+///
+/// /// The audio-thread half: it reads the gain through its own clone.
+/// struct Level(GainParams);
+///
+/// impl Processor for Level {
+///     fn process(&mut self, block: Block<'_, '_>) -> Status {
+///         let gain = 10.0_f32.powf(self.0.gain.get() / 20.0);
+///         for channel in block.channels.iter_mut() {
+///             channel.iter_mut().for_each(|sample| *sample *= gain);
+///         }
 ///         Status::Continue
 ///     }
 /// }
 ///
+/// /// The main-thread half. It keeps no parts, so it is `Send`.
 /// struct Gain {
-///     saved: Arc<SavedState>,
+///     params: GainParams,
 /// }
 ///
 /// impl Plugin for Gain {
@@ -104,29 +129,21 @@ use crate::state::SavedState;
 ///         midi_input: false,
 ///         midi_output: false,
 ///     };
-///     const PARAMS: &'static [ParamDecl] = &[
-///         ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0)
-///             .with_unit("dB"),
-///     ];
-///     type Processor = Passthrough;
+///     type Params = GainParams;
+///     type Processor = Level;
 ///
-///     fn new() -> Self {
-///         let set = ParamSet::from_decls(Self::PARAMS.iter().copied())
-///             .expect("valid declarations");
-///         let session = Session::new(&set);
-///         Gain { saved: Arc::new(SavedState::new(&set, &session)) }
+///     fn new(params: GainParams, _parts: Parts) -> Self {
+///         Gain { params }
 ///     }
 ///
-///     fn saved(&self) -> Arc<SavedState> {
-///         Arc::clone(&self.saved)
-///     }
-///
-///     fn activate(&mut self, _setup: &ProcessSetup) -> Passthrough {
-///         Passthrough
+///     fn activate(&mut self, _setup: &ProcessSetup) -> Level {
+///         Level(self.params.clone())
 ///     }
 /// }
 ///
-/// let mut plugin = Gain::new();
+/// // What an exporter does, here with no host.
+/// let (params, parts) = Parts::for_plugin::<Gain>()?;
+/// let mut plugin = Gain::new(params, parts);
 /// let setup = ProcessSetup {
 ///     sample_rate: 48_000.0,
 ///     max_frames: 64,
@@ -141,35 +158,67 @@ use crate::state::SavedState;
 /// let (events, mut out) = (EventList::with_capacity(0), EventList::with_capacity(0));
 /// let block = Block::new(&mut channels, 64, &events, &mut out);
 /// assert_eq!(processor.process(block), Status::Continue);
+/// assert_eq!(left[0], 0.5, "0 dB");
+/// # Ok::<(), seam_params::DeclError>(())
 /// ```
 pub trait Plugin: 'static {
     /// The facts a host reads before it creates an instance.
     const INFO: PluginInfo;
 
-    /// Every parameter, in declaration order, which is the order hosts list
-    /// them in. Hosts identify a parameter by a hash of its key, so the
-    /// order may change between versions.
-    const PARAMS: &'static [ParamDecl];
+    /// The parameters a host is shown: a struct that declares each one in
+    /// [`Params::declare`], in the order hosts list them within their group.
+    /// `()` declares none.
+    ///
+    /// Hosts identify a parameter by a hash of its key, so the order may
+    /// change between versions.
+    type Params: Params;
+
+    /// The version of the plugin's own saved-state schema, which a saved
+    /// block carries apart from Seam's.
+    ///
+    /// It stays 0, the default, until a block of the old shape would load
+    /// wrong: a parameter renamed or rescaled, a section restructured. The
+    /// plugin then raises it, and upgrades a block of an older version in
+    /// [`migrate`](Self::migrate).
+    const SCHEMA_VERSION: u64 = 0;
 
     /// The audio-thread half.
     type Processor: Processor;
 
-    /// Creates an instance.
+    /// Creates an instance from what Seam built for it: the parameters its
+    /// [`Params`](Self::Params) declared, and its [`Parts`].
+    ///
+    /// The plugin keeps what it uses. One that keeps the parts ticks them in
+    /// [`idle`](Self::idle).
     ///
     /// Thread: main, or for a plugin that is `Send` the thread that calls
     /// the C interface's `create`.
-    fn new() -> Self;
+    fn new(params: Self::Params, parts: Parts) -> Self;
 
-    /// Returns the saved state that the host's save and load calls go
-    /// through.
+    /// Upgrades a block an older schema saved, in place, from its version
+    /// `from`.
     ///
-    /// The exporter calls it once, after [`new`](Self::new), and keeps the
-    /// handle for the instance's life. The exporter takes the plugin's
-    /// parameter set from that handle ([`SavedState::set`]), so it never
-    /// builds a second one from [`PARAMS`](Self::PARAMS).
+    /// Seam calls it only while [`SCHEMA_VERSION`](Self::SCHEMA_VERSION) is
+    /// above 0, for a block of a lower version, with the block as a JSON
+    /// object holding its `parameters` and `extra`. The rules a migration
+    /// keeps, such as never overwriting a key the block holds, are on
+    /// [`SavedState::with_migration`](crate::SavedState::with_migration),
+    /// whose example is one. By default it changes nothing.
     ///
-    /// Thread: main.
-    fn saved(&self) -> Arc<SavedState>;
+    /// It runs inside the host's load, on whichever thread the host loads
+    /// from, which is why it has no `self`: it touches only the block.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the plugin returns, as the reason the host's load is
+    /// refused. The load then changes nothing.
+    fn migrate(
+        from: u64,
+        block: &mut Map<String, Json>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let _ = (from, block);
+        Ok(())
+    }
 
     /// Builds the processor for `setup`.
     ///
@@ -213,22 +262,13 @@ pub trait Plugin: 'static {
     ///
     /// Afterwards the exporter tells the host of the edits the plugin made;
     /// nothing else of the plugin's runs on a tick unless it calls it here.
-    ///
-    /// A plugin built on Seam's crates calls, in this order:
-    ///
-    /// 1. `Learn::poll`, when it uses MIDI learn: it commits a mapping
-    ///    learned since the last tick and writes the learned values.
-    /// 2. [`SessionUi::tick`](seam_session::SessionUi::tick): it captures
-    ///    what changed for the next save, and applies a session a host's
-    ///    load restored. Learn's poll holds learn as it commits a mapping, so
-    ///    the session can capture it only at its next tick. Polled after the
-    ///    tick, a new mapping misses the save until the tick after.
-    /// 3. `History::tick`, when it keeps undo: it records what changed since
-    ///    the last tick. Its place does not matter: it clears the history
-    ///    whenever a restore was stored or applied since it last looked.
+    /// A plugin that keeps its [`Parts`] calls [`Parts::tick`] here, on
+    /// every tick: it applies a session the host's load restored, and runs
+    /// undo and learn. An exporter reports a plugin that keeps its parts and
+    /// lets a tick pass without it, once, as a fault.
     ///
     /// Surfaces that show values poll their [watches](seam_params::Watch) on
-    /// the tick too, in any order with these.
+    /// the tick too, in any order with the parts' tick.
     ///
     /// Thread: main. The JUCE adapter ticks it on every platform it builds
     /// for, the VST3 exporter with its own timer on Windows and macOS, the
@@ -241,18 +281,28 @@ pub trait Plugin: 'static {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use std::cell::RefCell;
-    /// use std::rc::Rc;
-    /// use std::sync::Arc;
+    /// A synth with undo and MIDI learn: one tick records a drag, and the
+    /// next commits a learned controller and saves its mapping.
     ///
-    /// use seam_host::{Block, Plugin, ProcessSetup, Processor, SavedState, Status};
-    /// use seam_learn::{Config, Learn, LearnAudio, SESSION_KEY, Takes};
-    /// use seam_params::{Kind, ParamDecl, ParamSet, UiParams};
-    /// use seam_session::{Session, SessionUi};
+    /// ```
+    /// use seam_host::{Block, Parts, Plugin, ProcessSetup, Processor, Status};
+    /// use seam_learn::{Config, LearnAudio, SESSION_KEY, Takes};
+    /// use seam_params::{Declarer, Float, FloatDecl, Params};
     /// use seam_undo::{Bound, History};
     /// # use seam_host::{AuCodes, Category, Layout, PluginInfo};
     /// # use seam_ump::{ChannelVoice, EventList, Voice};
+    ///
+    /// struct SynthParams {
+    ///     cutoff: Float,
+    /// }
+    ///
+    /// impl Params for SynthParams {
+    ///     fn declare(p: &mut Declarer) -> Self {
+    ///         SynthParams {
+    ///             cutoff: p.add(FloatDecl::new("cutoff", "Cutoff", 20.0..=20_000.0, 1_000.0)),
+    ///         }
+    ///     }
+    /// }
     ///
     /// /// The processor: learn's audio side reads each block's MIDI first.
     /// struct Voices {
@@ -267,11 +317,8 @@ pub trait Plugin: 'static {
     /// }
     ///
     /// struct Synth {
-    ///     saved: Arc<SavedState>,
-    ///     /// What the plugin's page and controls write through.
-    ///     params: UiParams,
-    ///     session: SessionUi,
-    ///     learn: Rc<RefCell<Learn>>,
+    ///     parts: Parts,
+    ///     params: SynthParams,
     ///     history: History,
     /// }
     ///
@@ -292,54 +339,30 @@ pub trait Plugin: 'static {
     /// #       midi_input: true,
     /// #       midi_output: false,
     /// #   };
-    /// #   const PARAMS: &'static [ParamDecl] = &[ParamDecl::new(
-    /// #       "cutoff",
-    /// #       "Cutoff",
-    /// #       Kind::continuous(20.0, 20_000.0, 0.0, None),
-    /// #       1_000.0,
-    /// #   )];
+    ///     type Params = SynthParams;
     ///     type Processor = Voices;
     ///
-    ///     fn new() -> Self {
-    ///         let set = ParamSet::from_decls(Self::PARAMS.iter().copied()).expect("valid");
-    ///         let session = Session::new(&set);
-    ///         let ui = session.take_ui().expect("the first session UI handle");
-    ///         // Each activation takes an audio side of its own, in `activate`.
-    ///         let (learn, _) = Learn::new(&set, Config::default());
-    ///         let learn = Rc::new(RefCell::new(learn));
-    ///         Learn::attach(&learn, &ui).expect("learn's key is free");
-    ///         let params = set.take_ui().expect("the first UI handle");
-    ///         let history = History::new(&params, Bound::default()).expect("the first history");
-    ///         history.enroll_params();
-    ///         Synth {
-    ///             saved: Arc::new(SavedState::new(&set, &session)),
-    ///             params,
-    ///             session: ui,
-    ///             learn,
-    ///             history,
-    ///         }
+    ///     fn new(params: SynthParams, mut parts: Parts) -> Self {
+    ///         let history = parts.undo(Bound::default()).expect("no other history");
+    ///         parts.midi_learn(Config::default()).expect("learn's key is free");
+    ///         Synth { parts, params, history }
     ///     }
     ///
     ///     fn activate(&mut self, _setup: &ProcessSetup) -> Voices {
-    ///         Voices { learn: self.learn.borrow_mut().replace_audio() }
+    ///         Voices { learn: self.parts.learn_audio() }
     ///     }
     ///
     ///     fn idle(&mut self) {
-    ///         let _learned = self.learn.borrow_mut().poll();
-    ///         self.session.tick();
-    ///         self.history.tick();
+    ///         let _learned = self.parts.tick();
     ///     }
-    /// #
-    /// #   fn saved(&self) -> Arc<SavedState> {
-    /// #       Arc::clone(&self.saved)
-    /// #   }
     /// }
     ///
-    /// let mut synth = Synth::new();
-    /// let cutoff = synth.saved().set().id("cutoff").ok_or("declared")?;
+    /// let (params, parts) = Parts::for_plugin::<Synth>()?;
+    /// let mut synth = Synth::new(params, parts);
+    /// let cutoff = synth.params.cutoff.id();
     ///
     /// // The user drags the cutoff on the page: one undo step at the next tick.
-    /// synth.params.write(cutoff, 500.0);
+    /// synth.parts.params().write(cutoff, 500.0);
     /// synth.idle();
     /// assert_eq!(synth.history.len(), 1);
     ///
@@ -352,7 +375,7 @@ pub trait Plugin: 'static {
     /// #     max_out_events: 0,
     /// # };
     /// let mut voices = synth.activate(&setup);
-    /// synth.learn.borrow_mut().arm(cutoff, Takes::CONTROLLER)?;
+    /// synth.parts.learn().arm(cutoff, Takes::CONTROLLER)?;
     /// # let voice = Voice::Midi1ControlChange { controller: 74, value: 64 };
     /// # let mut events = EventList::with_capacity(1);
     /// # events.push(ChannelVoice { group: 0, channel: 0, voice }.event(0));
@@ -363,7 +386,7 @@ pub trait Plugin: 'static {
     /// synth.idle();
     ///
     /// // One tick, and the host's next save holds the mapping.
-    /// let block: serde_json::Value = serde_json::from_slice(&synth.saved().save())?;
+    /// let block: serde_json::Value = serde_json::from_slice(&synth.parts.saved().save())?;
     /// assert_eq!(block["extra"][SESSION_KEY]["mappings"][0]["target"], "cutoff");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

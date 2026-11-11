@@ -1,12 +1,10 @@
-# use std::sync::Arc;
 # use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 #
 # use seam_host::{
-#     AuCodes, Block, Category, EventList, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
-#     SavedState, Status, Tail,
+#     AuCodes, Block, Category, EventList, Layout, Parts, Plugin, PluginInfo, ProcessSetup,
+#     Processor, Status, Tail,
 # };
-# use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet};
-# use seam_session::Session;
+# use seam_params::{Declarer, Float, FloatDecl, Params};
 #
 # /// Main-thread ticks the plugin has had.
 # static TICKS: AtomicU32 = AtomicU32::new(0);
@@ -16,15 +14,26 @@
 # /// would.
 # static EDIT: AtomicBool = AtomicBool::new(false);
 #
-# /// Scales every channel by the gain parameter, and sleeps on silence.
-# struct Level {
-#     params: AudioParams,
-#     gain: ParamId,
+# /// One parameter, a gain in decibels.
+# #[derive(Clone)]
+# struct GainParams {
+#     gain: Float,
 # }
+#
+# impl Params for GainParams {
+#     fn declare(p: &mut Declarer) -> Self {
+#         GainParams {
+#             gain: p.add(FloatDecl::new("gain", "Gain", -24.0..=24.0, 0.0).with_unit("dB")),
+#         }
+#     }
+# }
+#
+# /// Scales every channel by the gain parameter, and sleeps on silence.
+# struct Level(GainParams);
 #
 # impl Processor for Level {
 #     fn process(&mut self, block: Block<'_, '_>) -> Status {
-#         let gain = 10.0_f32.powf(self.params.value(self.gain) / 20.0);
+#         let gain = 10.0_f32.powf(self.0.gain.get() / 20.0);
 #         let mut peak = 0.0_f32;
 #         for channel in block.channels.iter_mut() {
 #             for sample in channel.iter_mut() {
@@ -37,54 +46,37 @@
 # }
 #
 # /// A plugin with one parameter, a gain in decibels.
-# struct Gain(Arc<SavedState>);
-#
-# const GAIN_INFO: PluginInfo = PluginInfo {
-#     name: "Gain",
-#     vendor: "Example",
-#     url: "",
-#     email: "",
-#     description: "",
-#     version: "0.1.0",
-#     id: "dev.example.gain",
-#     vst3_class_id: [0; 16],
-#     au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
-#     category: Category::Effect,
-#     features: &[],
-#     layouts: &[Layout::STEREO],
-#     midi_input: false,
-#     midi_output: false,
-# };
-#
-# const GAIN_PARAMS: &[ParamDecl] = &[
-#     ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.0, None), 0.0).with_unit("dB"),
-# ];
-#
-# fn gain_new() -> Gain {
-#     let set = ParamSet::from_decls(GAIN_PARAMS.iter().copied()).expect("valid declarations");
-#     Gain(Arc::new(SavedState::new(&set, &Session::new(&set))))
-# }
-#
-# fn gain_level(plugin: &Gain) -> Level {
-#     let set = plugin.0.set();
-#     Level { params: set.audio(), gain: set.id("gain").expect("declared") }
+# struct Gain {
+#     parts: Parts,
+#     params: GainParams,
 # }
 #
 # impl Plugin for Gain {
-#     const INFO: PluginInfo = GAIN_INFO;
-#     const PARAMS: &'static [ParamDecl] = GAIN_PARAMS;
+#     const INFO: PluginInfo = PluginInfo {
+#         name: "Gain",
+#         vendor: "Example",
+#         url: "",
+#         email: "",
+#         description: "",
+#         version: "0.1.0",
+#         id: "dev.example.gain",
+#         vst3_class_id: [0; 16],
+#         au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
+#         category: Category::Effect,
+#         features: &[],
+#         layouts: &[Layout::STEREO],
+#         midi_input: false,
+#         midi_output: false,
+#     };
+#     type Params = GainParams;
 #     type Processor = Level;
 #
-#     fn new() -> Self {
-#         gain_new()
-#     }
-#
-#     fn saved(&self) -> Arc<SavedState> {
-#         Arc::clone(&self.0)
+#     fn new(params: GainParams, parts: Parts) -> Self {
+#         Gain { parts, params }
 #     }
 #
 #     fn activate(&mut self, _setup: &ProcessSetup) -> Level {
-#         gain_level(self)
+#         Level(self.params.clone())
 #     }
 #
 #     fn latency(&self) -> u32 {
@@ -98,10 +90,9 @@
 #     fn idle(&mut self) {
 #         assert!(!BREAK.load(Ordering::Relaxed), "the plugin broke");
 #         TICKS.fetch_add(1, Ordering::Relaxed);
+#         self.parts.tick();
 #         if EDIT.swap(false, Ordering::Relaxed) {
-#             let set = self.0.set();
-#             let ui = set.take_ui().expect("the first UI handle");
-#             ui.write(set.id("gain").expect("declared"), 6.0);
+#             self.parts.params().write(self.params.gain.id(), 6.0);
 #         }
 #     }
 # }

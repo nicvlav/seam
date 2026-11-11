@@ -189,6 +189,13 @@ editor's layout. It saves one [section](#section) under a stable key, and a
 restore applies to it on a later tick
 ([`Participant`](../crates/session/src/lib.rs)).
 
+### Parts
+
+One instance's parameter set, the session and the saved state over it, and
+its undo history and learn once the plugin turns them on. Seam builds them from
+the plugin's declarations and hands them to `Plugin::new`; a plugin that keeps
+them ticks them from its idle ([`Parts`](../crates/host/src/parts.rs)).
+
 ### Pass
 
 A session's apply pass. On a tick,
@@ -299,7 +306,8 @@ target the plugin registers, written on the UI thread in [bursts](#burst)
 One call of [`Plugin::idle`](../crates/host/src/plugin.rs), about 60 times a
 second on the main thread for the instance's life, editor open or not. "Once per
 UI tick" means from that call: `Learn::poll`, `SessionUi::tick` and
-`History::tick` run there.
+`History::tick` run there, through
+[`Parts::tick`](../crates/host/src/parts.rs).
 
 ### Tier
 

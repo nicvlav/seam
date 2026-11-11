@@ -1,14 +1,16 @@
 //! The C interface through its table, as the JUCE adapter drives it.
 
 use std::cell::{Cell, RefCell};
+use std::error::Error;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use seam_params::{
-    AudioParams, Gesture, Kind, ParamDecl, ParamId, ParamSet, ProgramParams, UiParams, host_id,
+    AudioParams, Declarer, Gesture, Kind, ParamDecl, ParamId, ParamSet, Params, ProgramParams,
+    host_id,
 };
-use seam_session::Session;
+use serde_json::{Map, Value as Json};
 
 use super::instance::{Callbacks, Instance};
 use super::{
@@ -20,8 +22,8 @@ use super::{
 use crate::boundary::tests::Watched;
 use crate::faults::{thread_faults, written};
 use crate::{
-    AuCodes, Block, Category, Feature, Layout, Plugin, PluginInfo, ProcessSetup, Processor,
-    SavedState, Status, Tail,
+    AuCodes, Block, Category, Feature, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status, Tail,
 };
 use seam_testkit::sync::{Latch, PATIENCE, wait_until};
 
@@ -43,6 +45,16 @@ const PARAMS: &[ParamDecl] = &[
 const GAIN: u32 = 0;
 const MODE: u32 = 1;
 const BYPASS: u32 = 2;
+
+/// The test plugins' parameters, declared from [`PARAMS`].
+struct Table;
+
+impl Params for Table {
+    fn declare(p: &mut Declarer) -> Self {
+        p.extend(PARAMS.iter().copied());
+        Table
+    }
+}
 
 /// What the probe was asked to do and what it saw, shared by the plugin and
 /// its processor, which a test host runs on the test's own thread.
@@ -77,16 +89,16 @@ fn probe<R>(f: impl FnOnce(&mut ProbeState) -> R) -> R {
     PROBE.with(|state| f(&mut state.borrow_mut()))
 }
 
+/// Keeps its parts, and ticks them.
 struct Probe {
-    saved: Arc<SavedState>,
-    ui: UiParams,
+    parts: Parts,
     program: ProgramParams,
     held: Option<Gesture>,
 }
 
 impl Probe {
     fn id(&self, key: &str) -> ParamId {
-        self.saved.set().id(key).expect("declared")
+        self.parts.set().id(key).expect("declared")
     }
 }
 
@@ -153,24 +165,17 @@ impl Plugin for Probe {
         midi_input: false,
         midi_output: false,
     };
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = ProbeProcessor;
 
-    fn new() -> Self {
+    fn new(_: Table, parts: Parts) -> Self {
         // Each test's probe starts afresh, even on a thread another used.
         probe(|state| *state = ProbeState::default());
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let session = Session::new(&set);
         Probe {
-            saved: Arc::new(SavedState::new(&set, &session)),
-            ui: set.take_ui().expect("the first UI handle"),
-            program: set.program(),
+            program: parts.set().program(),
+            parts,
             held: None,
         }
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.saved)
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> ProbeProcessor {
@@ -180,7 +185,7 @@ impl Plugin for Probe {
         );
         probe(|state| state.setups.push(*setup));
         ProbeProcessor {
-            params: self.saved.set().audio(),
+            params: self.parts.set().audio(),
             gain: self.id("gain"),
             drops: probe(|state| Arc::clone(&state.processor_drops)),
             panic_on_drop: probe(|state| state.panic_in_processor_drop),
@@ -203,14 +208,15 @@ impl Plugin for Probe {
     fn idle(&mut self) {
         probe(|state| state.idles += 1);
         assert!(!probe(|state| state.panic_in_idle), "an idle call's bug");
+        self.parts.tick();
         if let Some((key, value)) = probe(|state| state.edit.take()) {
-            assert!(self.ui.write(self.id(key), value));
+            assert!(self.parts.params().write(self.id(key), value));
         }
         if let Some((key, value)) = probe(|state| state.sync.take()) {
             self.program.sync(self.id(key), value);
         }
         if probe(|state| state.hold) && self.held.is_none() {
-            let gesture = self.ui.begin(self.id("gain"));
+            let gesture = self.parts.params().begin(self.id("gain"));
             gesture.write(3.0);
             self.held = Some(gesture);
         }
@@ -312,17 +318,20 @@ fn values_and_their_text_go_through_the_declarations() {
 fn text_is_cut_at_a_character() {
     const UNIT: &[ParamDecl] =
         &[ParamDecl::new("level", "Level", Kind::Choice(&["éé", "b"]), 0.0).with_unit("µ")];
-    struct Accents(Arc<SavedState>);
+    struct Unit;
+    impl Params for Unit {
+        fn declare(p: &mut Declarer) -> Self {
+            p.extend(UNIT.iter().copied());
+            Unit
+        }
+    }
+    struct Accents;
     impl Plugin for Accents {
         const INFO: PluginInfo = Probe::INFO;
-        const PARAMS: &'static [ParamDecl] = UNIT;
+        type Params = Unit;
         type Processor = ProbeProcessor;
-        fn new() -> Self {
-            let set = ParamSet::from_decls([UNIT[0]]).expect("valid");
-            Accents(Arc::new(SavedState::new(&set, &Session::new(&set))))
-        }
-        fn saved(&self) -> Arc<SavedState> {
-            Arc::clone(&self.0)
+        fn new(_: Unit, _: Parts) -> Self {
+            Accents
         }
         fn activate(&mut self, _: &ProcessSetup) -> ProbeProcessor {
             unreachable!("never activated")
@@ -1120,15 +1129,15 @@ impl Plugin for Instrument {
         midi_output: false,
         ..Probe::INFO
     };
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = ProbeProcessor;
 
-    fn new() -> Self {
-        Instrument(Probe::new())
+    fn new(params: Table, parts: Parts) -> Self {
+        Instrument(Probe::new(params, parts))
     }
 
-    fn saved(&self) -> Arc<SavedState> {
-        self.0.saved()
+    fn idle(&mut self) {
+        self.0.idle();
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> ProbeProcessor {
@@ -1319,15 +1328,19 @@ fn the_juce_settings_refuse_keys_whose_juce_ids_collide() {
         ParamDecl::new("Aa", PARAMS[0].name, PARAMS[0].kind, PARAMS[0].default),
         ParamDecl::new("BB", PARAMS[0].name, PARAMS[0].kind, PARAMS[0].default),
     ];
+    struct Collide;
+    impl Params for Collide {
+        fn declare(p: &mut Declarer) -> Self {
+            p.extend(COLLIDING.iter().copied());
+            Collide
+        }
+    }
     struct Colliding;
     impl Plugin for Colliding {
         const INFO: PluginInfo = Probe::INFO;
-        const PARAMS: &'static [ParamDecl] = COLLIDING;
+        type Params = Collide;
         type Processor = ProbeProcessor;
-        fn new() -> Self {
-            unreachable!("never created")
-        }
-        fn saved(&self) -> Arc<SavedState> {
+        fn new(_: Collide, _: Parts) -> Self {
             unreachable!("never created")
         }
         fn activate(&mut self, _: &ProcessSetup) -> ProbeProcessor {
@@ -1353,18 +1366,22 @@ fn the_juce_settings_refuse_a_midi_controllers_id_only_for_midi_input() {
         PARAMS[0].kind,
         PARAMS[0].default,
     )];
+    struct Controller;
+    impl Params for Controller {
+        fn declare(p: &mut Declarer) -> Self {
+            p.extend(CONTROLLER.iter().copied());
+            Controller
+        }
+    }
     struct Keyed<const MIDI_INPUT: bool>;
     impl<const MIDI_INPUT: bool> Plugin for Keyed<MIDI_INPUT> {
         const INFO: PluginInfo = PluginInfo {
             midi_input: MIDI_INPUT,
             ..Probe::INFO
         };
-        const PARAMS: &'static [ParamDecl] = CONTROLLER;
+        type Params = Controller;
         type Processor = ProbeProcessor;
-        fn new() -> Self {
-            unreachable!("never created")
-        }
-        fn saved(&self) -> Arc<SavedState> {
+        fn new(_: Controller, _: Parts) -> Self {
             unreachable!("never created")
         }
         fn activate(&mut self, _: &ProcessSetup) -> ProbeProcessor {
@@ -1382,9 +1399,10 @@ fn the_juce_settings_refuse_a_midi_controllers_id_only_for_midi_input() {
     assert!(message.contains("MIDI controller"), "{message}");
 }
 
-/// A plugin with no state but its saved block, whose processor passes audio
-/// through; `Send`, so its instance is lent to any thread.
-struct Mover(Arc<SavedState>);
+/// A plugin with no state but its parameter set, whose processor passes
+/// audio through; `Send`, since it drops its parts, so its instance is lent
+/// to any thread.
+struct Mover(Arc<ParamSet>);
 
 struct Through;
 
@@ -1396,16 +1414,11 @@ impl Processor for Through {
 
 impl Plugin for Mover {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = Through;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        Mover(Arc::new(SavedState::new(&set, &Session::new(&set))))
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+    fn new(_: Table, parts: Parts) -> Self {
+        Mover(Arc::clone(parts.set()))
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> Through {
@@ -1419,15 +1432,11 @@ struct Fixed(Mover, std::marker::PhantomData<std::rc::Rc<()>>);
 
 impl Plugin for Fixed {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = Through;
 
-    fn new() -> Self {
-        Fixed(Mover::new(), std::marker::PhantomData)
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        self.0.saved()
+    fn new(params: Table, parts: Parts) -> Self {
+        Fixed(Mover::new(params, parts), std::marker::PhantomData)
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> Through {
@@ -1572,15 +1581,11 @@ struct HeldActivation(Mover);
 
 impl Plugin for HeldActivation {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = Through;
 
-    fn new() -> Self {
-        HeldActivation(Mover::new())
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        self.0.saved()
+    fn new(params: Table, parts: Parts) -> Self {
+        HeldActivation(Mover::new(params, parts))
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> Through {
@@ -1639,15 +1644,11 @@ impl<const GATE: usize> Drop for HeldTick<GATE> {
 
 impl<const GATE: usize> Plugin for HeldTick<GATE> {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = Through;
 
-    fn new() -> Self {
-        HeldTick(Mover::new())
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        self.0.saved()
+    fn new(params: Table, parts: Parts) -> Self {
+        HeldTick(Mover::new(params, parts))
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> Through {
@@ -1824,17 +1825,13 @@ impl Drop for Syncer {
 
 impl Plugin for Syncer {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
     type Processor = Through;
 
-    fn new() -> Self {
-        let mover = Mover::new();
-        let program = mover.0.set().program();
+    fn new(params: Table, parts: Parts) -> Self {
+        let mover = Mover::new(params, parts);
+        let program = mover.0.program();
         Syncer(mover, program)
-    }
-
-    fn saved(&self) -> Arc<SavedState> {
-        self.0.saved()
     }
 
     fn activate(&mut self, setup: &ProcessSetup) -> Through {
@@ -1847,7 +1844,7 @@ impl Plugin for Syncer {
 
     fn idle(&mut self) {
         let count = SYNCER_IDLES.fetch_add(1, Ordering::Relaxed);
-        let gain = self.0.0.set().id("gain").expect("declared");
+        let gain = self.0.0.id("gain").expect("declared");
         let _ = self.1.sync(gain, count as f32 + 1.0);
     }
 }
@@ -1933,7 +1930,7 @@ fn an_instance_bound_to_no_thread_starts_no_timer() {
 }
 
 /// A plugin whose migration refuses every older block, with a reason.
-struct Stuck(Arc<SavedState>);
+struct Stuck;
 
 struct StuckProcessor;
 
@@ -1945,18 +1942,16 @@ impl Processor for StuckProcessor {
 
 impl Plugin for Stuck {
     const INFO: PluginInfo = Probe::INFO;
-    const PARAMS: &'static [ParamDecl] = PARAMS;
+    type Params = Table;
+    const SCHEMA_VERSION: u64 = 1;
     type Processor = StuckProcessor;
 
-    fn new() -> Self {
-        let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid");
-        let saved = SavedState::new(&set, &Session::new(&set))
-            .with_migration(1, |_, _| Err("no whole steps".into()));
-        Stuck(Arc::new(saved))
+    fn new(_: Table, _: Parts) -> Self {
+        Stuck
     }
 
-    fn saved(&self) -> Arc<SavedState> {
-        Arc::clone(&self.0)
+    fn migrate(_: u64, _: &mut Map<String, Json>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Err("no whole steps".into())
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> StuckProcessor {
@@ -1985,4 +1980,46 @@ fn the_first_refused_load_writes_the_reason_and_is_no_fault_through_the_cabi_exp
     assert_eq!(host.load(older), Err(Refused), "refused again");
     assert_eq!(written(), Vec::<String>::new(), "and said once");
     assert_eq!(thread_faults(), faults, "a refused load is no fault");
+}
+
+/// Declares one key twice, which the set refuses.
+struct Twice;
+
+impl Params for Twice {
+    fn declare(p: &mut Declarer) -> Self {
+        p.extend([PARAMS[0], PARAMS[0]]);
+        Twice
+    }
+}
+
+/// A plugin whose declarations are refused, so no instance is built.
+struct Unbuilt;
+
+impl Plugin for Unbuilt {
+    const INFO: PluginInfo = Probe::INFO;
+    type Params = Twice;
+    type Processor = Through;
+
+    fn new(_: Twice, _: Parts) -> Self {
+        unreachable!("never built")
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Through {
+        unreachable!("never built")
+    }
+}
+
+#[test]
+fn a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter() {
+    let faults = thread_faults();
+    written();
+    let table = plugin::<Unbuilt>();
+    // SAFETY: `create` takes a null host as one with no callbacks.
+    let instance = unsafe { (table.create)(std::ptr::null()) };
+    assert!(instance.is_null(), "no instance");
+    assert_eq!(thread_faults(), faults + 1, "the refusal counts as a fault");
+    let lines = written();
+    let refusal = "seam: Probe: no instance was built, since a declaration was refused: \
+                   key \"gain\" is declared twice.";
+    assert!(lines.iter().any(|line| line == refusal), "{lines:?}");
 }

@@ -3,9 +3,12 @@
 
 use std::sync::Arc;
 
-use seam_example_eq::{EqProcessor, ExampleEq, PARAMS};
+use seam_example_eq::EqProcessor;
 use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor, SavedState};
 use seam_params::{Kind, ParamDecl};
+
+mod common;
+use common::{built, declarations};
 
 const RATE: f64 = 48_000.0;
 const MAX_FRAMES: usize = 512;
@@ -72,21 +75,18 @@ fn noise(samples: usize) -> Vec<f32> {
 #[test]
 fn every_declaration_is_accepted_with_its_own_host_id() {
     // The builder refused nothing, and no two keys share a host id.
-    let plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (_, saved) = built();
     let set = saved.set();
-    assert_eq!(set.len(), PARAMS.len());
-    assert_eq!(PARAMS.len(), 25);
+    assert_eq!(set.len(), 25);
     let mut ids: Vec<u32> = set.ids().map(|id| set.host_id(id)).collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), PARAMS.len());
+    assert_eq!(ids.len(), 25);
 }
 
 #[test]
 fn a_flat_eq_passes_audio_through() {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     set(&saved, "hp.on", 0.0);
     let mut processor = plugin.activate(&setup());
     let level = dc(&mut processor, 48_000);
@@ -95,8 +95,7 @@ fn a_flat_eq_passes_audio_through() {
 
 #[test]
 fn a_low_shelf_sets_the_dc_gain() {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     only(&saved, &["low"]);
     set(&saved, "low.gain", -12.0);
     set(&saved, "low.freq", 450.0);
@@ -107,8 +106,7 @@ fn a_low_shelf_sets_the_dc_gain() {
 
 #[test]
 fn a_change_between_blocks_retunes_the_next_block() {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     only(&saved, &[]);
     let mut processor = plugin.activate(&setup());
     assert_eq!(dc(&mut processor, 64), 1.0, "every band off and 0 dB out");
@@ -122,8 +120,7 @@ fn a_change_between_blocks_retunes_the_next_block() {
 #[test]
 fn a_saved_state_loads_into_a_fresh_instance_on_another_thread() {
     // The host saves and loads on threads of its own.
-    let mut first = ExampleEq::new();
-    let saved = first.saved();
+    let (mut first, saved) = built();
     set(&saved, "mid.gain", 7.5);
     set(&saved, "mid.freq", 2_200.0);
     set(&saved, "high.on", 0.0);
@@ -135,8 +132,7 @@ fn a_saved_state_loads_into_a_fresh_instance_on_another_thread() {
             .expect("the host's thread")
     });
 
-    let mut second = ExampleEq::new();
-    let loaded = second.saved();
+    let (mut second, loaded) = built();
     std::thread::scope(|scope| {
         scope
             .spawn(|| assert!(loaded.load(&bytes).is_ok()))
@@ -162,15 +158,14 @@ fn a_saved_state_loads_into_a_fresh_instance_on_another_thread() {
 fn loads_racing_the_audio_thread_end_on_the_last_one() {
     // A load on a host thread while blocks run never leaves the
     // processor tuned to anything but a state that was loaded.
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     let states: Vec<Vec<u8>> = [-12.0f32, 6.0, 0.5]
         .into_iter()
         .map(|gain| {
-            let other = ExampleEq::new();
-            set(&other.saved(), "lowmid.gain", gain);
-            set(&other.saved(), "out.gain", gain / 2.0);
-            other.saved().save()
+            let (_, other) = built();
+            set(&other, "lowmid.gain", gain);
+            set(&other, "out.gain", gain / 2.0);
+            other.save()
         })
         .collect();
     let mut processor = plugin.activate(&setup());
@@ -190,8 +185,8 @@ fn loads_racing_the_audio_thread_end_on_the_last_one() {
         }
     });
 
-    let mut fresh = ExampleEq::new();
-    assert!(fresh.saved().load(&states[2]).is_ok());
+    let (mut fresh, loaded) = built();
+    assert!(loaded.load(&states[2]).is_ok());
     let mut expected = fresh.activate(&setup());
     let mut outputs = Vec::new();
     for processor in [&mut processor, &mut expected] {
@@ -240,22 +235,22 @@ fn each_parameter_retunes_on_its_own() {
         run(processor, &mut left, &mut right);
         left
     };
-    for decl in PARAMS {
+    for decl in &declarations() {
         let new = another(decl);
-        let mut changed = ExampleEq::new();
-        audible(&changed.saved());
+        let (mut changed, saved) = built();
+        audible(&saved);
         let mut processor = changed.activate(&setup());
         dc(&mut processor, 64);
-        set(&changed.saved(), decl.key, new);
+        set(&saved, decl.key, new);
         dc(&mut processor, 1);
         let after = from_silence(&mut processor);
 
-        let mut tuned = ExampleEq::new();
-        audible(&tuned.saved());
-        set(&tuned.saved(), decl.key, new);
+        let (mut tuned, saved) = built();
+        audible(&saved);
+        set(&saved, decl.key, new);
         let expected = from_silence(&mut tuned.activate(&setup()));
-        let mut old = ExampleEq::new();
-        audible(&old.saved());
+        let (mut old, saved) = built();
+        audible(&saved);
         let before = from_silence(&mut old.activate(&setup()));
         assert_eq!(after, expected, "{} retuned its band", decl.key);
         assert_ne!(after, before, "{} changes the sound", decl.key);
@@ -268,8 +263,7 @@ fn a_band_switched_back_on_resumes_warm() {
     // ProcessorChain bypass does, so it comes back with the state it kept.
     let input = noise(MAX_FRAMES * 8);
     let outputs = [true, false].map(|on_from_start| {
-        let mut plugin = ExampleEq::new();
-        let saved = plugin.saved();
+        let (mut plugin, saved) = built();
         only(&saved, &["mid"]);
         set(&saved, "mid.gain", 12.0);
         set(&saved, "mid.freq", 200.0);
@@ -299,8 +293,7 @@ fn a_retune_keeps_the_filter_state() {
     // click on each.
     let input = noise(MAX_FRAMES * 4);
     let played = |restart: bool| {
-        let mut plugin = ExampleEq::new();
-        let saved = plugin.saved();
+        let (mut plugin, saved) = built();
         only(&saved, &["mid"]);
         set(&saved, "mid.gain", 6.0);
         let mut processor = plugin.activate(&setup());
@@ -324,8 +317,7 @@ fn a_retune_keeps_the_filter_state() {
 
 #[test]
 fn a_short_block_leaves_the_rest_of_the_buffer_alone() {
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     set(&saved, "mid.gain", 12.0);
     set(&saved, "out.gain", -6.0);
     let mut processor = plugin.activate(&setup());

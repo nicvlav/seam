@@ -8,8 +8,8 @@ use seam_fuzz::Fuzzed;
 use seam_host::Plugin;
 
 fuzz_target!(|data: &[u8]| {
-    let mut plugin = Fuzzed::new();
-    let saved = plugin.saved();
+    let mut plugin = Fuzzed::built();
+    let saved = std::sync::Arc::clone(plugin.saved());
     let _ = saved.load(data);
     plugin.idle();
     let block = saved.save();

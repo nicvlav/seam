@@ -26,6 +26,10 @@
 //! - **A fault outside any instance** is reported at once, on the thread it
 //!   happens on, the first time its kind happens in the process. The calls
 //!   that catch one are not the audio thread's.
+//! - **A plugin's refused declarations** fail the instance's creation, as a
+//!   panic outside any instance. Each such refusal also writes a line with
+//!   the plugin's name and the reason, on the thread that tried to create
+//!   it: no instance exists to report it once.
 //!
 //! The panic itself is another matter. A processor that panics does so on
 //! the audio thread. There the panic allocates its payload, and std's
@@ -107,17 +111,21 @@ pub(crate) enum Fault {
     /// No main-thread timer started: the system refused one, or the
     /// instance has no thread of its own to run one on.
     NoTimer,
+    /// The plugin holds its parts and its idle did not tick them, so a
+    /// session the host's load restored never applies. Counted once.
+    Unticked,
 }
 
 impl Fault {
     /// Every kind, each once, in the order a report lists them.
-    const ALL: [Fault; 6] = [
+    const ALL: [Fault; 7] = [
         Fault::Panic,
         Fault::AudioPanic,
         Fault::WrongThread,
         Fault::HeldElsewhere,
         Fault::Reentered,
         Fault::NoTimer,
+        Fault::Unticked,
     ];
 
     fn bit(self) -> u8 {
@@ -146,6 +154,10 @@ impl Fault {
                 "a main-thread timer did not start (the system refused one, or the instance has \
                  no thread of its own), so it never ticks the plugin"
             }
+            Fault::Unticked => {
+                "the plugin keeps its parts but its idle did not tick them, so a project's \
+                 saved session never reaches the plugin; call Parts::tick from Plugin::idle"
+            }
         }
     }
 }
@@ -157,16 +169,17 @@ impl Fault {
 // until the match reads its new place too. The assertion keeps each kind's
 // bit inside the `u8`s that hold them.
 const _: () = {
-    const ALL: [Fault; 6] = Fault::ALL;
+    const ALL: [Fault; 7] = Fault::ALL;
     const FIRST: Fault = ALL[0];
     const SECOND: Fault = ALL[1];
     const THIRD: Fault = ALL[2];
     const FOURTH: Fault = ALL[3];
     const FIFTH: Fault = ALL[4];
     const SIXTH: Fault = ALL[5];
+    const SEVENTH: Fault = ALL[6];
     assert!(Fault::ALL.len() <= u8::BITS as usize);
     match Fault::Panic {
-        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH => {}
+        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH | SEVENTH => {}
     }
 };
 
@@ -184,6 +197,16 @@ pub(crate) fn record_fault(fault: Fault) {
     if REPORTED.fetch_or(fault.bit(), Ordering::Relaxed) & fault.bit() == 0 {
         write_line(&format!("seam: {}.", fault.what()));
     }
+}
+
+/// Writes one line for a plugin whose declarations were refused, naming
+/// `plugin` and the reason, `error`. The instance is not built: the caller
+/// panics next, and the shell's guard counts that. The caller is not the
+/// audio thread.
+pub(crate) fn report_refused_declarations(plugin: &str, error: &dyn Error) {
+    write_line(&format!(
+        "seam: {plugin}: no instance was built, since a declaration was refused: {error}."
+    ));
 }
 
 /// One instance's faults: how many, from every thread, and which kinds are

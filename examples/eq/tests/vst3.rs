@@ -2,13 +2,18 @@
 //! parameter list, its saved state, and audio that matches the processor
 //! driven directly, sample for sample.
 
-use seam_example_eq::{ExampleEq, PARAMS};
+use std::sync::LazyLock;
+
+use seam_example_eq::ExampleEq;
 use seam_host::vst3::TestHost;
 use seam_host::{Block, EventList, Layout, Plugin, ProcessSetup, Processor};
-use seam_params::{Kind, host_id};
+use seam_params::{Kind, ParamDecl, host_id};
 
 mod common;
-use common::{Noise, bits};
+use common::{Noise, bits, built, declarations};
+
+/// Every parameter's declaration, in the order hosts list them.
+static DECLARATIONS: LazyLock<Vec<ParamDecl>> = LazyLock::new(declarations);
 
 const RATE: f64 = 48_000.0;
 const MAX_FRAMES: usize = 512;
@@ -24,8 +29,8 @@ fn running() -> TestHost<ExampleEq> {
 #[test]
 fn the_host_lists_every_parameter_by_its_key_hash() {
     let host = TestHost::<ExampleEq>::new();
-    assert_eq!(host.parameter_count(), PARAMS.len());
-    for (index, decl) in PARAMS.iter().enumerate() {
+    assert_eq!(host.parameter_count(), DECLARATIONS.len());
+    for (index, decl) in DECLARATIONS.iter().enumerate() {
         let info = host.parameter(index).expect("listed");
         assert_eq!(info.id, host_id(decl.key), "{}", decl.key);
         assert_eq!(
@@ -52,8 +57,7 @@ fn the_host_lists_every_parameter_by_its_key_hash() {
 #[test]
 fn audio_through_the_exporter_matches_the_processor_driven_directly() {
     let mut host = running();
-    let mut plugin = ExampleEq::new();
-    let saved = plugin.saved();
+    let (mut plugin, saved) = built();
     let mut processor = plugin.activate(&ProcessSetup {
         sample_rate: RATE,
         max_frames: MAX_FRAMES,
@@ -70,7 +74,7 @@ fn audio_through_the_exporter_matches_the_processor_driven_directly() {
         let frames = [1, 16, 37, 64, 128, 255, 512][chooser.below(7)];
         let changes: Vec<(u32, f64)> = (0..chooser.below(4))
             .map(|_| {
-                let decl = &PARAMS[chooser.below(PARAMS.len())];
+                let decl = &DECLARATIONS[chooser.below(DECLARATIONS.len())];
                 (host_id(decl.key), chooser.unit())
             })
             .collect();
@@ -125,7 +129,7 @@ fn audio_through_the_exporter_matches_the_processor_driven_directly() {
 #[test]
 fn a_project_saved_through_the_exporter_reopens_the_same() {
     let mut host = running();
-    let changes: Vec<(u32, f64)> = PARAMS
+    let changes: Vec<(u32, f64)> = DECLARATIONS
         .iter()
         .enumerate()
         .map(|(index, decl)| (host_id(decl.key), (index as f64 * 0.37) % 1.0))
@@ -136,7 +140,7 @@ fn a_project_saved_through_the_exporter_reopens_the_same() {
 
     let reopened = TestHost::<ExampleEq>::new();
     assert_eq!(reopened.load(&block), Ok(()));
-    for decl in PARAMS {
+    for decl in DECLARATIONS.iter() {
         let id = host_id(decl.key);
         assert_eq!(reopened.normalized(id), host.normalized(id), "{}", decl.key);
     }
