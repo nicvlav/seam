@@ -35,6 +35,7 @@ seam-params.workspace = true
 seam-session.workspace = true
 seam-ump.workspace = true
 seam-undo.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 vst3 = { workspace = true, optional = true }
 

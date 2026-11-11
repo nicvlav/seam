@@ -83,6 +83,11 @@ delivered to a plugin through an exporter.
   `idle`; an exporter reports one that does not, once. A plugin declares its
   saved-state migration as `Plugin::SCHEMA_VERSION` and `Plugin::migrate`.
   `Parts::for_plugin` builds a plugin's parts with no host, for tests.
+- `seam-host`: a plain value saved with the session in one call.
+  `Parts::save` keeps any value serde can write and read saved under a key, as
+  JSON, and loads a default into it from a project saved without the key. A
+  change is captured at the next tick, or at once by `Parts::sync`, and a load
+  is captured once, by its apply.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
   main-thread timer.
 - The C interface (`export_cabi!`) and its generated header, `include/seam.h`,

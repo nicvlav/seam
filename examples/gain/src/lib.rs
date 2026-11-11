@@ -12,9 +12,6 @@
 #[cfg(feature = "vst3")]
 seam_host::export_vst3!(Gain);
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use seam_host::{
     AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
 };
@@ -23,8 +20,7 @@ use seam_params::{
     Bool, BoolDecl, Changes, Choice, ChoiceDecl, Choices, Declarer, Float, FloatDecl, Params,
     UiParams, Value,
 };
-use seam_session::{ApplyError, Participant, Registration, Section};
-use seam_undo::{Bound, History, HistoryError};
+use seam_undo::{Bound, History};
 
 const LABEL_KEY: &str = "label";
 const DEFAULT_LABEL: &str = "Untitled";
@@ -79,27 +75,6 @@ impl Params for GainParams {
     }
 }
 
-/// The label as a session participant: it saves and restores the value.
-#[derive(Debug)]
-struct LabelSection(Value<String>);
-
-impl Participant for LabelSection {
-    fn capture(&self) -> Section {
-        Section::String(self.0.get())
-    }
-
-    fn apply(&mut self, section: Option<&Section>) -> Result<(), ApplyError> {
-        let label = match section {
-            Some(section) => section
-                .as_str()
-                .ok_or_else(|| ApplyError::new("the label is not a string"))?,
-            None => DEFAULT_LABEL,
-        };
-        self.0.set(label.to_owned());
-        Ok(())
-    }
-}
-
 /// The plugin, on the main thread.
 #[derive(Debug)]
 pub struct Gain {
@@ -107,10 +82,6 @@ pub struct Gain {
     params: GainParams,
     history: History,
     label: Value<String>,
-    /// The session holds its participant weakly, so the plugin keeps it alive.
-    _label_section: Rc<RefCell<LabelSection>>,
-    label_registration: Registration,
-    label_seen: u64,
 }
 
 impl Gain {
@@ -119,10 +90,10 @@ impl Gain {
         self.label.get()
     }
 
-    /// Renames the instance: one undo step, saved with the plugin.
-    pub fn set_label(&mut self, label: &str) {
+    /// Renames the instance: one undo step, saved with the plugin from the
+    /// next tick.
+    pub fn set_label(&self, label: &str) {
         self.label.set(label.to_owned());
-        self.label_moved();
     }
 
     /// The parameter handle for an editor's writes, which undo records.
@@ -130,26 +101,9 @@ impl Gain {
         self.parts.params()
     }
 
-    /// Undoes the last step; false when there was none.
-    ///
-    /// # Errors
-    ///
-    /// As [`History::undo`]: refused while a gesture is open or a replay runs.
-    pub fn undo(&mut self) -> Result<bool, HistoryError> {
-        let undone = self.history.undo()?;
-        self.label_moved();
-        Ok(undone)
-    }
-
-    /// Redoes the last undone step; false when there was none.
-    ///
-    /// # Errors
-    ///
-    /// As [`History::redo`].
-    pub fn redo(&mut self) -> Result<bool, HistoryError> {
-        let redone = self.history.redo()?;
-        self.label_moved();
-        Ok(redone)
+    /// The undo history of the parameters and the label.
+    pub fn history(&self) -> &History {
+        &self.history
     }
 
     /// Arms the gain for MIDI learn: the next controller the processor sees
@@ -166,15 +120,6 @@ impl Gain {
     /// Whether a controller is learned to the gain.
     pub fn gain_is_learned(&self) -> bool {
         self.parts.learn().mapping(self.params.gain.id()).is_some()
-    }
-
-    /// Tells the session the label moved, so the next save writes it.
-    fn label_moved(&mut self) {
-        let changes = self.label.changes();
-        if changes != self.label_seen {
-            self.label_seen = changes;
-            self.label_registration.changed();
-        }
     }
 }
 
@@ -211,20 +156,15 @@ impl Plugin for Gain {
 
         let label = Value::new(DEFAULT_LABEL.to_owned(), parts.set());
         history.enroll(&label, "Rename").expect("a new value");
-        let label_section = Rc::new(RefCell::new(LabelSection(label.clone())));
-        let label_registration = parts
-            .session()
-            .register(LABEL_KEY, &label_section)
+        parts
+            .save(LABEL_KEY, &label, DEFAULT_LABEL.to_owned())
             .expect("a free key");
 
         Gain {
             parts,
             params,
             history,
-            label_seen: label.changes(),
             label,
-            _label_section: label_section,
-            label_registration,
         }
     }
 
@@ -234,7 +174,6 @@ impl Plugin for Gain {
 
     fn idle(&mut self) {
         self.parts.tick();
-        self.label_moved();
     }
 }
 

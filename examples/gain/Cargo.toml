@@ -29,7 +29,6 @@ vst3 = ["seam-host/vst3"]
 seam-host.workspace = true
 seam-learn.workspace = true
 seam-params.workspace = true
-seam-session.workspace = true
 seam-undo.workspace = true
 
 [dev-dependencies]

@@ -40,7 +40,6 @@ vst3 = ["seam-host/vst3"]
 seam-host.workspace = true
 seam-learn.workspace = true
 seam-params.workspace = true
-seam-session.workspace = true
 seam-undo.workspace = true
 
 [dev-dependencies]
@@ -210,44 +209,43 @@ let gain = plugin.ui().set().id(GAIN).expect("declared");
 // records what changed since the last tick before it undoes.
 assert!(plugin.ui().write(gain, -6.0));
 assert!(plugin.ui().write(gain, -12.0));
-assert_eq!(plugin.undo(), Ok(true));
+assert_eq!(plugin.history().undo(), Ok(true));
 assert_eq!(plugin.ui().value(gain), -6.0);
 ```
 
 ## 5. A value that is not a parameter
 
-The label is state the host knows nothing about. Two things give it a life:
+The label is state the host knows nothing about. A
+[`Value<String>`](../crates/params/src/value.rs) holds it, and three lines in
+`new` give it a life:
 
-- A [`Value<String>`](../crates/params/src/value.rs) holds it. Enrolling it
-  with `history.enroll(&label, "Rename")` makes its changes undo steps: the
-  sets between two ticks are one step, the latest winning, where two lone
-  writes of a parameter are two. A [`List`](../crates/params/src/list.rs)'s
-  verbs are one step each instead.
-- A [`Participant`](../crates/session/src/lib.rs) saves it. `capture` returns
-  the value as a section; `apply` takes a restored section back, or `None`
-  when the saved project predates the label, which must give the default.
+```rust
+let label = Value::new(DEFAULT_LABEL.to_owned(), parts.set());
+history.enroll(&label, "Rename").expect("a new value");
+parts
+    .save(LABEL_KEY, &label, DEFAULT_LABEL.to_owned())
+    .expect("a free key");
+```
 
-The same test goes on with the label:
+Enrolling it makes its changes undo steps: the sets between two ticks are one
+step, the latest winning, where two lone writes of a parameter are two. A
+[`List`](../crates/params/src/list.rs)'s verbs are one step each instead. The
+same test goes on with the label:
 
 ```rust
 // The label's sets between two ticks are one step, the latest winning.
 plugin.set_label("Vocals");
 plugin.set_label("Lead vocals");
-assert_eq!(plugin.undo(), Ok(true));
+assert_eq!(plugin.history().undo(), Ok(true));
 assert_eq!(plugin.label(), "Untitled");
 ```
 
-The plugin registers the participant with `parts.session()` under a stable
-key, `"label"`, and the session saves it there. Three details are easy to miss:
-
-- The session holds a participant weakly, so the plugin keeps the `Rc` alive.
-- A save writes the last capture, so after a change the plugin calls
-  `Registration::changed`; `label_moved` does it after each set, undo and redo.
-- A load writes the parameters at once, before it returns, but a
-  participant's section applies at the next tick, not when the host loads.
-
-Undo replays a label step through the same `Value`, so `apply` needs no special
-case for it.
+[`Parts::save`](../crates/host/src/parts.rs) saves it with the project under a
+stable key, `"label"`, as JSON through serde, so any value serde can write and
+read is saved the same way. A project saved before the label existed loads the
+default. A change, an undo's included, reaches the saved block at the next
+tick; that method says why and what it costs. A load writes the parameters at
+once, before it returns, but the label at the next tick.
 
 ## 6. MIDI learn
 
@@ -284,14 +282,13 @@ Nothing of the plugin's runs there unless `idle` calls it:
 ```rust
 fn idle(&mut self) {
     self.parts.tick();
-    self.label_moved();
 }
 ```
 
-[`Parts::tick`](../crates/host/src/parts.rs) runs learn, the session and the
-history in the one order that works, and owns the reasons for it. A plugin
-that keeps its parts and forgets the call never sees a project's saved session
-applied, so the exporter reports it as a fault.
+[`Parts::tick`](../crates/host/src/parts.rs) runs learn, the session, the
+history and the saved values in the one order that works, and owns the
+reasons for it. A plugin that keeps its parts and forgets the call never sees
+a project's saved session applied, so the exporter reports it as a fault.
 
 ## 8. Test it through a host
 

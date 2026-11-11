@@ -8,11 +8,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use seam_learn::{Config, Learn, LearnAudio, Learned};
-use seam_params::{DeclError, ParamSet, UiParams};
+use seam_params::{DeclError, ParamSet, UiParams, Value};
 use seam_session::{Session, SessionError, SessionUi};
 use seam_undo::{Bound, History, HistoryError};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::{Plugin, SavedState};
+
+mod saved;
+
+use saved::{SavedValue, Synced};
 
 /// One instance's parts, already joined: its parameter set, the session
 /// over it, the saved state the host saves and loads through, and undo and
@@ -114,6 +120,9 @@ pub struct Parts {
     session: SessionUi,
     history: Option<History>,
     learn: Option<Rc<RefCell<Learn>>>,
+    /// The values [`save`](Self::save) keeps saved, in the order it was
+    /// called.
+    values: Vec<Box<dyn Synced>>,
     /// Whether the plugin declares MIDI input, which learn needs.
     midi_input: bool,
     /// Moved by every tick, so the engine can tell a plugin that keeps its
@@ -153,6 +162,7 @@ impl Parts {
             set,
             history: None,
             learn: None,
+            values: Vec::new(),
             midi_input: P::INFO.midi_input,
             ticks: Arc::default(),
         };
@@ -258,6 +268,76 @@ impl Parts {
         self.learn().replace_audio()
     }
 
+    /// Saves `value` with the session under `key` from now on, and loads
+    /// `default` into it from a project saved without the key.
+    ///
+    /// A change is captured at the next [`tick`](Self::tick), not when it is
+    /// written. So a save the host makes between the two, about one tick or
+    /// 16 ms, still holds the value from before the change; a parameter is
+    /// never stale this way. [`sync`](Self::sync) captures at once.
+    ///
+    /// The whole value is captured whenever it moved, so state that is large
+    /// and changes a part at a time saves under several keys, one value each.
+    /// A section waiting under `key` from an earlier load applies before this
+    /// returns. A section that cannot be read as a `T` fails its apply: the
+    /// value keeps what it held, and the section stays saved.
+    ///
+    /// Thread: main.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::KeyTaken`] when another saved value, learn or
+    /// a participant the plugin registered holds `key`, and
+    /// [`SessionError::EmptyKey`] for an empty key. Nothing is saved then.
+    ///
+    /// # Panics
+    ///
+    /// In a build with debug assertions, here or at a later tick, when serde
+    /// cannot write the value as JSON: a map whose keys are not strings, say.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    #[doc = include_str!("../doc/gain.rs")]
+    /// use seam_params::Value;
+    ///
+    /// let (_params, mut parts) = Parts::for_plugin::<Gain>()?;
+    /// let label = Value::new(String::from("Untitled"), parts.set());
+    /// parts.save("label", &label, String::from("Untitled"))?;
+    ///
+    /// // What the host's next save holds.
+    /// let saved = |parts: &Parts| -> serde_json::Result<serde_json::Value> {
+    ///     serde_json::from_slice(&parts.saved().save())
+    /// };
+    ///
+    /// // Captured at the tick, so a save before it holds the label from
+    /// // before the change.
+    /// label.set(String::from("Drums"));
+    /// assert_eq!(saved(&parts)?["extra"]["label"], "Untitled");
+    /// parts.tick();
+    /// assert_eq!(saved(&parts)?["extra"]["label"], "Drums");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save<T>(&mut self, key: &str, value: &Value<T>, default: T) -> Result<(), SessionError>
+    where
+        T: Clone + Serialize + DeserializeOwned + 'static,
+    {
+        let saved = SavedValue::register(&self.session, key, value, default)?;
+        self.values.push(Box::new(saved));
+        Ok(())
+    }
+
+    /// Captures each value [`save`](Self::save) keeps saved that moved since
+    /// the last tick, as the tick does, for a caller whose next save must
+    /// already hold a change.
+    ///
+    /// Thread: main.
+    pub fn sync(&mut self) {
+        for value in &mut self.values {
+            value.sync();
+        }
+    }
+
     /// Runs one main-thread tick of every part, in the one order that works,
     /// and returns what learn committed, if anything.
     ///
@@ -278,9 +358,14 @@ impl Parts {
     /// 3. The history's tick, when undo is on: it records what changed since
     ///    the last tick. Its place does not matter: it clears the history
     ///    whenever a restore was stored or applied since it last looked.
+    /// 4. [`sync`](Self::sync): it captures each value [`save`](Self::save)
+    ///    keeps saved that moved since the last tick, a write undo replayed
+    ///    included. It skips one whose last write was the restore the
+    ///    session's tick applied, which that apply captured already. Until
+    ///    this step a save holds the value from before the change.
     ///
     /// When nothing changed it allocates nothing, and its cost does not grow
-    /// with the number of parameters.
+    /// with the number of parameters; each saved value costs one atomic load.
     ///
     /// Thread: main.
     ///
@@ -298,6 +383,7 @@ impl Parts {
         if let Some(history) = &self.history {
             history.tick();
         }
+        self.sync();
         learned
     }
 
