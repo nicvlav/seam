@@ -781,6 +781,18 @@ that day. Built on 2026-11-11, with one choice made while building it that
 waits for the owner: a value serde cannot write as JSON fails a debug
 assertion, and saves nothing in a release build.
 
+### D93. A derive that writes `declare`
+
+[The decision](decisions.md#d93-a-derive-that-writes-declare)
+
+The owner decided on 2026-11-10 that a derive writes `declare`, with this
+notation and the kind taken from the field's type, landing after the
+hand-written form, and that a mistake in a declaration is a compile error
+where it can be. Built on 2026-11-11, with two choices made while building it
+that wait for the owner: the derive checks option and flag names against a list
+a test keeps equal to the declarations' methods, and it refuses a generic
+struct rather than write code that cannot compile.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

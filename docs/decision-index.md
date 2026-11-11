@@ -976,6 +976,19 @@ move its line here; when a decision gains code, add one.
 - test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`
 - test `examples/gain/tests/gain.rs`: `the_label_saves_and_loads_back`, `undo_and_redo_restore_the_label_and_its_saved_state`
 
+### D93. A derive that writes `declare`
+
+[Record section](decisions.md#d93-a-derive-that-writes-declare)
+
+- `crates/macros/src/lib.rs`: module, `derive_params`, `params`, `row`, `known`, `Item`, `OPTIONS`, `FLAGS`, `is_flag`
+- `crates/params/src/declare.rs`: `Declared`, `key_is_new`
+- `crates/params/src/declare/rules.rs`: `same`
+- `examples/eq/src/params.rs`: `EqParams`
+- `examples/gain/src/lib.rs`: `GainParams`
+- test `crates/macros/src/lib.rs`: `the_options_and_flags_are_the_declarations_methods`, `a_misspelt_option_lists_the_options`, `a_mark_reads_arguments_options_and_flags`
+- test `crates/params/tests/derive.rs`: module, `a_derived_struct_declares_what_the_one_written_by_hand_declares`, `a_derived_struct_and_one_written_by_hand_hold_each_other`, `a_key_two_structs_share_is_refused_when_the_set_is_built`, `a_struct_of_no_fields_declares_an_empty_set`
+- test `crates/params/src/declare/derive_refusals.rs`: module, `FloatArgumentsOnBool`, `OptionTheKindLacks`, `FlagTheKindLacks`, `MisspeltOption`, `ChoiceGivenOtherEnum`, `ArgumentAfterOption`, `RangeBackwards`, `DefaultOutside`, `KeyWithSlash`, `KeyTwice`, `NeitherParameterNorStruct`, `MarkOnOtherType`, `OnEnum`, `OnTupleStruct`, `OnGenericStruct`
+
 ## Parameters
 
 ### P1. One store per parameter

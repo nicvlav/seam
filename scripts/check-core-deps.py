@@ -36,6 +36,7 @@ from pathlib import Path
 # everything, are on top; xtask drives the example.
 LAYERS = {
     "seam-testkit": 0,
+    "seam-macros": 0,
     "seam-params": 1,
     "seam-ump": 1,
     "seam-undo": 2,

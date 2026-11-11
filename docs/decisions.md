@@ -104,7 +104,7 @@ comments never cite an id: they state the reason in words, and
 | D65 | [What does a host see of a plugin through JUCE? (D31, D53, D58, C4)](#d65-what-a-host-sees-through-juce) | What JUCE 9 makes of it, as of the JUCE EQ; checked with VST3 on Windows. Parameter ids are JUCE's hash of the key, not D31's, and the one program has the plugin's name. | decided |
 | D66 | [What does a load do with bytes after the block, and is the host told that a load failed? (H2)](#d66-bytes-after-the-block-and-a-failed-load) | Trailing NUL bytes are trimmed and the block loads, and JSON whitespace around the object loads too; any other byte after the object makes the block unrecognised. A load that fails is answered as failed, except through JUCE, whose `setStateInformation` answers nothing, so the adapter cannot tell its host. | decided |
 | D67 | [How are the rules checked that keep locking types off the audio thread? (P6, D39)](#d67-checking-the-audio-thread-locking-rule) | By a debug-build mark, `seam_params::audio_thread`: a per-thread depth an exporter raises around everything its `process` call runs, and every call that locks asserts the mark is absent. | decided |
-| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, the native side of the page protocol, automation smoothing and splitting, a derive that declares each parameter once, and semver checks. | decided |
+| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, the native side of the page protocol, automation smoothing and splitting, and semver checks. | decided |
 | D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. A typed declaration's range is checked by `Range::new` too: by `FloatDecl::checked` while compiling, and when it is added. | decided |
 | D70 | [How does learn read MIDI 1.0's paired controllers and parameter numbers where MIDI 1.0 leaves room? (L2, L3, D30)](#d70-learns-reading-of-midi-10-pairs) | Per group and channel, the two NRPN address bytes pair in either order, 127 with 127 selects nothing, and data increment and decrement are never learned. A controller 32 to 63 right after the controller 32 below it learns that one as a 7-bit controller. A learned pair plays at 7 bits: 14-bit controller playback is open, to be built when an exporter delivers MIDI. | decided |
 | D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn ends the arm, clears every mapping and held entry and publishes the empty table, then closes open bursts (D82) and fails the apply, so the session keeps the section. | decided |
@@ -129,6 +129,7 @@ comments never cite an id: they state the reason in words, and
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
 | D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts and calls `Parts::tick` from `idle`; an exporter reports, once, a plugin that keeps them and does not. | to confirm |
 | D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Parts::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was a restore's, which the session's apply captured already. A save between a change and the next tick holds the value from before the change. | to confirm |
+| D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1472,10 +1473,11 @@ their code exists? Not applicable.
 
 **Rust.** Those whose code has not started: the CLAP exporter, `seam-webview`
 (D16), the native side of the page protocol (no Rust code handles a page message
-yet, B1), automation smoothing and splitting, a derive that declares each
-parameter once, and semver checks. Findings that rest on them stay open until
-then. The core already keeps each automation point's sample position (D59), so
-smoothing or splitting can build on it.
+yet, B1), automation smoothing and splitting, and semver checks. Findings that
+rest on them stay open until then. The core already keeps each automation
+point's sample position (D59), so smoothing or splitting can build on it. The
+derive that declares each parameter once was on this list until it was built
+(D93).
 
 The first audit's plan made smoothing the default and splitting opt-in with a
 32-sample floor; the second recommended an opt-in smoothing helper, and
@@ -2192,6 +2194,53 @@ and a participant written by hand, as the example gain had, which calls
 the old value for good where one call is forgotten.
 
 [History](decision-history.md#d92-when-a-saved-plain-value-is-captured)
+
+### D93. A derive that writes `declare`
+
+**Question and C++ Seam.** How does a plugin declare a struct of parameters
+without writing `declare`, and where is a mistake in it reported? (D90) Not
+applicable: the C++ Seam's plugins declared JUCE's parameters.
+
+**Rust.** `#[derive(Params)]` writes the `Params` impl a person would write:
+one `declare` that adds each marked field's declaration, in field order, and
+returns the struct. Nothing else is generated, so a derived struct may hold one
+written by hand and the other way round. Inside a field's `#[param(...)]` mark,
+the leading items are the arguments of the declaration's `new`, as written;
+`name = value` is its `with_name(value)`; a lone lowercase word is its
+`as_word()`. `true` and `false` are values, and a constant is written in
+capitals. An argument after an option is the derive's own error, and so is an
+option or a flag no declaration has, which it names with the ones there are; an
+option or a flag the field's kind lacks is the compiler's "no method" error.
+
+The kind is the field's type: the sealed `Declared` trait gives `Float` its
+`FloatDecl`, `Bool` its `BoolDecl` and `Choice<E>` its `ChoiceDecl<E>`, and the
+derive names the declaration through it, never through the type's name, so a
+type alias works. A field with no mark is a struct of parameters and declares
+itself through its own `Params`.
+
+Each declaration is a named constant, in a block of its own, that ends in
+`checked`, so a key, a range or a label no parameter could have fails a plain
+`cargo check` (D90), and one more constant per field refuses a key an earlier
+field of the struct has. Each generated token carries the span of what it came
+from, so every error lands on the author's mark or field. A key two structs
+share is refused when the set is built, as by hand.
+
+An enum, a union, a tuple or unit struct and a generic struct are refused.
+Arrays, optional parameters and pools are written by hand: the example gain
+derives its parameters, and the example EQ writes `declare` itself, since its
+bands come from a table. The derive lives in `seam-macros`, a proc-macro crate,
+and `seam-params` re-exports it under its `derive` feature, off by default, so
+the core still builds with no dependency.
+
+**Alternatives.** The alternatives were a `params!` table macro, whose body
+rustfmt leaves alone and which reports an unknown kind badly; an inline `const
+{ }` block per declaration, which `cargo check` does not evaluate; matching on
+the field's type name, which a type alias defeats; splitting the mark at its
+commas, which breaks an argument with a comma inside generic brackets; and
+leaving a misspelt option to the compiler, whose hint names the method,
+`with_step`, where the mark wants `step`.
+
+[History](decision-history.md#d93-a-derive-that-writes-declare)
 
 ## How to read this
 

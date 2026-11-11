@@ -193,7 +193,7 @@ const fn split_name(path: &[u8]) -> (&[u8], Option<&[u8]>) {
 }
 
 /// Whether `a` and `b` hold the same bytes.
-const fn same(a: &[u8], b: &[u8]) -> bool {
+pub(crate) const fn same(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

@@ -12,7 +12,16 @@ keywords = ["audio", "plugin", "parameters", "automation", "lock-free"]
 categories = ["multimedia::audio", "concurrency"]
 publish.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# `#[derive(Params)]`, which writes a struct's `declare`.
+derive = ["dep:seam-macros"]
+
 [dependencies]
+seam-macros = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
@@ -24,6 +33,10 @@ loom.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "derive"
+required-features = ["derive"]
 
 [[bench]]
 name = "iai"

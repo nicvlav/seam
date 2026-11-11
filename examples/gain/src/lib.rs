@@ -16,10 +16,7 @@ use seam_host::{
     AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
 };
 use seam_learn::{Config, LearnAudio, LearnError, Takes};
-use seam_params::{
-    Bool, BoolDecl, Changes, Choice, ChoiceDecl, Choices, Declarer, Float, FloatDecl, Params,
-    UiParams, Value,
-};
+use seam_params::{Bool, Changes, Choice, Choices, Float, Params, UiParams, Value};
 use seam_undo::{Bound, History};
 
 const LABEL_KEY: &str = "label";
@@ -54,25 +51,17 @@ impl Choices for Mode {
 
 /// The parameters, in the order hosts list them, each declared where it is
 /// held.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Params)]
 pub struct GainParams {
+    #[param(
+        "gain", "Gain", -60.0..=12.0, 0.0,
+        step = 0.1, unit = "dB",
+    )]
     gain: Float,
+    #[param("mode", "Mode", Mode::Clean)]
     mode: Choice<Mode>,
+    #[param("bypass", "Bypass", false, bypass)]
     bypass: Bool,
-}
-
-impl Params for GainParams {
-    fn declare(p: &mut Declarer) -> Self {
-        GainParams {
-            gain: p.add(
-                FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0)
-                    .with_step(0.1)
-                    .with_unit("dB"),
-            ),
-            mode: p.add(ChoiceDecl::new("mode", "Mode", Mode::Clean)),
-            bypass: p.add(BoolDecl::new("bypass", "Bypass", false).as_bypass()),
-        }
-    }
 }
 
 /// The plugin, on the main thread.
