@@ -25,8 +25,9 @@ fn stream() -> Vec<u32> {
 
 #[library_benchmark]
 #[bench::mixed(stream())]
-fn split_a_stream(words: Vec<u32>) -> usize {
-    black_box(Packets::new(black_box(&words), 0).count())
+fn split_a_stream(words: Vec<u32>) -> Vec<u32> {
+    black_box(Packets::new(black_box(&words), 0).count());
+    words
 }
 
 #[library_benchmark]

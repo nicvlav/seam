@@ -29,9 +29,13 @@ fn one(kind: Kind) -> (Arc<ParamSet>, AudioParams, ParamId) {
 #[bench::stepped_past_the_last_point(one(Kind::continuous(0.0, 10.0, 3.0, None)), 0.95)]
 #[bench::bool(one(Kind::Bool), 0.8)]
 #[bench::choice(one(Kind::Choice(&LABELS)), 0.6)]
-fn host_write(state: (Arc<ParamSet>, AudioParams, ParamId), normalized: f64) {
+fn host_write(
+    state: (Arc<ParamSet>, AudioParams, ParamId),
+    normalized: f64,
+) -> (Arc<ParamSet>, AudioParams, ParamId) {
     let (_set, audio, id) = &state;
     audio.host_write(black_box(*id), black_box(normalized));
+    state
 }
 
 library_benchmark_group!(name = params; benchmarks = host_write);
