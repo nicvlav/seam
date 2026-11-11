@@ -24,9 +24,9 @@ jobs:
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          shape='^(feat|fix|docs|test|ci)(\([a-z0-9-]+\))?: [^ ].*[^. ]$'
+          shape='^(feat|fix|docs|test|ci)(\([a-z0-9-]+\))?!?: [^ ].*[^. ]$'
           if [[ ! "$TITLE" =~ $shape ]]; then
-            echo "::error::The title is not 'type(scope): what changed', with a type of feat, fix, docs, test or ci and no full stop."
+            echo "::error::The title is not 'type(scope): what changed', with a type of feat, fix, docs, test or ci, a ! after it for a breaking change, and no full stop."
             exit 1
           fi
           if [[ "$TITLE" =~ \(#[0-9]+\)$ ]]; then

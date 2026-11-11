@@ -7,7 +7,8 @@ keeps one commit per change, each building and passing its tests.
 
 - **Title.** It becomes the commit's subject, so it is a [Conventional
   Commits][conventional] subject in the form `git log --oneline` shows:
-  `type(scope): what changed`. GitHub adds the pull request's number. Name the
+  `type(scope): what changed`, with a `!` before the colon when the change
+  breaks a plugin author's code. GitHub adds the pull request's number. Name the
   change, never the process that produced it.
 - **Description.** What and why, the checks run, review notes and `Closes #N`.
   None of that goes in the commit.
