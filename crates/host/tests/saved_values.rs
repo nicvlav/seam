@@ -3,7 +3,6 @@
 //! once for a load.
 
 use std::cell::Cell;
-use std::collections::BTreeMap;
 
 use seam_host::{
     AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
@@ -240,6 +239,8 @@ fn a_second_save_under_one_key_is_refused() {
 #[cfg(debug_assertions)]
 #[test]
 fn a_value_serde_cannot_write_as_json_is_a_contract_panic() {
+    use std::collections::BTreeMap;
+
     let mut parts = parts();
     // JSON's object keys are strings, and a pair is not one.
     let pairs = Value::new(BTreeMap::from([((1_u8, 2_u8), 3_u8)]), parts.set());
