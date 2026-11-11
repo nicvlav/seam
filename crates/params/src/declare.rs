@@ -11,6 +11,8 @@ use crate::{
     Bool, Choice, Choices, DeclError, Float, Kind, ParamDecl, ParamSet, ParamSetBuilder, Range,
 };
 
+#[cfg(all(doctest, feature = "derive"))]
+mod derive_refusals;
 #[cfg(doctest)]
 mod refusals;
 pub(crate) mod rules;
@@ -447,6 +449,59 @@ impl<E: Choices> Declaration for ChoiceDecl<E> {
         let decl = ParamDecl::new(self.key, self.name, Kind::Choice(E::LABELS), index as f32)
             .with_group(self.group);
         Choice(p.store(decl, refused), PhantomData)
+    }
+}
+
+/// A typed parameter, [`Float`], [`Bool`] or [`Choice`], and the declaration
+/// that makes it: [`FloatDecl`], [`BoolDecl`] or [`ChoiceDecl`].
+///
+/// `#[derive(Params)]` reads each field's declaration from its type through
+/// this trait, never from the type's name, so a type alias works there. It
+/// is sealed: only this crate's parameters implement it.
+///
+/// # Examples
+///
+/// What the derive writes for a field whose type is an alias:
+///
+/// ```
+/// use seam_params::{Declared, Float, FloatDecl};
+///
+/// type Decibels = Float;
+///
+/// const GAIN: <Decibels as Declared>::Decl =
+///     FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0).checked();
+/// ```
+pub trait Declared: Sealed + Sized {
+    /// The declaration that makes this parameter.
+    type Decl: Declaration<Param = Self>;
+}
+
+impl Declared for Float {
+    type Decl = FloatDecl;
+}
+
+impl Declared for Bool {
+    type Decl = BoolDecl;
+}
+
+impl<E: Choices> Declared for Choice<E> {
+    type Decl = ChoiceDecl<E>;
+}
+
+/// Panics, at compile time in `#[derive(Params)]`, when `key` is one of
+/// `earlier`, the keys of the fields before it in the struct.
+///
+/// # Panics
+///
+/// For such a key, which is the point.
+#[doc(hidden)]
+pub const fn key_is_new(key: &'static str, earlier: &[&'static str]) {
+    let mut at = 0;
+    while at < earlier.len() {
+        if rules::same(earlier[at].as_bytes(), key.as_bytes()) {
+            panic!("{}", DeclError::DuplicateKey(key).rule());
+        }
+        at += 1;
     }
 }
 

@@ -39,6 +39,13 @@ delivered to a plugin through an exporter.
   returns the first declaration it refused, such as a key two parameters
   share. A typed declaration refuses a default outside its range, where a
   `ParamDecl` snaps it. `Declarer::extend` declares a plain table.
+- `seam-params`: `#[derive(Params)]`, under the `derive` feature, writes a
+  struct's `declare` from a `#[param(...)]` mark on each field: the
+  declaration's arguments, then `name = value` options and lone-word flags,
+  with the kind taken from the field's type through `Declared`. A field with
+  no mark declares a struct of parameters. Each declaration is checked while
+  compiling, and so is a key two fields of the struct share: `cargo check`
+  reports it on the mark. The example gain derives its parameters.
 - `seam-undo`: an undo history that polls once per tick. One gesture is one
   step, transactions group steps, and host automation, restores and learned
   writes never record. A restore clears the history, and the history is bounded

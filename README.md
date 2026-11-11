@@ -48,8 +48,9 @@ export together. Read it first, then the crate overviews it links.
 ## Layout
 
 The Rust crates are in `crates/`: the core (`params`, `undo`, `session`,
-`learn`, `ump`), the [exporters](docs/glossary.md#exporter) (`host`), the page
-protocol (`bridge`) and test tools (`testkit`). Beside them are the example
+`learn`, `ump`), the parameters' derive (`macros`), the
+[exporters](docs/glossary.md#exporter) (`host`), the page protocol (`bridge`)
+and test tools (`testkit`). Beside them are the example
 gain (`examples/gain`), the example EQ (`examples/eq`), the page's React hooks
 (`page`), the generic JUCE adapter (`adapters/juce`), the repository's tasks
 (`xtask`), the fuzz targets (`fuzz`) and the comparison against plain JUCE

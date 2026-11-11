@@ -28,7 +28,7 @@ vst3 = ["seam-host/vst3"]
 [dependencies]
 seam-host.workspace = true
 seam-learn.workspace = true
-seam-params.workspace = true
+seam-params = { workspace = true, features = ["derive"] }
 seam-undo.workspace = true
 
 [dev-dependencies]

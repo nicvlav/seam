@@ -39,7 +39,7 @@ vst3 = ["seam-host/vst3"]
 [dependencies]
 seam-host.workspace = true
 seam-learn.workspace = true
-seam-params.workspace = true
+seam-params = { workspace = true, features = ["derive"] }
 seam-undo.workspace = true
 
 [dev-dependencies]
@@ -48,7 +48,8 @@ seam-ump.workspace = true
 ```
 
 `seam-host` builds no exporter by default, so the crate's own `vst3` feature
-turns the VST3 one on, and the tests add the test host. Each
+turns the VST3 one on, and the tests add the test host. `seam-params`'s
+`derive` feature gives `#[derive(Params)]`. Each
 `workspace = true` takes its value from the repository's root manifest;
 [your own crate](#your-own-crate) says what replaces it outside this
 repository.
@@ -56,57 +57,64 @@ repository.
 ## 1. Declare the parameters
 
 A parameter is declared once, where the plugin holds it. The gain's sit in a
-struct of their own, and its [`Params`](../crates/params/src/declare.rs)
-implementation declares each one and keeps what it is handed:
+struct of their own, which derives [`Params`](../crates/params/src/lib.rs):
+the mark on each field declares that parameter, and the derive writes the
+function that declares them all and keeps what each is handed:
 
 ```rust
+#[derive(Debug, Clone, Params)]
 pub struct GainParams {
+    #[param(
+        "gain", "Gain", -60.0..=12.0, 0.0,
+        step = 0.1, unit = "dB",
+    )]
     gain: Float,
+    #[param("mode", "Mode", Mode::Clean)]
     mode: Choice<Mode>,
+    #[param("bypass", "Bypass", false, bypass)]
     bypass: Bool,
-}
-
-impl Params for GainParams {
-    fn declare(p: &mut Declarer) -> Self {
-        GainParams {
-            gain: p.add(
-                FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0)
-                    .with_step(0.1)
-                    .with_unit("dB"),
-            ),
-            mode: p.add(ChoiceDecl::new("mode", "Mode", Mode::Clean)),
-            bypass: p.add(BoolDecl::new("bypass", "Bypass", false).as_bypass()),
-        }
-    }
 }
 ```
 
-Each declaration is a key, a display name, a range or a set of choices, and a
-default in real units. Everything else follows from it: the host's id (a hash
-of the key), its range and text, the save, and the page's typed hook.
+Each mark is a key, a display name, a range for a float, and a default in
+real units, then its options. Everything else follows from it: the host's id
+(a hash of the key), its range and text, the save, and the page's typed hook.
 
-- A [`FloatDecl`](../crates/params/src/declare.rs) reads as JUCE's
-  `NormalisableRange (start, end, interval)`: a range, ends included, and
-  `with_step`, where 0, the default, means no steps. `with_skew_centre` puts a
-  value at the middle of the control's travel, as `setSkewForCentre` does. So
-  the gain runs from -60 dB to 12 dB in steps of 0.1 dB, linearly. A default
-  outside the range is refused, not moved into it.
-- The declaration's type is the parameter's: `p.add` hands back a `Float` for
-  a `FloatDecl`, a `Bool` for a `BoolDecl` and a `Choice<Mode>` for a
-  `ChoiceDecl`, so a field of another kind does not compile.
+- The field's type is the parameter's kind, and says which declaration the
+  mark writes: a [`FloatDecl`](../crates/params/src/declare.rs) for a `Float`,
+  a `BoolDecl` for a `Bool` and a `ChoiceDecl` for a `Choice<Mode>`. The
+  mark's leading items are that declaration's `new`, `step = 0.1` is its
+  `with_step(0.1)`, and the lone word `bypass` its `as_bypass()`. So a
+  float's arguments on a `Bool` field do not compile.
+- A float's range reads as JUCE's `NormalisableRange (start, end, interval)`:
+  ends included, and `step`, where 0, the default, means no steps.
+  `skew_centre` puts a value at the middle of the control's travel, as
+  `setSkewForCentre` does. So the gain runs from -60 dB to 12 dB in steps of
+  0.1 dB, linearly. A default outside the range is refused, not moved into it.
+- Each declaration is checked while compiling: a key or a range no parameter
+  could have, a default outside its range, and a key another field has fail
+  `cargo check`, on the mark. rustfmt leaves a mark as it is typed, so a long
+  one is wrapped by hand, as the gain's is: the arguments, then the options.
 - The store keeps real units (dB, not 0 to 1). A host speaks in 0 to 1
   positions, and Seam converts both ways at its boundary.
 - A choice's names are its labels, and the host sees them as the parameter's
   text. The mode's come from the enum that names its values, so the two cannot
   drift apart.
-- `as_bypass` tells the exporter this parameter is the host's bypass. The
+- `bypass` tells the exporter this parameter is the host's bypass. The
   processor still implements it: the host only learns which parameter it is.
-- Hosts list the parameters in the order `declare` adds them.
+- Hosts list the parameters in the order of the fields.
 - The key is the parameter's identity for good. The saved block stores the
   value under it and the host's id is its hash, so a key never changes once
   the plugin ships, though the display name may. Adding a parameter later is
   safe: a block saved before it loads with the new parameter at its default
   ([`SavedState::load`](../crates/host/src/state.rs)).
+
+The derive writes what you would write by hand: a `declare` that adds each
+field's declaration, `p.add(FloatDecl::new(...).with_step(0.1))`, and returns
+the struct. Write it yourself when the parameters are not one per field. The
+example EQ's [`EqParams`](../examples/eq/src/params.rs) does: its six bands
+come from a table, a band's shape is not a parameter, and a high-pass has no
+gain.
 
 `Mode` names the choice's values, in the order of its labels:
 
@@ -369,8 +377,8 @@ change the manifest:
   `seam-host = { git = "https://github.com/nicvlav/seam", rev = "..." }`,
   or `seam-host = { path = "../seam/crates/host" }` for a checkout. Pin one
   `rev` for every Seam crate, since before 1.0 a minor version may break the
-  API. The dev-dependency on `seam-host` keeps its `features` beside its
-  source.
+  API. A dependency with `features`, `seam-params` and the dev-dependency on
+  `seam-host`, keeps them beside its source.
 - Copy the root manifest's `[workspace.lints.rust]` and
   `[workspace.lints.clippy]` tables in as `[lints.rust]` and `[lints.clippy]`,
   or drop the `[lints]` table, and copy its `[profile.release]` for the same

@@ -10,7 +10,9 @@
 //!   declaration, a [`FloatDecl`], [`BoolDecl`] or [`ChoiceDecl`], hands back
 //!   its parameter, and [`ParamSet::declare`] freezes them into a
 //!   [`ParamSet`], with one store each: an atomic value and change counter.
-//!   [`ParamSetBuilder`] does the same for a plain table of [`ParamDecl`]s.
+//!   With the `derive` feature, `#[derive(Params)]` writes `declare` from a
+//!   mark on each field. [`ParamSetBuilder`] builds a set from a plain table
+//!   of [`ParamDecl`]s.
 //! - One handle per writer: [`AudioParams`] (host and [learned
 //!   writes][learned-write]), [`UiParams`] (user [`Gesture`]s, [`Edit`]s, undo
 //!   replays) and [`ProgramParams`] ([syncs][sync] and a saved state's
@@ -106,6 +108,8 @@
 
 // The nightly real-time sanitizer lane marks the calls the audio thread makes.
 #![cfg_attr(seam_rtsan, feature(sanitize))]
+// docs.rs shows which feature each gated item needs.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(not(target_has_atomic = "64"))]
 compile_error!(
@@ -137,7 +141,9 @@ pub use clock::{
 // The module is public too, so rustdoc would list these as bare re-exports.
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
-pub use declare::{BoolDecl, ChoiceDecl, Declaration, Declarer, FloatDecl, Params};
+pub use declare::{
+    BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, Params, key_is_new,
+};
 pub use events::{GestureRecord, HostEvent};
 pub use host_events::HostEventDrain;
 pub use host_id::{RESERVED_HOST_IDS, host_id};
@@ -150,3 +156,91 @@ pub use set::{AudioParams, DeclError, MAX_KEY_LEN, ParamSet, ParamSetBuilder};
 pub use ui::{Edit, Gesture, GestureRecords, UiParams};
 pub use value::{Commit, TrackedRef, Tracker, Value, ValueGesture};
 pub use watch::Watch;
+
+/// Writes a struct's [`Params::declare`] from a `#[param(...)]` mark on each
+/// field.
+///
+/// Each marked field is one parameter, and its type says which declaration
+/// makes it, through [`Declared`]: a [`Float`] field is a [`FloatDecl`], a
+/// [`Bool`] a [`BoolDecl`] and a [`Choice<E>`] a [`ChoiceDecl<E>`]. Inside
+/// the mark:
+///
+/// - the leading items are the arguments of the declaration's `new`, as
+///   written: the key, the name, a float's range, and the default;
+/// - `name = value` is its `with_name(value)`: `step`, `skew_centre`, `unit`
+///   and `group`;
+/// - a lone lowercase word is its `as_word()`: `bypass`. `true` and `false`
+///   are values, and a constant is written in capitals.
+///
+/// A field with no mark is a struct of parameters itself, and declares
+/// itself through its own [`Params`], derived or written by hand.
+///
+/// The derive writes what a person would: one `impl Params` that adds each
+/// field in order, through [`Declarer::add`]. Each declaration is a named
+/// constant that ends in [`checked`](FloatDecl::checked), so a plain `cargo
+/// check` refuses a key, a range or a label no parameter could have, and a
+/// key an earlier field of the struct has, on the mark. A key that two
+/// structs share is refused when the set is built, as by hand.
+///
+/// Arrays, optional parameters and generic structs are not derived: write
+/// `declare` by hand for those, as for a set whose parameters come from a
+/// table.
+///
+/// rustfmt leaves a mark as it is typed, so a long one is wrapped by hand.
+///
+/// # Examples
+///
+/// ```
+/// use seam_params::{Bool, Choice, Choices, Float, ParamSet, Params};
+///
+/// #[derive(Debug, Clone, Copy, PartialEq)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+///
+/// impl Choices for Mode {
+///     const LABELS: &'static [&'static str] = &["Clean", "Warm"];
+///
+///     fn from_index(index: usize) -> Self {
+///         match index {
+///             0 => Mode::Clean,
+///             _ => Mode::Warm,
+///         }
+///     }
+///
+///     fn index(self) -> usize {
+///         self as usize
+///     }
+/// }
+///
+/// #[derive(Params)]
+/// struct Band {
+///     #[param("low.freq", "Frequency", 20.0..=500.0, 100.0, unit = "Hz", group = "Low")]
+///     freq: Float,
+/// }
+///
+/// #[derive(Params)]
+/// struct Drive {
+///     #[param(
+///         "gain", "Gain", -60.0..=12.0, 0.0,
+///         step = 0.1, unit = "dB",
+///     )]
+///     gain: Float,
+///     #[param("mode", "Mode", Mode::Warm)]
+///     mode: Choice<Mode>,
+///     #[param("bypass", "Bypass", false, bypass)]
+///     bypass: Bool,
+///     low: Band,
+/// }
+///
+/// let (set, drive) = ParamSet::declare::<Drive>()?;
+/// assert_eq!(drive.gain.get(), 0.0);
+/// assert_eq!(drive.mode.get(), Mode::Warm);
+/// assert_eq!(set.bypass(), Some(drive.bypass.id()));
+/// assert_eq!(set.decl(drive.low.freq.id()).group, "Low");
+/// # Ok::<(), seam_params::DeclError>(())
+/// ```
+#[cfg(feature = "derive")]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+pub use seam_macros::Params;
