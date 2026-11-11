@@ -6,7 +6,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::{GestureRecord, Origin, ParamId, ParamSet, RestoreReader};
+use crate::param::sealed::Token;
+use crate::set::ParamCell;
+use crate::{GestureRecord, Origin, ParamId, ParamSet, RestoreReader, Writable};
 
 /// Who is writing through a gesture. Only a user's writes become undo
 /// steps.
@@ -355,11 +357,18 @@ impl UiParams {
     /// opened only when it changes the value. Returns whether it did; a value
     /// that is not finite is refused.
     ///
+    /// `param` is a typed parameter, by reference, or a [`ParamId`], and
+    /// `value` is of its type: a `bool` for a [`Bool`](crate::Bool), the
+    /// plugin's enum for a [`Choice`](crate::Choice), real units for a
+    /// [`Float`](crate::Float) or a [`ParamId`]. A typed parameter of
+    /// another set is refused.
+    ///
     /// # Panics
     ///
     /// In a debug build, when it changes a value while a restore applies, as
     /// in a session participant's apply, which writes through
-    /// [`ProgramParams::sync`](crate::ProgramParams::sync) instead.
+    /// [`ProgramParams::sync`](crate::ProgramParams::sync) instead; and when
+    /// `param` is a typed parameter of another set.
     ///
     /// # Examples
     ///
@@ -377,8 +386,24 @@ impl UiParams {
     /// assert!(!ui.write(gain, f32::NAN)); // refused
     /// # Ok::<(), seam_params::DeclError>(())
     /// ```
-    pub fn write(&self, id: ParamId, value: f32) -> bool {
+    pub fn write<P: Writable>(&self, param: P, value: P::Value) -> bool {
+        param.write_through(self, value, Token(()))
+    }
+
+    /// [`write`](Self::write) for a [`ParamId`], with the stored `f32`.
+    pub(crate) fn user_write(&self, id: ParamId, value: f32) -> bool {
         self.gesture_write(id, value, Writer::User)
+    }
+
+    /// [`write`](Self::write) for a typed parameter, with the `f32` its
+    /// value encodes to: refused when the store is another set's.
+    pub(crate) fn user_write_cell(&self, cell: &Arc<ParamCell>, value: f32) -> bool {
+        let ours = self.state.set.owns(cell);
+        debug_assert!(
+            ours,
+            "a parameter of another set was written through this UiParams"
+        );
+        ours && self.gesture_write(cell.id(), value, Writer::User)
     }
 
     /// Starts the plugin's own edit: values changed together reach the host

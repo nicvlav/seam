@@ -21,7 +21,9 @@ use seam_host::{
     Status,
 };
 use seam_learn::{Config, Learn, LearnAudio, LearnError, Takes};
-use seam_params::{AudioParams, Kind, ParamDecl, ParamId, ParamSet, UiParams, Value};
+use seam_params::{
+    BindError, Bool, Changes, Choice, Choices, Float, Kind, ParamDecl, ParamSet, UiParams, Value,
+};
 use seam_session::{ApplyError, Participant, Registration, Section, Session, SessionUi};
 use seam_undo::{Bound, History, HistoryError};
 
@@ -38,9 +40,54 @@ const DEFAULT_LABEL: &str = "Untitled";
 /// Every parameter, in the order hosts list them.
 const PARAMS: &[ParamDecl] = &[
     ParamDecl::new(GAIN, "Gain", Kind::continuous(-60.0, 12.0, 0.1, None), 0.0).with_unit("dB"),
-    ParamDecl::new(MODE, "Mode", Kind::Choice(&["Clean", "Warm", "Hot"]), 0.0),
+    ParamDecl::new(MODE, "Mode", Kind::Choice(Mode::LABELS), 0.0),
     ParamDecl::new(BYPASS, "Bypass", Kind::Bool, 0.0).as_bypass(),
 ];
+
+/// What each mode does to the sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Gain only.
+    Clean,
+    /// Gain, then a soft clip.
+    Warm,
+    /// Gain with three times the drive, then a soft clip.
+    Hot,
+}
+
+impl Choices for Mode {
+    const LABELS: &'static [&'static str] = &["Clean", "Warm", "Hot"];
+
+    fn from_index(index: usize) -> Self {
+        match index {
+            0 => Mode::Clean,
+            1 => Mode::Warm,
+            _ => Mode::Hot,
+        }
+    }
+
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The parameters as the plugin reads them, each bound to its declaration.
+#[derive(Debug, Clone)]
+struct GainParams {
+    gain: Float,
+    mode: Choice<Mode>,
+    bypass: Bool,
+}
+
+impl GainParams {
+    fn bind(set: &ParamSet) -> Result<Self, BindError> {
+        Ok(GainParams {
+            gain: set.bind(GAIN)?,
+            mode: set.bind(MODE)?,
+            bypass: set.bind(BYPASS)?,
+        })
+    }
+}
 
 /// The label as a session participant: it saves and restores the value.
 #[derive(Debug)]
@@ -67,6 +114,7 @@ impl Participant for LabelSection {
 #[derive(Debug)]
 pub struct Gain {
     saved: Arc<SavedState>,
+    params: GainParams,
     ui: UiParams,
     session: SessionUi,
     history: History,
@@ -124,14 +172,13 @@ impl Gain {
     ///
     /// As [`Learn::arm`].
     pub fn learn_gain(&mut self) -> Result<(), LearnError> {
-        let gain = declared(self.saved.set(), GAIN);
+        let gain = self.params.gain.id();
         self.learn.borrow_mut().arm(gain, Takes::CONTROLLER)
     }
 
     /// Whether a controller is learned to the gain.
     pub fn gain_is_learned(&self) -> bool {
-        let gain = declared(self.saved.set(), GAIN);
-        self.learn.borrow().mapping(gain).is_some()
+        self.learn.borrow().mapping(self.params.gain.id()).is_some()
     }
 
     /// Tells the session the label moved, so the next save writes it.
@@ -142,10 +189,6 @@ impl Gain {
             self.label_registration.changed();
         }
     }
-}
-
-fn declared(set: &ParamSet, key: &str) -> ParamId {
-    set.id(key).expect("declared in PARAMS")
 }
 
 impl Plugin for Gain {
@@ -175,6 +218,7 @@ impl Plugin for Gain {
 
     fn new() -> Self {
         let set = ParamSet::from_decls(PARAMS.iter().copied()).expect("valid declarations");
+        let params = GainParams::bind(&set).expect("each parameter matches its declaration");
         let session = Session::new(&set);
         let saved = Arc::new(SavedState::new(&set, &session));
         let session_ui = session.take_ui().expect("the first session UI handle");
@@ -195,6 +239,7 @@ impl Plugin for Gain {
 
         Gain {
             saved,
+            params,
             ui,
             session: session_ui,
             history,
@@ -212,7 +257,7 @@ impl Plugin for Gain {
 
     fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
         let learn = self.learn.borrow_mut().replace_audio();
-        GainProcessor::new(self.saved.set(), learn)
+        GainProcessor::new(self.params.clone(), learn)
     }
 
     fn idle(&mut self) {
@@ -225,41 +270,24 @@ impl Plugin for Gain {
     }
 }
 
-/// What each mode does to the sound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    /// Gain only.
-    Clean,
-    /// Gain, then a soft clip.
-    Warm,
-    /// Gain with three times the drive, then a soft clip.
-    Hot,
-}
-
 /// The audio-thread half: a gain and a mode over the first two channels.
 #[derive(Debug)]
 pub struct GainProcessor {
-    params: AudioParams,
     learn: LearnAudio,
-    gain_id: ParamId,
-    mode_id: ParamId,
-    bypass_id: ParamId,
-    /// The sum of the parameters' change counters when it last tuned.
-    seen: Option<u64>,
+    params: GainParams,
+    /// What the fields below were last read from.
+    changes: Changes,
     gain: f32,
     mode: Mode,
     bypassed: bool,
 }
 
 impl GainProcessor {
-    fn new(set: &Arc<ParamSet>, learn: LearnAudio) -> Self {
+    fn new(params: GainParams, learn: LearnAudio) -> Self {
         let mut processor = GainProcessor {
-            params: set.audio(),
             learn,
-            gain_id: declared(set, GAIN),
-            mode_id: declared(set, MODE),
-            bypass_id: declared(set, BYPASS),
-            seen: None,
+            params,
+            changes: Changes::new(),
             gain: 1.0,
             mode: Mode::Clean,
             bypassed: false,
@@ -270,22 +298,13 @@ impl GainProcessor {
 
     /// Reads the parameters again when one moved. Atomics only.
     fn retune(&mut self) {
-        let set = self.params.set();
-        let seen = set
-            .changes(self.gain_id)
-            .wrapping_add(set.changes(self.mode_id))
-            .wrapping_add(set.changes(self.bypass_id));
-        if self.seen == Some(seen) {
+        let GainParams { gain, mode, bypass } = &self.params;
+        if !self.changes.moved([gain, mode, bypass]) {
             return;
         }
-        self.seen = Some(seen);
-        self.gain = 10.0_f32.powf(set.value(self.gain_id) / 20.0);
-        self.mode = match set.value(self.mode_id) {
-            mode if mode < 0.5 => Mode::Clean,
-            mode if mode < 1.5 => Mode::Warm,
-            _ => Mode::Hot,
-        };
-        self.bypassed = set.value(self.bypass_id) >= 0.5;
+        self.gain = 10.0_f32.powf(gain.get() / 20.0);
+        self.mode = mode.get();
+        self.bypassed = bypass.get();
     }
 }
 

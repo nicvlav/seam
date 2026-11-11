@@ -16,14 +16,14 @@
 )]
 
 #[cfg(loom)]
-use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use loom::sync::atomic::{AtomicBool, Ordering};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 #[cfg(not(loom))]
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use value_cell::{Packed, ValueCell};
+pub(crate) use param_cell::ParamCell;
 
 use crate::host_events::{HostEventDrain, HostQueue};
 use crate::program::ProgramParams;
@@ -297,35 +297,29 @@ impl ParamSetBuilder {
     /// ```
     pub fn build(self) -> Arc<ParamSet> {
         let order = declaration_order(&self.decls);
-        let decls: Box<[ParamDecl]> = order
+        let cells: Box<[Arc<ParamCell>]> = order
             .iter()
             .filter_map(|&i| self.decls.get(i).copied())
-            .collect();
-        let by_key = decls
-            .iter()
             .enumerate()
-            .map(|(index, decl)| (decl.key, ParamId::from_index(index)))
+            .map(|(index, decl)| Arc::new(ParamCell::new(ParamId::from_index(index), decl)))
             .collect();
-        let bypass = decls
+        let by_key = cells
             .iter()
-            .position(|decl| decl.bypass)
-            .map(ParamId::from_index);
-        let values = decls
-            .iter()
-            .map(|decl| ValueCell::new(Packed::new(decl.default_value(), Origin::Restore)))
+            .map(|cell| (cell.decl().key, cell.id()))
             .collect();
-        let changes = decls.iter().map(|_| AtomicU64::new(0)).collect();
-        let host_ids: Box<[u32]> = decls.iter().map(|decl| host_id(decl.key)).collect();
+        let bypass = cells
+            .iter()
+            .find(|cell| cell.decl().bypass)
+            .map(|cell| cell.id());
+        let host_ids: Box<[u32]> = cells.iter().map(|cell| host_id(cell.decl().key)).collect();
         let by_host_id = host_ids
             .iter()
             .enumerate()
             .map(|(index, &id)| (id, ParamId::from_index(index)))
             .collect();
-        let host = HostQueue::new(decls.len());
+        let host = HostQueue::new(cells.len());
         Arc::new(ParamSet {
-            decls,
-            values,
-            changes,
+            cells,
             by_key,
             host_ids,
             by_host_id,
@@ -416,8 +410,8 @@ fn declaration_order(decls: &[ParamDecl]) -> Vec<usize> {
     order
 }
 
-/// The frozen parameters and their stores: one value cell in real units and
-/// one change counter each, which every thread reads without locks.
+/// The frozen parameters and their stores: one cell each, holding a value in
+/// real units and a change counter, which every thread reads without locks.
 ///
 /// A [`ParamId`] names a parameter of the set that minted it. Passing one from
 /// another set is a bug: a method panics when the index is out of range and
@@ -439,11 +433,8 @@ fn declaration_order(decls: &[ParamDecl]) -> Vec<usize> {
 /// ```
 #[derive(Debug)]
 pub struct ParamSet {
-    decls: Box<[ParamDecl]>,
-    values: Box<[ValueCell]>,
-    /// Moved by every write after its store; see
-    /// [`store_then_publish`](Self::store_then_publish).
-    changes: Box<[AtomicU64]>,
+    /// In declaration order: the cell at an id's index is that parameter's.
+    cells: Box<[Arc<ParamCell>]>,
     by_key: HashMap<&'static str, ParamId>,
     host_ids: Box<[u32]>,
     by_host_id: HashMap<u32, ParamId>,
@@ -497,12 +488,12 @@ impl ParamSet {
 
     /// Returns how many parameters there are.
     pub fn len(&self) -> usize {
-        self.decls.len()
+        self.cells.len()
     }
 
     /// Returns whether there are none.
     pub fn is_empty(&self) -> bool {
-        self.decls.is_empty()
+        self.cells.is_empty()
     }
 
     /// Returns every parameter, in declaration order.
@@ -566,7 +557,7 @@ impl ParamSet {
 
     /// Returns a parameter's declaration.
     pub fn decl(&self, id: ParamId) -> &ParamDecl {
-        cell(&self.decls, id)
+        self.cell(id).decl()
     }
 
     /// Returns the bypass parameter, if one is declared.
@@ -574,14 +565,15 @@ impl ParamSet {
         self.bypass
     }
 
-    /// Returns the current value, in real units. The
-    /// [crate overview](crate#examples) shows it read on the audio thread.
+    /// Returns the current value, in real units.
     ///
-    /// A reader that keeps a count, as a [`Watch`](crate::Watch) does, reads
-    /// both through [`read`](Self::read).
+    /// Plugin code holds a typed parameter instead, which reads its own value
+    /// as its own type: [`Float::get`](crate::Float::get). A reader that
+    /// keeps a count, as a [`Watch`](crate::Watch) does, reads both through
+    /// [`read`](Self::read).
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn value(&self, id: ParamId) -> f32 {
-        cell(&self.values, id).load(Ordering::Relaxed).value()
+        self.cell(id).value()
     }
 
     /// Returns the change count, then the value and the origin of the write
@@ -608,15 +600,7 @@ impl ParamSet {
     /// ```
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn read(&self, id: ParamId) -> Reading<f32> {
-        // The count first, as `store_then_publish` explains; then the value
-        // and its origin from one word.
-        let changes = self.changes(id);
-        let word = cell(&self.values, id).load(Ordering::Relaxed);
-        Reading {
-            changes,
-            value: word.value(),
-            origin: word.origin(),
-        }
+        self.cell(id).read()
     }
 
     /// Returns the current value as a host's 0..1, computed from the store
@@ -646,8 +630,7 @@ impl ParamSet {
     /// [crate overview](crate#examples) shows the pattern.
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn changes(&self, id: ParamId) -> u64 {
-        // Acquire pairs with the release in `store_then_publish`.
-        cell(&self.changes, id).load(Ordering::Acquire)
+        self.cell(id).changes()
     }
 
     /// Returns whether a sync has asked the host to re-read every value
@@ -744,6 +727,18 @@ impl ParamSet {
         HostEventDrain::new(self)
     }
 
+    /// The cell `id` names.
+    pub(crate) fn cell(&self, id: ParamId) -> &Arc<ParamCell> {
+        cell(&self.cells, id)
+    }
+
+    /// Whether `cell` is one of this set's, and not another set's.
+    pub(crate) fn owns(&self, cell: &Arc<ParamCell>) -> bool {
+        self.cells
+            .get(cell.id().index())
+            .is_some_and(|own| Arc::ptr_eq(own, cell))
+    }
+
     pub(crate) fn host(&self) -> &HostQueue {
         &self.host
     }
@@ -757,15 +752,8 @@ impl ParamSet {
         self.store_then_publish(id, value, origin, || {});
     }
 
-    /// Every write, in its one order: the value and its origin in one store,
-    /// then `between`, then the publish. The value is legal.
-    ///
-    /// The publish is the count's release, which pairs with the acquire in
-    /// [`changes`](Self::changes): a reader that loads the count and then the
-    /// value never sees a value older than the count. The store comes before
-    /// `between` because `between` may tell the host, which can read the
-    /// value back at once; nothing depends on `between` coming before the
-    /// publish. A [`value`](Self::value) call may see the write sooner.
+    /// Every write, in its one order, as
+    /// [`ParamCell::store_then_publish`] gives it.
     pub(crate) fn store_then_publish(
         &self,
         id: ParamId,
@@ -773,13 +761,7 @@ impl ParamSet {
         origin: Origin,
         between: impl FnOnce(),
     ) {
-        // Relaxed: a release after this in program order makes the word
-        // visible to a reader that acquires it. That is the count's below for
-        // a watch, and for the host's drain the release `between` makes when
-        // it tells the host.
-        cell(&self.values, id).store(Packed::new(value, origin), Ordering::Relaxed);
-        between();
-        cell(&self.changes, id).fetch_add(1, Ordering::Release);
+        self.cell(id).store_then_publish(value, origin, between);
     }
 }
 
@@ -871,8 +853,10 @@ impl AudioParams {
     /// ```
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn host_write(&self, id: ParamId, normalized: f64) {
-        let value = self.set.decl(id).host_value(normalized);
-        self.set.store(id, value, Origin::Host);
+        // One cell, fetched once, for the declaration and the write.
+        let cell = self.set.cell(id);
+        let value = cell.decl().host_value(normalized);
+        cell.store_then_publish(value, Origin::Host, || {});
     }
 
     /// Writes a learned controller's value, as its 0..1 after the mapping's
@@ -898,12 +882,14 @@ impl AudioParams {
     /// ```
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn learned_write(&self, id: ParamId, normalized: f64) {
-        if let Some(value) = self.set.decl(id).learned_value(normalized) {
-            self.set.store(id, value, Origin::Learn);
+        let cell = self.set.cell(id);
+        if let Some(value) = cell.decl().learned_value(normalized) {
+            cell.store_then_publish(value, Origin::Learn, || {});
         }
     }
 }
 
+mod param_cell;
 #[cfg(test)]
 mod tests;
 mod value_cell;

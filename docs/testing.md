@@ -184,7 +184,8 @@ the mark is absent:
   hold that undo replays take);
 - the handles a set hands out once (`ParamSet::take_ui`,
   `ParamSet::take_host_event_drain`);
-- the drops of `AudioParams`, `LearnAudio` and `HostEventDrain`.
+- the drops of `AudioParams`, `LearnAudio`, `HostEventDrain` and the typed
+  parameters (`Float`, `Bool`, `Choice`).
 
 An exporter holds the guard around everything its process call runs. So every
 test that drives the plugin through an exporter fails at the first lock on the
@@ -420,9 +421,11 @@ dispatch, saved and targets tests, with `-Zmiri-disable-isolation` and four
 property cases. Learn's four take about 20 seconds under either model on
 Windows. Its ceiling test maps 4,096 sources, did not finish in 25 minutes and
 is skipped. Its allocation gate is not run (it hits the allocator fault
-described below on Windows, and Linux has not run it yet). The other integration
-tests are left out: `seam-undo`'s do not finish in an hour under the
-interpreter.
+described below on Windows, and Linux has not run it yet). Among the core
+crates' unit tests, the parameters' check that no two of 65,536 small groups
+share an identity is ignored under miri: it takes minutes in the interpreter.
+The other integration tests are left out: `seam-undo`'s do not finish in an
+hour under the interpreter.
 
 No allocation gate runs under miri, so the counting allocator itself is not
 checked for undefined behaviour. Open: whether the gates pass under miri on

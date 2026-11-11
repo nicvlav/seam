@@ -125,6 +125,7 @@ comments never cite an id: they state the reason in words, and
 | D86 | [How does `PluginInfo` hold the AU codes? (D64)](#d86-the-au-codes) | As one `AuCodes` with named `subtype` and `manufacturer` fields, so the two cannot be swapped unseen. | decided |
 | D87 | [How does `ProcessSetup` give the main bus? (D58)](#d87-the-main-bus-in-processsetup) | As one `layout: Layout`, the one of the plugin's layouts the host chose. | decided |
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
+| D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1443,8 +1444,9 @@ an exporter raises around everything its `process` call runs, and around the
 other calls a host may make on the audio thread (the C interface's `set` and
 `reset`, VST3's `setProcessing`). Every call that locks asserts the mark is
 absent: `Value` and `List` calls, `Session` calls, `Load::restore` and the load
-hold an undo replay takes; so do the drops of `AudioParams`, `LearnAudio` and
-`HostEventDrain`, which must not free on the audio thread.
+hold an undo replay takes; so do the drops of `AudioParams`, `LearnAudio`,
+`HostEventDrain` and the typed parameters `Float`, `Bool` and `Choice`, which
+must not free on the audio thread. A typed parameter's clone is allowed there.
 
 A thread already unwinding is not checked, so a drop during a panic cannot turn
 it into an abort. A release build has neither the mark nor the checks. VST3's
@@ -1984,6 +1986,55 @@ the `tresult` as a C++ host would, and one `Refused` for both hosts, whose
 variants each host would only half use.
 
 [History](decision-history.md#d88-a-call-a-test-host-was-refused)
+
+### D89. How plugin code names a parameter
+
+**Question and C++ Seam.** How does plugin code name a parameter and read its
+value? (P1, P10) Not applicable: the C++ Seam's plugins were JUCE's, and read
+their parameters through JUCE.
+
+**Rust.** Plugin code holds a parameter as a typed parameter: `Float` for a
+continuous one, `Bool`, or `Choice<E>` for an enum `E` that implements
+`Choices`, whose `LABELS` the declaration takes as `Kind::Choice(E::LABELS)`.
+Each carries its store: the parameter's one cell, which its set shares, with
+the value word and the change count first and the id and declaration behind
+them. `get` is one atomic load and a decode. It names no set and has no path
+that panics; for a choice it calls `Choices::from_index` on a saturated index,
+and that must be total too.
+
+A parameter is `Clone`, and a clone is the same parameter: equality is the
+store's identity, not the value. It is not `Copy`, since the last drop frees
+the store, so its drop is checked against the audio-thread mark (D67).
+
+`ParamSet::bind` makes one from a key, once, when the plugin is built. It
+refuses with a `BindError` that names the key when nothing is declared under
+it, when the declaration is another kind, and when a choice's labels are not
+`E::LABELS`. Nothing is checked after that. A parameter's `id()` is its place
+in the set, by which every call that takes a `ParamId` names it, and `value`
+on the set and its handles takes a `ParamId` and returns the stored `f32`.
+`UiParams::write` takes a typed parameter, by reference, with a value of its
+type, or a `ParamId` with an `f32`, through one sealed trait. It refuses a
+parameter of another set: `false`, and a debug assertion. Declarations are
+still a table of `ParamDecl`s.
+
+A processor asks once per block whether any of a group of parameters moved
+with `Changes`, which holds a stamp and no parameter. The members come with
+each call, as `moved([&gain, &mode])`, and may be of different kinds. The
+stamp is the sum of their change counts and a mix of their stores' serials,
+numbers no two stores share in a process. So a call about other parameters
+than the last answers true, short of a collision in the mix, which is chance,
+about once in 2^64. The check is a load per member and a compare.
+
+**Alternatives.** The alternatives were the id it was, looked up by string
+behind `expect` and decoded with a threshold per kind in every plugin; a handle
+that is an index into its set, which is read against that set, reads another
+parameter or panics when paired with another set, and cannot exist before its
+set does; typed reads under names of their own beside the untyped ones, which
+doubled the API; a `Changes` that holds its members, which ties it to one
+group's size; and a group check over a boxed list of ids, which puts a pointer
+to follow on the audio thread.
+
+[History](decision-history.md#d89-how-plugin-code-names-a-parameter)
 
 ## How to read this
 

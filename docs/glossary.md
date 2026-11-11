@@ -270,8 +270,10 @@ staged word is [field.rs](../crates/learn/src/field.rs).
 
 A parameter's one value cell, in real units. The audio thread, the UI, the host
 and the save path all read it, so none sees a value older than another. The
-value and its origin share one atomic word
+value and its origin share one atomic word. Its set and its [typed
+parameter](#typed-parameter) share it
 ([`ParamSet`](../crates/params/src/set.rs);
+[param_cell.rs](../crates/params/src/set/param_cell.rs),
 [value_cell.rs](../crates/params/src/set/value_cell.rs)).
 
 ### Surface
@@ -312,6 +314,14 @@ registered target's on the UI thread.
 Several steps undone and redone as one entry: every step recorded while a
 transaction is open joins it
 ([`History::transaction`](../crates/undo/src/history.rs)).
+
+### Typed parameter
+
+A parameter as plugin code holds it: a [`Float`, `Bool` or
+`Choice`](../crates/params/src/param.rs) that carries its [store](#store) and
+reads, with `get`, as the type its kind stands for: an `f32`, a `bool` or the
+plugin's enum. A clone is the same parameter. Its
+[`ParamId`](../crates/params/src/decl.rs) is its place in its set.
 
 ### Watch
 

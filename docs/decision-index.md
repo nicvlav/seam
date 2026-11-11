@@ -386,7 +386,8 @@ move its line here; when a decision gains code, add one.
 
 - `crates/params/src/lib.rs`: module
 - `crates/params/src/origin.rs`: `Origin::ALL`, `Reading`, `Reading::origin`
-- `crates/params/src/set.rs`: `ParamSet`, `ParamSet::read`, `ParamSet::values`
+- `crates/params/src/set.rs`: `ParamSet`, `ParamSet::read`, `ParamSet::cells`
+- `crates/params/src/set/param_cell.rs`: `ParamCell::read`
 - `crates/params/src/set/value_cell.rs`: module, `Packed`, `Packed::new`, `Packed::origin`, `ValueCell`
 - test `crates/params/src/origin.rs`: `every_origin_reads_back_from_its_number_and_no_other_byte_reads`
 - test `crates/params/src/set/tests.rs`: `loom_racing_writers_leave_one_writers_value_with_its_origin`
@@ -698,6 +699,7 @@ move its line here; when a decision gains code, add one.
 - `crates/params/src/clock.rs`: `RestoreClock::hold_loads`
 - `crates/params/src/host_events.rs`: `HostEventDrain`
 - `crates/params/src/list.rs`: `List`
+- `crates/params/src/param.rs`: `Float`, `Bool`, `Choice`
 - `crates/params/src/program.rs`: `Load::restore`
 - `crates/params/src/set.rs`: `AudioParams`
 - `crates/params/src/value.rs`: `Value`
@@ -705,6 +707,7 @@ move its line here; when a decision gains code, add one.
 - test `crates/host/src/engine/tests.rs`: `the_block_runs_marked_as_the_audio_thread_and_no_processor_drops_there`
 - test `crates/learn/tests/capture.rs`: `dropping_the_audio_side_is_silent_off_the_audio_thread`, `dropping_the_audio_side_is_refused_on_the_audio_thread`
 - test `crates/params/tests/audio_thread.rs`: module, `the_mark_belongs_to_its_thread`, `every_checked_call_is_silent_off_the_audio_thread`, `a_panic_while_unwinding_is_not_made_worse`, `the_guard_is_zero_sized_and_nothing_is_ever_refused`
+- test `crates/params/tests/typed.rs`: `dropping_a_typed_parameter_under_the_audio_thread_mark_is_a_contract_panic`
 - test `crates/session/tests/audio_thread.rs`: module
 
 ### D68. Audit items that wait for their code
@@ -906,6 +909,23 @@ move its line here; when a decision gains code, add one.
 - test `crates/host/src/vst3/tests.rs`: `the_host_writes_through_process_and_through_the_controller`, `layouts_follow_the_declaration`, `a_panicking_entry_point_answers_an_error`, `state_round_trips_through_streams_on_any_thread`, `setup_is_refused_while_active`, `a_setup_with_no_block_size_keeps_its_rate_and_one_past_the_limit_is_built_for_the_limit`
 - test `crates/host/src/cabi/tests.rs`: `activation_builds_a_processor_for_the_setup_and_layout`, `a_panic_in_activate_or_idle_is_answered`, `the_saved_block_round_trips_and_a_stranger_changes_nothing`, `an_instrument_plays_with_no_input_or_a_narrower_one`
 
+### D89. How plugin code names a parameter
+
+[Record section](decisions.md#d89-how-plugin-code-names-a-parameter)
+
+- `crates/params/src/param.rs`: module, `Float`, `Bool`, `Choice`, `Float::get`, `Bool::get`, `Choice::get`, `Choices`, `AnyParam`, `Writable`, `Bind`, `BindError`, `ParamSet::bind`
+- `crates/params/src/set/param_cell.rs`: module, `ParamCell`, `ParamCell::serial`, `SERIALS`
+- `crates/params/src/set.rs`: `ParamSet::cell`, `ParamSet::owns`
+- `crates/params/src/changes.rs`: module, `Changes`, `Changes::new`, `Changes::moved`, `stamp`, `mix`
+- `crates/params/src/ui.rs`: `UiParams::write`, `UiParams::user_write_cell`
+- `examples/gain/src/lib.rs`: `Mode`, `GainParams`, `GainProcessor::retune`
+- `examples/eq/src/lib.rs`: `EqParams`, `BandParams`, `EqProcessor::retune`
+- test `crates/params/tests/typed.rs`: module, `a_parameter_bound_to_another_kind_is_refused_with_its_key`, `a_key_nothing_is_declared_under_is_refused_by_name`, `a_choice_whose_enum_has_other_labels_is_refused_with_its_key`, `each_parameter_reads_with_get_what_the_ui_wrote`, `a_typed_parameter_and_its_id_read_one_store`, `a_parameter_outlives_its_set_and_still_reads_its_store`, `a_clone_is_the_same_parameter_and_two_parameters_are_not`, `a_write_through_another_sets_ui_is_a_contract_panic_and_changes_nothing`, `a_group_moves_once_per_write_to_a_member_and_never_for_another`, `a_group_asked_about_other_parameters_than_last_time_moves`, `reads_and_the_group_check_run_under_the_audio_thread_mark`, `dropping_a_typed_parameter_under_the_audio_thread_mark_is_a_contract_panic`, `typed_parameters_and_a_group_check_cross_threads_whatever_the_enum`
+- test `crates/params/src/changes.rs`: `no_two_small_groups_share_an_identity`
+- test `crates/params/src/param.rs`: `the_last_parameter_dropped_frees_its_store_after_the_set_has_gone`, `decoding_is_total_and_inverts_encoding_on_stored_values`
+- test `crates/params/tests/drops.rs`: `the_last_typed_parameter_drops_on_a_worker_after_its_set`
+- test `crates/params/tests/alloc_gate.rs`: `typed_reads_and_the_group_check_do_not_allocate`
+
 ## Parameters
 
 ### P1. One store per parameter
@@ -913,7 +933,8 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#p1-one-store-per-parameter)
 
 - `crates/params/src/lib.rs`: module
-- `crates/params/src/set.rs`: module, `ParamSet`, `ParamSet::normalized`, `ParamSet::values`
+- `crates/params/src/set.rs`: module, `ParamSet`, `ParamSet::normalized`, `ParamSet::cells`
+- `crates/params/src/set/param_cell.rs`: module, `ParamCell`, `ParamCell::store_then_publish`
 - `crates/params/src/set/value_cell.rs`: module, `Packed::value`, `ValueCell`
 - test `crates/params/src/set/tests.rs`: `loom_racing_writers_leave_one_writers_value_with_its_origin`
 - test `crates/params/tests/set.rs`: module
@@ -967,6 +988,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/vst3/mod.rs`: module
 - `crates/params/src/decl.rs`: `ParamDecl::host_value`
 - `crates/params/src/set.rs`: module, `ParamSet`, `ParamSet::read`, `ParamSet::store_then_publish`, `AudioParams`, `AudioParams::host_write`
+- `crates/params/src/set/param_cell.rs`: `ParamCell::store_then_publish`
 - `examples/eq/examples/parity/cases.rs`: `normalized`
 - test `crates/params/src/set/tests.rs`: `loom_a_read_never_has_a_count_newer_than_its_value`, `loom_a_user_write_and_a_sync_publish_their_count_and_request_after_their_value`
 - test `crates/params/tests/alloc_gate.rs`: module
@@ -993,6 +1015,7 @@ move its line here; when a decision gains code, add one.
 - `crates/params/src/host_events.rs`: module
 - `crates/params/src/program.rs`: `ProgramParams::sync`
 - `crates/params/src/set.rs`: `ParamSet::store_then_publish`
+- `crates/params/src/set/param_cell.rs`: `ParamCell::store_then_publish`
 - `crates/params/src/ui.rs`: module, `UiState::write`, `UiParams`
 - test `crates/params/src/host_events.rs`: `loom_a_drain_racing_a_gesture_hears_one_balanced_bracket`
 - test `crates/params/src/set/tests.rs`: `loom_a_user_write_and_a_sync_publish_their_count_and_request_after_their_value`
