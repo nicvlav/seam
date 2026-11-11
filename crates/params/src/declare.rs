@@ -521,7 +521,37 @@ impl Params for () {
 /// [`Params::declare`] runs to its end. The parameter handed back for that
 /// declaration, and for each one after it, has a store of its own and is in
 /// no set. The build then returns the refusal, and drops what `declare`
-/// returned. [`ParamSet::declare`] shows one refused.
+/// returned.
+///
+/// # Examples
+///
+/// A refusal midway: `declare` still runs to its end, and the build returns
+/// that refusal.
+///
+/// ```
+/// use seam_params::{Bool, BoolDecl, DeclError, Declarer, ParamSet, Params};
+///
+/// struct Clash {
+///     on: Bool,
+///     again: Bool,
+///     unkeyed: Bool,
+/// }
+///
+/// impl Params for Clash {
+///     fn declare(p: &mut Declarer) -> Self {
+///         Clash {
+///             on: p.add(BoolDecl::new("on", "On", true)),
+///             // Refused: the key is taken. `declare` goes on.
+///             again: p.add(BoolDecl::new("on", "On again", false)),
+///             // Not checked: after a refusal, nothing joins the set.
+///             unkeyed: p.add(BoolDecl::new("", "No key", false)),
+///         }
+///     }
+/// }
+///
+/// let refused = ParamSet::declare::<Clash>().map(|_| ()).unwrap_err();
+/// assert_eq!(refused, DeclError::DuplicateKey("on"));
+/// ```
 #[derive(Debug)]
 pub struct Declarer {
     builder: ParamSetBuilder,
