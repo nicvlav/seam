@@ -2086,9 +2086,13 @@ default past its labels, with `DeclError::DefaultOutsideRange`; a
 `ParamDecl` still snaps its default.
 
 The table path stays: `ParamDecl`, `Kind`, `ParamSetBuilder` and
-`ParamSet::from_decls` are unchanged, and `Declarer::extend` declares a
-table, for a test plugin or one whose parameters come from data.
-`Plugin::PARAMS` still asks for a table.
+`ParamSet::from_decls` keep their signatures and the rules they apply, and
+`Declarer::extend` declares a table, for a test plugin or one whose
+parameters come from data. `Plugin::PARAMS` still asks for a table. Since
+the builder shares the typed declarations' rules, it applies the ones a row
+breaks on its own before the ones only the rows before it show, so a row
+that breaks two rules is refused for the one of its own: a repeated key
+whose choice has one label is `TooFewChoices`, not `DuplicateKey`.
 
 **Alternatives.** The alternatives were a table of `ParamDecl`s beside typed
 fields bound by key, which writes each parameter four times (a key, a row, a
