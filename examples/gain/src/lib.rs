@@ -204,7 +204,7 @@ impl Plugin for Gain {
     type Processor = GainProcessor;
 
     fn new(params: GainParams, mut parts: Parts) -> Self {
-        let history = parts.undo(Bound::default());
+        let history = parts.undo(Bound::default()).expect("no other history");
         parts
             .midi_learn(Config::default())
             .expect("learn's key is free");

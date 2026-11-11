@@ -91,7 +91,7 @@ impl Plugin for Listening {
 #[test]
 fn an_idle_tick_of_a_plugin_s_parts_does_not_allocate() {
     let (_params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
-    let _history = parts.undo(Bound::default());
+    let _history = parts.undo(Bound::default()).expect("no other history");
     parts
         .midi_learn(Config::default())
         .expect("learn's key is free");

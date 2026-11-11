@@ -191,7 +191,7 @@ parameters and drops its parts, so it stays `Send`.
 Undo is one call in `new`, which turns it on with every parameter enrolled:
 
 ```rust
-let history = parts.undo(Bound::default());
+let history = parts.undo(Bound::default()).expect("no other history");
 ```
 
 The `History` it returns records changes to what is enrolled in it. Only

@@ -10,7 +10,7 @@ use std::sync::{Arc, Weak};
 use seam_learn::{Config, Learn, LearnAudio, Learned};
 use seam_params::{DeclError, ParamSet, UiParams};
 use seam_session::{Session, SessionError, SessionUi};
-use seam_undo::{Bound, History};
+use seam_undo::{Bound, History, HistoryError};
 
 use crate::{Plugin, SavedState};
 
@@ -80,7 +80,7 @@ use crate::{Plugin, SavedState};
 /// #   type Processor = Silent;
 ///
 ///     fn new(params: Level, mut parts: Parts) -> Self {
-///         let history = parts.undo(Bound::default());
+///         let history = parts.undo(Bound::default()).expect("no other history");
 ///         Gain { parts, params, history }
 ///     }
 ///
@@ -185,19 +185,19 @@ impl Parts {
     /// history. A second call returns the same history: clones share it.
     ///
     /// The history is pruned to `bound`; a later call's is ignored.
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "only the parts make a history over their handle, and only once"
-    )]
-    pub fn undo(&mut self, bound: Bound) -> History {
-        self.history
-            .get_or_insert_with(|| {
-                let history = History::new(&self.params, bound)
-                    .expect("only the parts make a history over their handle");
-                history.enroll_params();
-                history
-            })
-            .clone()
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HistoryError::HistoryExists`] when the plugin made a history
+    /// of its own over [`params`](Self::params), which is still alive.
+    pub fn undo(&mut self, bound: Bound) -> Result<History, HistoryError> {
+        if let Some(history) = &self.history {
+            return Ok(history.clone());
+        }
+        let history = History::new(&self.params, bound)?;
+        history.enroll_params();
+        self.history = Some(history.clone());
+        Ok(history)
     }
 
     /// Turns MIDI learn on, its mappings saved with the session.

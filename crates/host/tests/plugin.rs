@@ -211,7 +211,7 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
     use seam_undo::Bound;
 
     let (params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
-    let history = parts.undo(Bound::default());
+    let history = parts.undo(Bound::default()).expect("no other history");
     parts
         .midi_learn(Config::default())
         .expect("learn's key is free");
@@ -264,4 +264,22 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
 fn learn_is_refused_to_a_plugin_that_takes_no_midi() {
     let (_, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
     let _ = parts.midi_learn(seam_learn::Config::default());
+}
+
+#[test]
+fn undo_is_refused_while_the_plugin_s_own_history_is_alive() {
+    use seam_undo::{Bound, History, HistoryError};
+
+    let (_, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
+    let own = History::new(parts.params(), Bound::default()).expect("the first history");
+    assert_eq!(
+        parts.undo(Bound::default()).err(),
+        Some(HistoryError::HistoryExists)
+    );
+    drop(own);
+    let _history = parts.undo(Bound::default()).expect("no other history");
+    assert!(
+        parts.undo(Bound::default()).is_ok(),
+        "a second call hands back the same history"
+    );
 }
