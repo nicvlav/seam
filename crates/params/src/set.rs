@@ -25,12 +25,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) use param_cell::ParamCell;
 
+use crate::declare::rules;
 use crate::host_events::{HostEventDrain, HostQueue};
 use crate::program::ProgramParams;
 use crate::ui::UiParams;
 use crate::{
-    Kind, Origin, ParamDecl, ParamId, RESERVED_HOST_IDS, Reading, RestoreClock, audio_thread,
-    host_id,
+    Kind, Origin, ParamDecl, ParamId, RangeError, Reading, RestoreClock, audio_thread, host_id,
 };
 
 /// The longest key, in bytes: AAX truncates longer ones, which would merge
@@ -107,6 +107,46 @@ pub enum DeclError {
         /// The parameter declared first.
         other: &'static str,
     },
+    /// A typed declaration's range is one [`Range::new`](crate::Range::new)
+    /// refuses.
+    RangeRefused {
+        /// The parameter declared with it.
+        key: &'static str,
+        /// The rule the range breaks.
+        error: RangeError,
+    },
+    /// A typed declaration's default is outside its range, or not one of a
+    /// choice's values. A plain [`ParamDecl`] snaps its default instead.
+    DefaultOutsideRange(&'static str),
+}
+
+impl DeclError {
+    /// The rule broken, in words that name no key, for a refusal while
+    /// compiling, where a message cannot be formatted.
+    pub(crate) const fn rule(&self) -> &'static str {
+        match self {
+            DeclError::EmptyKey => "a parameter's key is empty",
+            DeclError::KeyHasSlash(_) => "a parameter's key contains '/'",
+            DeclError::KeyTooLong(_) => "a parameter's key is longer than 31 bytes",
+            DeclError::DuplicateKey(_) => "two parameters have one key",
+            DeclError::KeyIsGroup(_) => "a key and a group share a name",
+            DeclError::EmptyGroupName { .. } => "a group path has an empty name in it",
+            DeclError::TooFewChoices(_) => "a choice has fewer than two labels",
+            DeclError::EmptyChoiceLabel(_) => "a choice has an empty label",
+            DeclError::PaddedChoiceLabel { .. } => "a choice has a label with whitespace at an end",
+            DeclError::DuplicateChoiceLabel { .. } => {
+                "a choice has two labels that differ only in case"
+            }
+            DeclError::SecondBypass(_) => "a second parameter is the bypass",
+            DeclError::BypassNotBool(_) => "the bypass is not a bool",
+            DeclError::ReservedHostId(_) => {
+                "a parameter's key has a host id the VST3 exporter reserves"
+            }
+            DeclError::HostIdCollision { .. } => "two keys share one host id",
+            DeclError::RangeRefused { error, .. } => error.rule(),
+            DeclError::DefaultOutsideRange(_) => "a parameter's default is outside its range",
+        }
+    }
 }
 
 impl fmt::Display for DeclError {
@@ -150,6 +190,12 @@ impl fmt::Display for DeclError {
             DeclError::HostIdCollision { key, other } => {
                 write!(f, "keys {other:?} and {key:?} share one host id")
             }
+            DeclError::RangeRefused { key, error } => {
+                write!(f, "parameter {key:?} has a range that is refused: {error}")
+            }
+            DeclError::DefaultOutsideRange(key) => {
+                write!(f, "parameter {key:?} has a default outside its range")
+            }
         }
     }
 }
@@ -175,7 +221,9 @@ impl std::error::Error for DeclError {}
 /// ```
 #[derive(Debug, Default)]
 pub struct ParamSetBuilder {
-    decls: Vec<ParamDecl>,
+    /// In the order added. Each store is made here, so a typed parameter
+    /// can carry it before the set is built.
+    cells: Vec<Arc<ParamCell>>,
     keys: HashSet<&'static str>,
     groups: HashSet<&'static str>,
     host_ids: HashMap<u32, &'static str>,
@@ -218,25 +266,33 @@ impl ParamSetBuilder {
     /// assert_eq!(builder.build().len(), 1);
     /// ```
     pub fn add(&mut self, decl: ParamDecl) -> Result<&mut Self, DeclError> {
+        self.add_cell(decl)?;
+        Ok(self)
+    }
+
+    /// [`add`](Self::add), handing back the parameter's store.
+    pub(crate) fn add_cell(&mut self, decl: ParamDecl) -> Result<Arc<ParamCell>, DeclError> {
         self.check(&decl)?;
         self.keys.insert(decl.key);
         self.host_ids.insert(host_id(decl.key), decl.key);
         self.groups.extend(group_names(decl.group));
         self.bypass |= decl.bypass;
-        self.decls.push(decl);
-        Ok(self)
+        let cell = Arc::new(ParamCell::new(decl));
+        self.cells.push(Arc::clone(&cell));
+        Ok(cell)
     }
 
+    /// The rules a declaration can break on its own, then the ones only the
+    /// declarations before it show.
     fn check(&self, decl: &ParamDecl) -> Result<(), DeclError> {
         let key = decl.key;
-        if key.is_empty() {
-            return Err(DeclError::EmptyKey);
+        rules::key(key)?;
+        rules::group(key, decl.group)?;
+        if let Kind::Choice(labels) = decl.kind {
+            rules::labels(key, labels)?;
         }
-        if key.contains('/') {
-            return Err(DeclError::KeyHasSlash(key));
-        }
-        if key.len() > MAX_KEY_LEN {
-            return Err(DeclError::KeyTooLong(key));
+        if decl.bypass && !decl.kind.is_boolean() {
+            return Err(DeclError::BypassNotBool(key));
         }
         if self.keys.contains(key) {
             return Err(DeclError::DuplicateKey(key));
@@ -244,29 +300,11 @@ impl ParamSetBuilder {
         if self.groups.contains(key) {
             return Err(DeclError::KeyIsGroup(key));
         }
-        let id = host_id(key);
-        if RESERVED_HOST_IDS.contains(&id) {
-            return Err(DeclError::ReservedHostId(key));
-        }
-        if let Some(&other) = self.host_ids.get(&id) {
+        if let Some(&other) = self.host_ids.get(&host_id(key)) {
             return Err(DeclError::HostIdCollision { key, other });
         }
-        for name in group_names(decl.group) {
-            if name.is_empty() {
-                return Err(DeclError::EmptyGroupName {
-                    key,
-                    group: decl.group,
-                });
-            }
-            if name == key || self.keys.contains(name) {
-                return Err(DeclError::KeyIsGroup(name));
-            }
-        }
-        if let Kind::Choice(labels) = decl.kind {
-            check_labels(key, labels)?;
-        }
-        if decl.bypass && !decl.kind.is_boolean() {
-            return Err(DeclError::BypassNotBool(key));
+        if let Some(name) = group_names(decl.group).find(|name| self.keys.contains(name)) {
+            return Err(DeclError::KeyIsGroup(name));
         }
         if decl.bypass && self.bypass {
             return Err(DeclError::SecondBypass(key));
@@ -296,13 +334,14 @@ impl ParamSetBuilder {
     /// # Ok::<(), seam_params::DeclError>(())
     /// ```
     pub fn build(self) -> Arc<ParamSet> {
-        let order = declaration_order(&self.decls);
+        let order = declaration_order(&self.cells);
         let cells: Box<[Arc<ParamCell>]> = order
             .iter()
-            .filter_map(|&i| self.decls.get(i).copied())
-            .enumerate()
-            .map(|(index, decl)| Arc::new(ParamCell::new(ParamId::from_index(index), decl)))
+            .filter_map(|&i| self.cells.get(i).cloned())
             .collect();
+        for (index, cell) in cells.iter().enumerate() {
+            cell.place(ParamId::from_index(index));
+        }
         let by_key = cells
             .iter()
             .map(|cell| (cell.decl().key, cell.id()))
@@ -341,26 +380,6 @@ pub(crate) fn cell<T>(cells: &[T], id: ParamId) -> &T {
     &cells[id.index()]
 }
 
-/// Checks a choice's labels against the [`DeclError`] rules for them.
-fn check_labels(key: &'static str, labels: &'static [&'static str]) -> Result<(), DeclError> {
-    if labels.len() < 2 {
-        return Err(DeclError::TooFewChoices(key));
-    }
-    for (index, &label) in labels.iter().enumerate() {
-        if label.trim().is_empty() {
-            return Err(DeclError::EmptyChoiceLabel(key));
-        }
-        if label.trim() != label {
-            return Err(DeclError::PaddedChoiceLabel { key, label });
-        }
-        let mut earlier = labels.iter().take(index);
-        if earlier.any(|other| other.eq_ignore_ascii_case(label)) {
-            return Err(DeclError::DuplicateChoiceLabel { key, label });
-        }
-    }
-    Ok(())
-}
-
 /// The names along a group path; none for the top level.
 fn group_names(group: &'static str) -> impl Iterator<Item = &'static str> {
     group.split('/').filter(move |_| !group.is_empty())
@@ -380,7 +399,7 @@ fn group_paths(group: &'static str) -> impl Iterator<Item = &'static str> {
     clippy::indexing_slicing,
     reason = "runs once, on the main thread, when a set is built; the indices are ones it just made"
 )]
-fn declaration_order(decls: &[ParamDecl]) -> Vec<usize> {
+fn declaration_order(cells: &[Arc<ParamCell>]) -> Vec<usize> {
     #[derive(Default)]
     struct Group {
         params: Vec<usize>,
@@ -388,9 +407,9 @@ fn declaration_order(decls: &[ParamDecl]) -> Vec<usize> {
     }
     let mut groups = vec![Group::default()];
     let mut by_path: HashMap<&str, usize> = HashMap::new();
-    for (index, decl) in decls.iter().enumerate() {
+    for (index, cell) in cells.iter().enumerate() {
         let mut node = 0;
-        for path in group_paths(decl.group) {
+        for path in group_paths(cell.decl().group) {
             node = *by_path.entry(path).or_insert_with(|| {
                 let child = groups.len();
                 groups.push(Group::default());
@@ -400,7 +419,7 @@ fn declaration_order(decls: &[ParamDecl]) -> Vec<usize> {
         }
         groups[node].params.push(index);
     }
-    let mut order = Vec::with_capacity(decls.len());
+    let mut order = Vec::with_capacity(cells.len());
     let mut stack = vec![0];
     while let Some(node) = stack.pop() {
         order.extend(&groups[node].params);
@@ -734,8 +753,8 @@ impl ParamSet {
 
     /// Whether `cell` is one of this set's, and not another set's.
     pub(crate) fn owns(&self, cell: &Arc<ParamCell>) -> bool {
-        self.cells
-            .get(cell.id().index())
+        cell.placed()
+            .and_then(|id| self.cells.get(id.index()))
             .is_some_and(|own| Arc::ptr_eq(own, cell))
     }
 

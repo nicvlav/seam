@@ -105,7 +105,7 @@ comments never cite an id: they state the reason in words, and
 | D66 | [What does a load do with bytes after the block, and is the host told that a load failed? (H2)](#d66-bytes-after-the-block-and-a-failed-load) | Trailing NUL bytes are trimmed and the block loads, and JSON whitespace around the object loads too; any other byte after the object makes the block unrecognised. A load that fails is answered as failed, except through JUCE, whose `setStateInformation` answers nothing, so the adapter cannot tell its host. | decided |
 | D67 | [How are the rules checked that keep locking types off the audio thread? (P6, D39)](#d67-checking-the-audio-thread-locking-rule) | By a debug-build mark, `seam_params::audio_thread`: a per-thread depth an exporter raises around everything its `process` call runs, and every call that locks asserts the mark is absent. | decided |
 | D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, the native side of the page protocol, automation smoothing and splitting, a derive that declares each parameter once, and semver checks. | decided |
-| D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. | decided |
+| D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. A typed declaration's range is checked by `Range::new` too: by `FloatDecl::checked` while compiling, and when it is added. | decided |
 | D70 | [How does learn read MIDI 1.0's paired controllers and parameter numbers where MIDI 1.0 leaves room? (L2, L3, D30)](#d70-learns-reading-of-midi-10-pairs) | Per group and channel, the two NRPN address bytes pair in either order, 127 with 127 selects nothing, and data increment and decrement are never learned. A controller 32 to 63 right after the controller 32 below it learns that one as a 7-bit controller. A learned pair plays at 7 bits: 14-bit controller playback is open, to be built when an exporter delivers MIDI. | decided |
 | D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn ends the arm, clears every mapping and held entry and publishes the empty table, then closes open bursts (D82) and fails the apply, so the session keeps the section. | decided |
 | D72 | [How much may a host ask of an instance? (H2, D59, D62)](#d72-how-much-a-host-may-ask) | Fixed limits: a processor is built for at most 65,536 frames a block, a setup that promises more being built for that many, a saved block is at most 64 MiB, and a block's automation has room for 8 points per parameter on average, shared by its queues. | decided |
@@ -126,6 +126,7 @@ comments never cite an id: they state the reason in words, and
 | D87 | [How does `ProcessSetup` give the main bus? (D58)](#d87-the-main-bus-in-processsetup) | As one `layout: Layout`, the one of the plugin's layouts the host chose. | decided |
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
+| D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -1493,6 +1494,14 @@ strictly inside; the builder does not check ranges. `Kind::continuous`, a public
 `const fn`, panics on what `Range::new` refuses, so a wrong range in a
 declaration that is a constant fails the build.
 
+A typed declaration writes its range as one, `FloatDecl::new(key, name,
+-60.0..=12.0, default)` with `with_step` and `with_skew_centre`, so it holds
+no `Range` until it is checked, and `Range::new` checks it in two places.
+`FloatDecl::checked`, a `const fn`, panics on a refused range, which in a
+declaration that is a constant fails the build. `Declarer::add` refuses it
+with `DeclError::RangeRefused`, naming the key. Both also refuse a default
+outside the range (D90).
+
 **Alternatives.** The alternatives were public fields checked by the builder in
 every build, or `Range::new` alone, each constant declaration matching its
 result by hand.
@@ -2014,8 +2023,9 @@ in the set, by which every call that takes a `ParamId` names it, and `value`
 on the set and its handles takes a `ParamId` and returns the stored `f32`.
 `UiParams::write` takes a typed parameter, by reference, with a value of its
 type, or a `ParamId` with an `f32`, through one sealed trait. It refuses a
-parameter of another set: `false`, and a debug assertion. Declarations are
-still a table of `ParamDecl`s.
+parameter of another set: `false`, and a debug assertion. Declaring a
+parameter with a typed declaration hands it back (D90); `bind` serves a plain
+table of `ParamDecl`s.
 
 A processor asks once per block whether any of a group of parameters moved
 with `Changes`, which holds a stamp and no parameter. The members come with
@@ -2035,6 +2045,66 @@ group's size; and a group check over a boxed list of ids, which puts a pointer
 to follow on the audio thread.
 
 [History](decision-history.md#d89-how-plugin-code-names-a-parameter)
+
+### D90. How a plugin declares its parameters
+
+**Question and C++ Seam.** How does a plugin declare its parameters and come
+to hold them as typed parameters? (P1, P10, D89) Not applicable: the C++
+Seam's plugins declared JUCE's parameters.
+
+**Rust.** In one function that returns them. A struct of parameters
+implements `Params`, whose `declare(p: &mut Declarer) -> Self` adds each
+parameter and keeps what it is handed: `p.add(FloatDecl::new("gain", "Gain",
+-60.0..=12.0, 0.0).with_step(0.1))` is a `Float`. A declaration is typed, and
+its type is the kind: `FloatDecl` makes a `Float`, `BoolDecl` a `Bool`, and
+`ChoiceDecl<E>` a `Choice<E>` whose labels are `E::LABELS` and whose default
+is an `E`. A field of another kind does not compile, and only a `BoolDecl`
+can be the bypass. A struct may hold another and call its `declare`; `()` is
+the struct of a plugin with none. `ParamSet::declare::<P>()` runs `declare`
+and freezes the set.
+
+`add` makes the parameter's store there and then. Its id, its place in the
+order hosts list parameters, is fixed when the set is frozen, as a table's
+is (P10), since the set orders parameters by group. Asking for it inside
+`declare` is a contract panic.
+
+A mistake is a compile error on the author's own line where it can be. Each
+typed declaration has a `const fn checked` that panics on the rules one
+declaration can break alone: the key's, the group's, the labels', the
+range's, and a float's default inside its range. In a named `const` that
+fails `cargo check`; an inline `const { }` block fails only when code is
+generated. Those rules are written once, as `const fn`s, and
+`ParamSetBuilder::add` and `Declarer::add` call the same ones. What only the
+whole set shows (a key, group name or host id another parameter has, a
+second bypass) is one `DeclError` when the set is built. `declare` returns
+no `Result`: the declarer keeps the first refusal and goes on, handing back
+parameters with stores of their own and in no set, and `ParamSet::declare`
+returns the refusal and drops what `declare` returned.
+
+A typed declaration refuses a default outside its range, and a choice's
+default past its labels, with `DeclError::DefaultOutsideRange`; a
+`ParamDecl` still snaps its default.
+
+The table path stays: `ParamDecl`, `Kind`, `ParamSetBuilder` and
+`ParamSet::from_decls` keep their signatures and the rules they apply, and
+`Declarer::extend` declares a table, for a test plugin or one whose
+parameters come from data. `Plugin::PARAMS` still asks for a table. Since
+the builder shares the typed declarations' rules, it applies the ones a row
+breaks on its own before the ones only the rows before it show, so a row
+that breaks two rules is refused for the one of its own: a repeated key
+whose choice has one label is `TooFewChoices`, not `DuplicateKey`.
+
+**Alternatives.** The alternatives were a table of `ParamDecl`s beside typed
+fields bound by key, which writes each parameter four times (a key, a row, a
+field and a bind) and says its kind twice; typed constants gathered in a list
+and bound, which cannot be gathered without naming each one again, since a
+`const` must state its type and a `const fn` cannot call a trait method; a
+`Result` from `declare`, which every plugin would pass on; an id fixed when a
+parameter is added, which a parameter that carries its store does not need;
+and a typed declaration that snaps its default as a table row does, which
+hides a typo.
+
+[History](decision-history.md#d90-how-a-plugin-declares-its-parameters)
 
 ## How to read this
 

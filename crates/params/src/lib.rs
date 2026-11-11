@@ -6,16 +6,19 @@
 //! decides what else happens: whether the host hears of it, whether it opens
 //! a [gesture], whether undo records it, and when the UI shows it.
 //!
-//! - [`ParamSetBuilder`] checks [`ParamDecl`]s once and freezes them into a
+//! - A plugin declares its parameters in [`Params::declare`]: each typed
+//!   declaration, a [`FloatDecl`], [`BoolDecl`] or [`ChoiceDecl`], hands back
+//!   its parameter, and [`ParamSet::declare`] freezes them into a
 //!   [`ParamSet`], with one store each: an atomic value and change counter.
+//!   [`ParamSetBuilder`] does the same for a plain table of [`ParamDecl`]s.
 //! - One handle per writer: [`AudioParams`] (host and [learned
 //!   writes][learned-write]), [`UiParams`] (user [`Gesture`]s, [`Edit`]s, undo
 //!   replays) and [`ProgramParams`] ([syncs][sync] and a saved state's
 //!   [`Load`], a [restore]).
 //! - A typed parameter, [`Float`], [`Bool`] or [`Choice`], is a parameter as
-//!   plugin code holds it: it carries its store, [`ParamSet::bind`] checks it
-//!   against the declaration once, and [`get`](Float::get) returns an `f32`, a
-//!   `bool` or the plugin's own enum, on any thread. [`Changes`] tells the
+//!   plugin code holds it: it carries its store, and [`get`](Float::get)
+//!   returns an `f32`, a `bool` or the plugin's own enum, on any thread.
+//!   [`ParamSet::bind`] makes one from a table's key. [`Changes`] tells the
 //!   audio thread when any of a group moved.
 //! - [`Value`] and [`List`] hold plugin state that is not a parameter, and
 //!   undo enrols them.
@@ -38,18 +41,34 @@
 //!
 //! # Examples
 //!
-//! A processor holds a typed parameter for each one it reads, bound once when
-//! the plugin is built, and recomputes only when one moved. Each carries its
-//! store, so the processor needs no handle to the set. It is dropped off the
-//! audio thread, and a debug build catches a drop there, which could free a
-//! store.
+//! A plugin declares each parameter where it holds it. Its processor
+//! recomputes only when one moved, and needs no handle to the set, since
+//! each parameter carries its store. It is dropped off the audio thread, and
+//! a debug build catches a drop there, which could free a store.
 //!
 //! ```
-//! use seam_params::{Bool, Changes, Float, Kind, ParamDecl, ParamSet};
+//! use seam_params::{Bool, BoolDecl, Changes, Declarer, Float, FloatDecl, ParamSet, Params};
 //!
-//! struct Processor {
+//! struct GainParams {
 //!     gain: Float,
 //!     mute: Bool,
+//! }
+//!
+//! impl Params for GainParams {
+//!     fn declare(p: &mut Declarer) -> Self {
+//!         GainParams {
+//!             gain: p.add(
+//!                 FloatDecl::new("gain", "Gain", -24.0..=24.0, 0.0)
+//!                     .with_step(0.1)
+//!                     .with_unit("dB"),
+//!             ),
+//!             mute: p.add(BoolDecl::new("mute", "Mute", false)),
+//!         }
+//!     }
+//! }
+//!
+//! struct Processor {
+//!     params: GainParams,
 //!     changes: Changes,
 //!     factor: f32,
 //! }
@@ -57,34 +76,27 @@
 //! impl Processor {
 //!     /// Called once per block, on the audio thread.
 //!     fn retune(&mut self) {
-//!         if self.changes.moved([&self.gain, &self.mute]) {
-//!             let decibels = self.gain.get(); // an f32, in dB
-//!             let muted = self.mute.get(); // a bool
+//!         let GainParams { gain, mute } = &self.params;
+//!         if self.changes.moved([gain, mute]) {
+//!             let decibels = gain.get(); // an f32, in dB
+//!             let muted = mute.get(); // a bool
 //!             self.factor = if muted { 0.0 } else { 10.0_f32.powf(decibels / 20.0) };
 //!         }
 //!     }
 //! }
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! const PARAMS: &[ParamDecl] = &[
-//!     ParamDecl::new("gain", "Gain", Kind::continuous(-24.0, 24.0, 0.1, None), 0.0)
-//!         .with_unit("dB"),
-//!     ParamDecl::new("mute", "Mute", Kind::Bool, 0.0),
-//! ];
-//! let params = ParamSet::from_decls(PARAMS.iter().copied())?;
+//! let (set, params) = ParamSet::declare::<GainParams>()?;
 //! let mut processor = Processor {
-//!     gain: params.bind("gain")?,
-//!     mute: params.bind("mute")?,
+//!     params,
 //!     changes: Changes::new(),
 //!     factor: 1.0,
 //! };
 //!
 //! // The host automates the gain to the top of its range (0..1 is its scale).
-//! params.audio().host_write(processor.gain.id(), 1.0);
+//! set.audio().host_write(processor.params.gain.id(), 1.0);
 //! processor.retune();
 //! assert!((processor.factor - 15.848_932).abs() < 1e-3); // +24 dB
-//! # Ok(())
-//! # }
+//! # Ok::<(), seam_params::DeclError>(())
 //! ```
 //!
 //! Invariants: a value never leaves its legal set (writes snap, and a value
@@ -104,6 +116,7 @@ pub mod audio_thread;
 mod changes;
 mod clock;
 pub mod decl;
+mod declare;
 mod events;
 mod host_events;
 mod host_id;
@@ -124,6 +137,7 @@ pub use clock::{
 // The module is public too, so rustdoc would list these as bare re-exports.
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
+pub use declare::{BoolDecl, ChoiceDecl, Declaration, Declarer, FloatDecl, Params};
 pub use events::{GestureRecord, HostEvent};
 pub use host_events::HostEventDrain;
 pub use host_id::{RESERVED_HOST_IDS, host_id};

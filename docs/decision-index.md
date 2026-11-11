@@ -722,6 +722,10 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#d69-where-a-continuous-range-is-checked)
 
 - `crates/params/src/decl.rs`: `Range`, `Range::new`, `RangeError`, `Kind::continuous`
+- `crates/params/src/declare.rs`: `FloatDecl::checked`, `FloatDecl::check`
+- `crates/params/src/declare/rules.rs`: `range`
+- `crates/params/src/set.rs`: `RangeRefused`
+- test `crates/params/tests/declare.rs`: `a_range_and_a_default_are_refused_by_their_rules`
 - test `crates/params/tests/set.rs`: `a_range_is_refused_unless_it_can_be_snapped_to_and_converted`
 
 ### D70. Learn's reading of MIDI 1.0 pairs
@@ -926,6 +930,18 @@ move its line here; when a decision gains code, add one.
 - test `crates/params/tests/drops.rs`: `the_last_typed_parameter_drops_on_a_worker_after_its_set`
 - test `crates/params/tests/alloc_gate.rs`: `typed_reads_and_the_group_check_do_not_allocate`
 
+### D90. How a plugin declares its parameters
+
+[Record section](decisions.md#d90-how-a-plugin-declares-its-parameters)
+
+- `crates/params/src/declare.rs`: module, `FloatDecl`, `BoolDecl`, `ChoiceDecl`, `FloatDecl::checked`, `BoolDecl::checked`, `ChoiceDecl::checked`, `Declaration`, `Params`, `Declarer`, `Declarer::add`, `Declarer::extend`, `Declarer::store`, `ParamSet::declare`, `STAND_IN`
+- `crates/params/src/declare/rules.rs`: module, `and`, `key`, `group`, `labels`, `range`
+- `crates/params/src/set.rs`: `ParamSetBuilder::add_cell`, `ParamSetBuilder::check`, `DeclError::rule`, `DefaultOutsideRange`
+- `crates/params/src/set/param_cell.rs`: `ParamCell::place`, `ParamCell::placed`, `ParamCell::id`
+- test `crates/params/tests/declare.rs`: module, `each_declaration_makes_the_parameter_a_person_would_declare_by_hand`, `a_struct_lists_in_the_builders_order_and_each_id_is_its_keys`, `a_key_is_refused_by_the_rules_a_table_row_meets`, `what_only_the_whole_set_shows_is_refused_when_it_is_built`, `a_group_and_a_choices_labels_are_refused_by_their_rules`, `a_range_and_a_default_are_refused_by_their_rules`, `the_first_refusal_wins_and_declare_runs_to_its_end`, `one_key_in_two_nested_structs_is_refused_when_the_set_is_built`, `asking_for_an_id_inside_declare_is_a_contract_panic`, `extend_over_a_table_gives_the_set_from_decls_gives`, `a_struct_of_no_parameters_makes_an_empty_set`, `a_declared_parameter_reads_writes_and_reports_changes`, `checked_names_the_rule_a_declaration_breaks`
+- test `crates/params/src/declare/refusals.rs`: module, `RangeBackwards`, `DefaultOutside`, `EmptyKey`, `KeyWithSlash`, `KeyTooLong`, `OneLabel`, `LabelsDifferInCase`, `FloatGivenBool`, `ChoiceGivenOtherEnum`, `BypassOnFloat`
+- test `crates/params/src/declare/rules.rs`: `whitespace_is_read_as_trim_reads_it`, `the_key_length_rule_states_the_longest_key`, `a_char_is_split_off_as_str_chars_reads_it`
+
 ## Parameters
 
 ### P1. One store per parameter
@@ -1093,7 +1109,8 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/cabi/mod.rs`: `param_info`
 - `crates/params/src/lib.rs`: module
 - `crates/params/src/meta.rs`: module, `stepped_decimals`
-- `crates/params/src/set.rs`: `check_labels`, `DeclError::EmptyChoiceLabel`, `DeclError::PaddedChoiceLabel`, `DeclError::DuplicateChoiceLabel`
+- `crates/params/src/declare/rules.rs`: `labels`, `whitespace`
+- `crates/params/src/set.rs`: `DeclError::EmptyChoiceLabel`, `DeclError::PaddedChoiceLabel`, `DeclError::DuplicateChoiceLabel`
 - test `crates/params/tests/meta.rs`: module, `text_uses_the_steps_decimals`, `text_counts_the_starts_and_the_steps_places_so_every_point_shows_as_itself`
 - test `crates/params/tests/set.rs`: `bad_declarations_are_refused_in_every_build`
 
