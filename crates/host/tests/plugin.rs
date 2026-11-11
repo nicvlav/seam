@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
+    AuCodes, Block, Category, Driver, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status,
 };
 use seam_params::{Bool, BoolDecl, Declarer, Kind, ParamDecl, ParamSet, Params};
 use seam_session::Session;
@@ -78,7 +79,6 @@ impl Plugin for Minimal {
 
     fn idle(&mut self) {
         self.ticks.set(self.ticks.get() + 1);
-        self.parts.tick();
     }
 }
 
@@ -115,7 +115,7 @@ fn a_plugin_owning_main_thread_state_saves_and_loads_from_another_thread() {
 
 #[test]
 fn a_mapping_learned_after_the_session_ticks_waits_a_tick_for_the_save() {
-    // Why `Parts::tick` polls learn before it ticks the session.
+    // Why `Driver::tick` polls learn before it ticks the session.
     use std::cell::RefCell;
 
     use seam_learn::{Config, Learn, SESSION_KEY, Takes};
@@ -218,6 +218,7 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
     let zoom = Rc::new(RefCell::new(Zoom(1.0)));
     let _registration = parts.session().register("zoom", &zoom).expect("a free key");
     let saved = Arc::clone(parts.saved());
+    let driver = Driver::of(&parts);
 
     // A host's load: the session applies at the next tick.
     let block = json!({
@@ -228,8 +229,9 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
     .to_string();
     saved.load(block.as_bytes()).expect("a valid block");
     assert_eq!(zoom.borrow().0, 1.0, "nothing applies before the tick");
-    assert!(parts.tick().is_none());
+    driver.tick();
     assert_eq!(zoom.borrow().0, 2.0, "the tick applied the restore");
+    assert!(parts.learn().is_empty());
 
     // A drag, and a controller learned in the same tick.
     let on = params.on.id();
@@ -250,7 +252,11 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
         .event(0),
     );
     audio.process(&events);
-    assert!(parts.tick().is_some(), "the tick committed the mapping");
+    driver.tick();
+    assert!(
+        parts.learn().mapping(on).is_some(),
+        "the tick committed the mapping"
+    );
     assert_eq!(history.len(), 1, "the drag is one undo step");
     let block: serde_json::Value = serde_json::from_slice(&saved.save()).expect("JSON");
     assert_eq!(

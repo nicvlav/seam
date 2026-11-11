@@ -3,6 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::ffi::c_void;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -208,7 +209,6 @@ impl Plugin for Probe {
     fn idle(&mut self) {
         probe(|state| state.idles += 1);
         assert!(!probe(|state| state.panic_in_idle), "an idle call's bug");
-        self.parts.tick();
         if let Some((key, value)) = probe(|state| state.edit.take()) {
             assert!(self.parts.params().write(self.id(key), value));
         }
@@ -1442,6 +1442,105 @@ impl Plugin for Fixed {
     fn activate(&mut self, setup: &ProcessSetup) -> Through {
         self.0.activate(setup)
     }
+}
+
+#[test]
+fn an_unbound_instance_holds_no_driver_and_no_timer() {
+    let unbound = Instance::<Mover>::new_unbound(None, &crate::engine::LOAN_WAIT);
+    assert!(
+        !unbound.main().expect("lent here").holds_on_thread(),
+        "what is not Send stays out of state that moves between threads"
+    );
+    assert_eq!(unbound.release(), crate::engine::Release::Free);
+    let bound = Instance::<Fixed>::new(None);
+    assert!(bound.main().expect("bound here").holds_on_thread());
+    assert_eq!(bound.release(), crate::engine::Release::Free);
+}
+
+thread_local! {
+    /// The instance [`Busy`] has its host tick from inside its activation.
+    static BUSY: Cell<*mut SeamInstance> = const { Cell::new(std::ptr::null_mut()) };
+    /// What [`Busy`]'s participant holds, and how many idles it had.
+    static BUSY_ZOOM: Rc<RefCell<Option<Json>>> = Rc::default();
+    static BUSY_IDLES: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Holds what a restore hands it.
+struct Restored(Rc<RefCell<Option<Json>>>);
+
+impl seam_session::Participant for Restored {
+    fn capture(&self) -> seam_session::Section {
+        self.0.borrow().clone().unwrap_or(Json::Null)
+    }
+
+    fn apply(
+        &mut self,
+        section: Option<&seam_session::Section>,
+    ) -> Result<(), seam_session::ApplyError> {
+        *self.0.borrow_mut() = section.cloned();
+        Ok(())
+    }
+}
+
+/// Keeps its parts and a participant, and has its host tick it from inside
+/// its activation, as a host's nested message loop would.
+struct Busy {
+    _parts: Parts,
+    _participant: Rc<RefCell<Restored>>,
+    _registration: seam_session::Registration,
+}
+
+impl Plugin for Busy {
+    const INFO: PluginInfo = Probe::INFO;
+    type Params = Table;
+    type Processor = Through;
+
+    fn new(_: Table, parts: Parts) -> Self {
+        let participant = Rc::new(RefCell::new(Restored(BUSY_ZOOM.with(Rc::clone))));
+        let registration = parts
+            .session()
+            .register("zoom", &participant)
+            .expect("registered");
+        Busy {
+            _parts: parts,
+            _participant: participant,
+            _registration: registration,
+        }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Through {
+        // SAFETY: the live instance the test made, ticked on its main
+        // thread from inside one of its own calls, as the header lets a
+        // host's nested message loop.
+        unsafe { (plugin::<Busy>().idle)(BUSY.get()) };
+        Through
+    }
+
+    fn idle(&mut self) {
+        BUSY_IDLES.with(|idles| idles.set(idles.get() + 1));
+    }
+}
+
+#[test]
+fn a_tick_while_the_plugin_is_busy_skips_seam_s_tick_and_its_idle() {
+    let host = TestHost::<Busy>::new();
+    BUSY.set(host.instance());
+    let block = br#"{"seamStateVersion": 1, "parameters": {}, "extra": {"zoom": 2}}"#;
+    assert_eq!(host.load(block), Ok(()));
+    assert_eq!(host.activate(48_000.0, 64, Layout::STEREO), Ok(()));
+    assert_eq!(BUSY_IDLES.with(Cell::get), 0, "the nested tick ran no idle");
+    assert_eq!(
+        BUSY_ZOOM.with(|zoom| zoom.borrow().clone()),
+        None,
+        "nor Seam's tick, which would have applied the load"
+    );
+    host.idle();
+    assert_eq!(BUSY_IDLES.with(Cell::get), 1);
+    assert_eq!(
+        BUSY_ZOOM.with(|zoom| zoom.borrow().clone()),
+        Some(Json::from(2))
+    );
+    assert_eq!(host.faults(), 0);
 }
 
 /// Creates an instance from `table` on another thread, then activates and

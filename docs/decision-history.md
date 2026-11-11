@@ -770,6 +770,14 @@ it that wait for the owner: the fault for a plugin that keeps its parts and
 does not tick them, the line a refused declaration writes, and learn's refusal
 of a plugin that declares no MIDI input.
 
+Amended the same day, 2026-11-11: the owner agreed that Seam, not the plugin,
+ticks the parts, through a link the engine holds weakly, and took the
+amendments of a review of that plan, among them that the tick's return goes
+and that the handle the engine and tests tick through is `Driver`, made by
+`Driver::of`. `Parts::tick` and the fault for a forgotten tick went, so the
+first of the three choices above no longer stands. Built the same day. The
+other two still wait for the owner.
+
 ### D92. When a saved plain value is captured
 
 [The decision](decisions.md#d92-when-a-saved-plain-value-is-captured)

@@ -550,7 +550,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/cabi/abi.rs`: `SeamPlugin::idle`
 - `crates/host/src/cabi/mod.rs`: module
 - `crates/host/src/plugin.rs`: `Plugin::idle`
-- `crates/host/src/parts.rs`: `Parts::tick`
+- `crates/host/src/parts.rs`: `Driver::tick`
 - `crates/host/src/engine/mod.rs`: `Engine::start_timer`, `Engine::ticker`
 - `crates/host/src/engine/timer.rs`: module, `Timer`, `abandon`
 - `crates/host/src/vst3/component.rs`: `Component::initialize`
@@ -954,23 +954,25 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#d91-who-builds-a-plugins-parts)
 
 - `crates/host/src/cabi/juce.rs`: `juce_settings`
-- `crates/host/src/engine/mod.rs`: `Engine::build`, `Engine::tick`, `Main::ticks`
-- `crates/host/src/faults.rs`: module, `Fault::Unticked`, `report_refused_declarations`
-- `crates/host/src/parts.rs`: module, `Parts`, `Parts::for_plugin`, `Parts::undo`, `Parts::midi_learn`, `Parts::learn`, `Parts::learn_audio`, `Parts::tick`, `Parts::watch`, `TickWatch`, `TickWatch::missed`
+- `crates/host/src/engine/mod.rs`: `Engine::new_unbound`, `Engine::build`, `Engine::tick`, `Main::on_thread`, `OnThread`
+- `crates/host/src/faults.rs`: module, `report_refused_declarations`
+- `crates/host/src/parts.rs`: module, `Parts`, `Parts::for_plugin`, `Parts::undo`, `Parts::midi_learn`, `Parts::learn`, `Parts::learn_audio`, `Ticked`, `Ticked::tick`, `Driver`, `Driver::of`, `Driver::tick`
 - `crates/host/src/plugin.rs`: `Plugin`, `Plugin::Params`, `Plugin::new`, `Plugin::idle`
 - `examples/eq/src/lib.rs`: `ExampleEq`
 - `examples/eq/src/params.rs`: `EqParams`, `BandParams::declare`
 - `examples/gain/src/lib.rs`: `Gain`, `GainParams`
-- test `crates/host/src/cabi/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter`
-- test `crates/host/src/engine/tests.rs`: `Forgetful`, `the_parameters_new_is_handed_are_the_ones_the_host_writes`, `a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once`
+- test `crates/host/src/cabi/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter`, `Busy`, `an_unbound_instance_holds_no_driver_and_no_timer`, `a_tick_while_the_plugin_is_busy_skips_seam_s_tick_and_its_idle`
+- test `crates/host/src/engine/tests.rs`: `Restoring`, `Idleless`, `the_parameters_new_is_handed_are_the_ones_the_host_writes`, `seam_ticks_the_parts_before_the_plugin_s_idle`, `a_plugin_that_writes_no_idle_still_has_its_parts_ticked`, `a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported`
 - test `crates/host/src/vst3/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter`
+- test `crates/host/tests/alloc_gate.rs`: `an_idle_tick_of_a_plugin_s_parts_does_not_allocate`, `an_idle_tick_through_the_engine_does_not_allocate`
 - test `crates/host/tests/plugin.rs`: `one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture`, `learn_is_refused_to_a_plugin_that_takes_no_midi`
+- test `crates/host/tests/saved_values.rs`: `a_participant_may_save_and_sync_from_an_apply_the_tick_runs`
 
 ### D92. When a saved plain value is captured
 
 [Record section](decisions.md#d92-when-a-saved-plain-value-is-captured)
 
-- `crates/host/src/parts.rs`: `Parts::save`, `Parts::sync`, `Parts::tick`
+- `crates/host/src/parts.rs`: `Parts::save`, `Parts::sync`, `Driver::tick`
 - `crates/host/src/parts/saved.rs`: module, `Synced`, `ValueSection`, `SavedValue`, `SavedValue::register`, `SavedValue::sync`
 - `examples/gain/src/lib.rs`: `Gain`
 - test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`

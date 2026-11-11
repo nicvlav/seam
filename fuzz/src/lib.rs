@@ -1,15 +1,15 @@
 //! A plugin for the fuzz targets that load saved state: parameters of every
 //! kind and two session participants, one that takes strings only and one
-//! that takes anything. The plugin keeps its parts, and [`Plugin::idle`]
-//! ticks them, so a target that ticks after a load makes the restored
-//! sections reach the participants.
+//! that takes anything. The plugin keeps its parts, and Seam ticks them, so
+//! a target that ticks after a load makes the restored sections reach the
+//! participants.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use seam_host::{
-    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    AuCodes, Block, Category, Driver, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
     SavedState, Status,
 };
 use seam_params::{Declarer, Kind, ParamDecl, Params};
@@ -109,17 +109,19 @@ impl<P: Participant + 'static> Held<P> {
 
 /// The fuzzed plugin.
 pub struct Fuzzed {
-    /// Ticked from `idle`.
+    /// Kept, so Seam ticks them.
     parts: Parts,
     notes: Held<Notes>,
     _anything: Held<Anything>,
 }
 
 impl Fuzzed {
-    /// Builds the plugin as an exporter does.
-    pub fn built() -> Self {
+    /// Builds the plugin as an exporter does, with the driver that ticks
+    /// its parts as the exporter's engine would.
+    pub fn built() -> (Self, Driver) {
         let (params, parts) = Parts::for_plugin::<Fuzzed>().expect("valid declarations");
-        Fuzzed::new(params, parts)
+        let driver = Driver::of(&parts);
+        (Fuzzed::new(params, parts), driver)
     }
 
     /// The saved state a host's save and load go through.
@@ -172,10 +174,6 @@ impl Plugin for Fuzzed {
         }
     }
 
-    fn idle(&mut self) {
-        self.parts.tick();
-    }
-
     fn activate(&mut self, _setup: &ProcessSetup) -> Silent {
         Silent
     }
@@ -187,14 +185,14 @@ mod tests {
 
     #[test]
     fn a_loaded_section_reaches_its_participant_after_a_tick() {
-        let mut first = Fuzzed::built();
+        let (first, driver) = Fuzzed::built();
         first.set_notes("hello");
-        first.idle();
+        driver.tick();
         let block = first.saved().save();
 
-        let mut second = Fuzzed::built();
+        let (second, driver) = Fuzzed::built();
         assert!(second.saved().load(&block).is_ok());
-        second.idle();
+        driver.tick();
         assert_eq!(second.notes(), "hello");
     }
 }

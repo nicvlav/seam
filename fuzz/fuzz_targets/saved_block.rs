@@ -5,18 +5,17 @@
 
 use libfuzzer_sys::fuzz_target;
 use seam_fuzz::Fuzzed;
-use seam_host::Plugin;
 
 fuzz_target!(|data: &[u8]| {
-    let mut plugin = Fuzzed::built();
+    let (plugin, driver) = Fuzzed::built();
     let saved = std::sync::Arc::clone(plugin.saved());
     let _ = saved.load(data);
-    plugin.idle();
+    driver.tick();
     let block = saved.save();
     assert!(
         saved.load(&block).is_ok(),
         "a block this plugin saved does not load"
     );
-    plugin.idle();
+    driver.tick();
     assert_eq!(saved.save(), block, "a saved block is not a fixpoint");
 });

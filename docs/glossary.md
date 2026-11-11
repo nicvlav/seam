@@ -80,6 +80,13 @@ hands an exporter the begins, values and ends the host must hear;
 [`UiParams::take_gesture_records`](../crates/params/src/ui.rs) hands undo the
 gestures that closed.
 
+### Driver
+
+What runs a plugin's [parts](#parts) each [tick](#tick): a link to them that
+does not keep them alive, which an exporter's engine holds and ticks just
+before `Plugin::idle`. A test with no host makes one from the parts
+([`Driver`](../crates/host/src/parts.rs)).
+
 ### Edit
 
 A program write that opens a gesture, so the host hears a begin, the values and
@@ -193,8 +200,9 @@ restore applies to it on a later tick
 
 One instance's parameter set, the session and the saved state over it, and
 its undo history and learn once the plugin turns them on. Seam builds them from
-the plugin's declarations and hands them to `Plugin::new`; a plugin that keeps
-them ticks them from its idle ([`Parts`](../crates/host/src/parts.rs)).
+the plugin's declarations and hands them to `Plugin::new`, and ticks them
+through a [driver](#driver) while the plugin keeps them
+([`Parts`](../crates/host/src/parts.rs)).
 
 ### Pass
 
@@ -303,11 +311,12 @@ target the plugin registers, written on the UI thread in [bursts](#burst)
 
 ### Tick
 
-One call of [`Plugin::idle`](../crates/host/src/plugin.rs), about 60 times a
-second on the main thread for the instance's life, editor open or not. "Once per
-UI tick" means from that call: `Learn::poll`, `SessionUi::tick`,
-`History::tick` and the capture of the values `Parts::save` keeps saved run
-there, through [`Parts::tick`](../crates/host/src/parts.rs).
+The main thread's turn, about 60 times a second for the instance's life,
+editor open or not. "Once per UI tick" means from that turn: Seam first runs
+`Learn::poll`, `SessionUi::tick`, `History::tick` and the capture of the values
+`Parts::save` keeps saved, through
+[`Driver::tick`](../crates/host/src/parts.rs), and then calls
+[`Plugin::idle`](../crates/host/src/plugin.rs).
 
 ### Tier
 

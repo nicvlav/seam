@@ -2,10 +2,15 @@
 
 use std::cell::RefCell;
 use std::error::Error;
+use std::rc::Rc;
 
+use seam_learn::{Config, LearnAudio, SESSION_KEY, Takes};
 #[cfg(feature = "vst3")]
 use seam_params::host_id;
-use seam_params::{Declarer, Float, FloatDecl, Params, audio_thread};
+use seam_params::{Declarer, Float, FloatDecl, Params, Value, audio_thread};
+use seam_session::{ApplyError, Participant, Registration, Section};
+use seam_ump::{ChannelVoice, EventList, Voice};
+use seam_undo::{Bound, History};
 use serde_json::{Map, Value as Json};
 
 use crate::faults::written;
@@ -617,18 +622,134 @@ fn a_release_reports_the_faults_no_tick_reported<S: Shell>() {
     );
 }
 
-/// Keeps its parts and never ticks them.
-struct Forgetful {
-    _parts: Parts,
+/// What a plugin here that keeps its parts hands the test, which runs it on
+/// the test's own thread.
+#[derive(Default)]
+struct Handed {
+    /// The number the plugin's participant holds.
+    zoom: Rc<RefCell<Zoom>>,
+    /// What the participant held when the plugin's idle last ran.
+    zoom_at_idle: Option<f64>,
+    history: Option<History>,
+    /// A plain value the history records.
+    level: Option<Value<f32>>,
+    /// Learn's audio side, which a block would feed.
+    learn: Option<LearnAudio>,
 }
 
-impl Plugin for Forgetful {
+thread_local! {
+    static HANDED: RefCell<Handed> = RefCell::default();
+}
+
+fn handed<R>(f: impl FnOnce(&mut Handed) -> R) -> R {
+    HANDED.with(|handed| f(&mut handed.borrow_mut()))
+}
+
+/// A participant: a number saved under `zoom`, 1 by default.
+#[derive(Debug)]
+struct Zoom(f64);
+
+impl Default for Zoom {
+    fn default() -> Self {
+        Zoom(1.0)
+    }
+}
+
+impl Participant for Zoom {
+    fn capture(&self) -> Section {
+        Section::from(self.0)
+    }
+
+    fn apply(&mut self, section: Option<&Section>) -> Result<(), ApplyError> {
+        self.0 = section.and_then(Section::as_f64).unwrap_or(1.0);
+        Ok(())
+    }
+}
+
+/// Registers a fresh [`Zoom`] with `parts`' session, handed to the test.
+fn zoom(parts: &Parts) -> Registration {
+    let zoom = Rc::new(RefCell::new(Zoom::default()));
+    let registration = parts.session().register("zoom", &zoom).expect("a free key");
+    handed(|handed| {
+        *handed = Handed {
+            zoom,
+            ..Handed::default()
+        }
+    });
+    registration
+}
+
+/// The host's saved block with `zoom` under the participant's key.
+fn with_zoom(block: &[u8], zoom: f64) -> Vec<u8> {
+    let mut block: Json = serde_json::from_slice(block).expect("JSON");
+    block["extra"]["zoom"] = Json::from(zoom);
+    serde_json::to_vec(&block).expect("JSON writes")
+}
+
+/// Keeps its parts and a participant, and notes in its idle what the
+/// participant holds.
+struct Restoring {
+    _parts: Parts,
+    _zoom: Registration,
+}
+
+impl Plugin for Restoring {
     const INFO: PluginInfo = Probe::INFO;
     type Params = Gain;
     type Processor = Adder;
 
     fn new(_: Gain, parts: Parts) -> Self {
-        Forgetful { _parts: parts }
+        Restoring {
+            _zoom: zoom(&parts),
+            _parts: parts,
+        }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Adder {
+        unreachable!("never activated")
+    }
+
+    fn idle(&mut self) {
+        handed(|handed| handed.zoom_at_idle = Some(handed.zoom.borrow().0));
+    }
+}
+
+/// Keeps its parts, with undo, learn and a participant, and writes no idle.
+struct Idleless {
+    _parts: Parts,
+    _zoom: Registration,
+}
+
+impl Plugin for Idleless {
+    const INFO: PluginInfo = PluginInfo {
+        midi_input: true,
+        ..Probe::INFO
+    };
+    type Params = Gain;
+    type Processor = Adder;
+
+    fn new(params: Gain, mut parts: Parts) -> Self {
+        let history = parts.undo(Bound::default()).expect("no other history");
+        let level = Value::new(0.0_f32, parts.set());
+        history.enroll(&level, "Level").expect("a new value");
+        parts
+            .midi_learn(Config::default())
+            .expect("learn's key is free");
+        parts
+            .learn()
+            .arm(params.gain.id(), Takes::CONTROLLER)
+            .expect("a target");
+        let learn = parts.learn_audio();
+        let registration = zoom(&parts);
+        handed(|handed| {
+            handed.history = Some(history);
+            handed.level = Some(level);
+            handed.learn = Some(learn);
+        });
+        Idleless {
+            _parts: parts,
+            _zoom: registration,
+        }
     }
 
     fn activate(&mut self, _: &ProcessSetup) -> Adder {
@@ -637,25 +758,79 @@ impl Plugin for Forgetful {
 }
 
 through_every_shell!(
-    Forgetful:
-    a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once,
+    Restoring:
+    seam_ticks_the_parts_before_the_plugin_s_idle,
 );
 
-fn a_plugin_that_keeps_its_parts_and_never_ticks_them_is_reported_once<S: Shell>() {
+through_every_shell!(
+    Idleless:
+    a_plugin_that_writes_no_idle_still_has_its_parts_ticked,
+);
+
+through_every_shell!(
+    Probe:
+    a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported,
+);
+
+fn seam_ticks_the_parts_before_the_plugin_s_idle<S: Shell>() {
     let mut host = S::create();
-    host.expect_faults(1);
-    written();
     host.tick();
+    assert_eq!(handed(|handed| handed.zoom_at_idle), Some(1.0));
+    let block = with_zoom(&host.save(), 2.0);
+    assert_eq!(host.load(&block), Ok(()));
     host.tick();
-    let lines = written();
-    assert!(
-        lines.len() == 1 && lines[0].contains("did not tick them"),
-        "reported at the next tick: {lines:?}"
+    assert_eq!(
+        handed(|handed| handed.zoom_at_idle),
+        Some(2.0),
+        "the idle after a load sees it applied"
     );
+    host.expect_faults(0);
+}
+
+fn a_plugin_that_writes_no_idle_still_has_its_parts_ticked<S: Shell>() {
+    let mut host = S::create();
+    // An edit, and a controller learn hears, as a block would bring it.
+    handed(|handed| {
+        handed.level.as_ref().expect("handed").set(0.5);
+        let voice = Voice::Midi1ControlChange {
+            controller: 74,
+            value: 64,
+        };
+        let mut events = EventList::with_capacity(1);
+        events.push(
+            ChannelVoice {
+                group: 0,
+                channel: 0,
+                voice,
+            }
+            .event(0),
+        );
+        handed.learn.as_mut().expect("handed").process(&events);
+    });
+    host.tick();
+    let history = handed(|handed| handed.history.clone()).expect("handed");
+    assert_eq!(history.len(), 1, "the edit is one undo step");
+    let block: Json = serde_json::from_slice(&host.save()).expect("JSON");
+    assert_eq!(
+        block["extra"][SESSION_KEY]["mappings"][0]["target"], "gain",
+        "the learned mapping is saved"
+    );
+
+    let block = with_zoom(&host.save(), 2.0);
+    assert_eq!(host.load(&block), Ok(()));
+    host.tick();
+    assert_eq!(handed(|handed| handed.zoom.borrow().0), 2.0, "restored");
+    host.expect_faults(0);
+}
+
+fn a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported<S: Shell>() {
+    let mut host = S::create();
+    written();
     for _ in 0..3 {
         host.tick();
     }
-    assert_eq!(written(), Vec::<String>::new(), "and counted once");
+    assert_eq!(written(), Vec::<String>::new());
+    host.expect_faults(0);
 }
 
 /// Version 1 of its schema renamed `level` to `gain`.

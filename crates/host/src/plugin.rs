@@ -48,7 +48,8 @@ use crate::parts::Parts;
 ///   the parameters and the [`Parts`] to [`new`](Self::new). The host lists
 ///   that set, and saves and loads through that saved state. A declaration
 ///   refused fails the instance's creation, with the reason in the fault
-///   report.
+///   report. While the plugin keeps the parts, Seam ticks them before each
+///   [`idle`](Self::idle).
 /// - **Bypass.** A parameter declared with
 ///   [`as_bypass`](seam_params::BoolDecl::as_bypass) is the one the host
 ///   drives as bypass, and the processor implements it. A plugin that
@@ -188,8 +189,8 @@ pub trait Plugin: 'static {
     /// Creates an instance from what Seam built for it: the parameters its
     /// [`Params`](Self::Params) declared, and its [`Parts`].
     ///
-    /// The plugin keeps what it uses. One that keeps the parts ticks them in
-    /// [`idle`](Self::idle).
+    /// The plugin keeps what it uses. Seam ticks the parts for as long as
+    /// the plugin keeps them.
     ///
     /// Thread: main, or for a plugin that is `Send` the thread that calls
     /// the C interface's `create`.
@@ -258,17 +259,19 @@ pub trait Plugin: 'static {
     }
 
     /// Handles the main-thread tick, about 60 times a second from creation to
-    /// destruction, editor open or not.
+    /// destruction, editor open or not, for the plugin's own work. By
+    /// default it does nothing.
     ///
-    /// Afterwards the exporter tells the host of the edits the plugin made;
-    /// nothing else of the plugin's runs on a tick unless it calls it here.
-    /// A plugin that keeps its [`Parts`] calls [`Parts::tick`] here, on
-    /// every tick: it applies a session the host's load restored, and runs
-    /// undo and learn. An exporter reports a plugin that keeps its parts and
-    /// lets a tick pass without it, once, as a fault.
+    /// Seam's own work comes first, in the same tick: when the plugin keeps
+    /// its [`Parts`], Seam [ticks](crate::Driver::tick) them, which applies a
+    /// session the host's load restored and runs undo and learn. So `idle`
+    /// sees a restore applied and a learned mapping committed. Afterwards
+    /// the exporter tells the host of the edits the plugin made. A tick that
+    /// meets the plugin busy in a call of its own runs neither, and the next
+    /// tick runs both.
     ///
-    /// Surfaces that show values poll their [watches](seam_params::Watch) on
-    /// the tick too, in any order with the parts' tick.
+    /// Surfaces that show values poll their [watches](seam_params::Watch)
+    /// here.
     ///
     /// Thread: main. The JUCE adapter ticks it on every platform it builds
     /// for, the VST3 exporter with its own timer on Windows and macOS, the
@@ -281,11 +284,12 @@ pub trait Plugin: 'static {
     ///
     /// # Examples
     ///
-    /// A synth with undo and MIDI learn: one tick records a drag, and the
-    /// next commits a learned controller and saves its mapping.
+    /// A synth with undo and MIDI learn, whose idle shows whether its cutoff
+    /// is learned. One tick records a drag; the next commits a learned
+    /// controller and saves its mapping, before the synth's idle sees it.
     ///
     /// ```
-    /// use seam_host::{Block, Parts, Plugin, ProcessSetup, Processor, Status};
+    /// use seam_host::{Block, Driver, Parts, Plugin, ProcessSetup, Processor, Status};
     /// use seam_learn::{Config, LearnAudio, SESSION_KEY, Takes};
     /// use seam_params::{Declarer, Float, FloatDecl, Params};
     /// use seam_undo::{Bound, History};
@@ -320,6 +324,8 @@ pub trait Plugin: 'static {
     ///     parts: Parts,
     ///     params: SynthParams,
     ///     history: History,
+    ///     /// What the editor shows beside the cutoff.
+    ///     cutoff_learned: bool,
     /// }
     ///
     /// impl Plugin for Synth {
@@ -345,7 +351,7 @@ pub trait Plugin: 'static {
     ///     fn new(params: SynthParams, mut parts: Parts) -> Self {
     ///         let history = parts.undo(Bound::default()).expect("no other history");
     ///         parts.midi_learn(Config::default()).expect("learn's key is free");
-    ///         Synth { parts, params, history }
+    ///         Synth { parts, params, history, cutoff_learned: false }
     ///     }
     ///
     ///     fn activate(&mut self, _setup: &ProcessSetup) -> Voices {
@@ -353,17 +359,24 @@ pub trait Plugin: 'static {
     ///     }
     ///
     ///     fn idle(&mut self) {
-    ///         let _learned = self.parts.tick();
+    ///         let cutoff = self.params.cutoff.id();
+    ///         self.cutoff_learned = self.parts.learn().mapping(cutoff).is_some();
     ///     }
     /// }
     ///
+    /// // Built and ticked with no host, as a test does: Seam's tick, then idle.
     /// let (params, parts) = Parts::for_plugin::<Synth>()?;
+    /// let driver = Driver::of(&parts);
     /// let mut synth = Synth::new(params, parts);
+    /// let mut tick = |synth: &mut Synth| {
+    ///     driver.tick();
+    ///     synth.idle();
+    /// };
     /// let cutoff = synth.params.cutoff.id();
     ///
     /// // The user drags the cutoff on the page: one undo step at the next tick.
     /// synth.parts.params().write(cutoff, 500.0);
-    /// synth.idle();
+    /// tick(&mut synth);
     /// assert_eq!(synth.history.len(), 1);
     ///
     /// // The user arms learn and turns controller 74, which the host's block brings.
@@ -383,7 +396,9 @@ pub trait Plugin: 'static {
     /// # let mut out = EventList::with_capacity(0);
     /// # let mut channels = [&mut left[..], &mut right[..]];
     /// voices.process(Block::new(&mut channels, 1, &events, &mut out));
-    /// synth.idle();
+    /// assert!(!synth.cutoff_learned);
+    /// tick(&mut synth);
+    /// assert!(synth.cutoff_learned);
     ///
     /// // One tick, and the host's next save holds the mapping.
     /// let block: serde_json::Value = serde_json::from_slice(&synth.parts.saved().save())?;

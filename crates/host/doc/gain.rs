@@ -90,7 +90,6 @@
 #     fn idle(&mut self) {
 #         assert!(!BREAK.load(Ordering::Relaxed), "the plugin broke");
 #         TICKS.fetch_add(1, Ordering::Relaxed);
-#         self.parts.tick();
 #         if EDIT.swap(false, Ordering::Relaxed) {
 #             self.parts.params().write(self.params.gain.id(), 6.0);
 #         }

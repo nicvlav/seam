@@ -160,10 +160,6 @@ impl Plugin for Gain {
     fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
         GainProcessor::new(self.params.clone(), self.parts.learn_audio())
     }
-
-    fn idle(&mut self) {
-        self.parts.tick();
-    }
 }
 
 /// The audio-thread half: a gain and a mode over the first two channels.

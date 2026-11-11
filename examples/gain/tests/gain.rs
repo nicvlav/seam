@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use seam_example_gain::Gain;
 use seam_host::vst3::TestHost;
-use seam_host::{Block, EventList, Layout, Parts, Plugin, ProcessSetup, Processor, SavedState};
+use seam_host::{
+    Block, Driver, EventList, Layout, Parts, Plugin, ProcessSetup, Processor, SavedState,
+};
 use seam_params::host_id;
 use seam_ump::{ChannelVoice, Voice};
 
@@ -14,12 +16,14 @@ const GAIN: &str = "gain";
 const MODE: &str = "mode";
 const BYPASS: &str = "bypass";
 
-/// The plugin, built as an exporter builds it, and the saved state the
-/// host's save and load would go through.
-fn built() -> (Gain, Arc<SavedState>) {
+/// The plugin, built as an exporter builds it, the driver that ticks its
+/// parts as the exporter's engine would, and the saved state the host's save
+/// and load would go through.
+fn built() -> (Gain, Driver, Arc<SavedState>) {
     let (params, parts) = Parts::for_plugin::<Gain>().expect("valid declarations");
+    let driver = Driver::of(&parts);
     let saved = Arc::clone(parts.saved());
-    (Gain::new(params, parts), saved)
+    (Gain::new(params, parts), driver, saved)
 }
 
 fn running() -> TestHost<Gain> {
@@ -79,10 +83,10 @@ fn the_host_sees_three_named_modes_and_one_bypass() {
 
 #[test]
 fn the_label_saves_and_loads_back() {
-    let (mut plugin, saved) = built();
+    let (plugin, driver, saved) = built();
     plugin.set_label("Drum bus");
     // The label is captured for the save at the next tick.
-    plugin.idle();
+    driver.tick();
     let block = saved.save();
 
     // Through the exporter, as a host reopening the project.
@@ -91,10 +95,10 @@ fn the_label_saves_and_loads_back() {
     assert_eq!(host.save().as_ref(), Ok(&block));
 
     // Into a new instance: the label applies on its next tick.
-    let (mut reopened, saved) = built();
+    let (reopened, driver, saved) = built();
     saved.load(&block).expect("a saved block");
     assert_eq!(reopened.label(), "Untitled");
-    reopened.idle();
+    driver.tick();
     assert_eq!(reopened.label(), "Drum bus");
     assert_eq!(
         reopened.history().undo(),
@@ -105,14 +109,14 @@ fn the_label_saves_and_loads_back() {
 
 #[test]
 fn undo_and_redo_restore_the_label_and_its_saved_state() {
-    let (mut plugin, saved) = built();
+    let (plugin, driver, saved) = built();
     plugin.set_label("Vocals");
-    plugin.idle();
+    driver.tick();
     plugin.set_label("Lead vocals");
 
     assert_eq!(plugin.history().undo(), Ok(true));
     assert_eq!(plugin.label(), "Vocals");
-    plugin.idle();
+    driver.tick();
     let saved = String::from_utf8(saved.save()).expect("UTF-8");
     assert!(saved.contains(r#""label":"Vocals""#), "{saved}");
 
@@ -124,7 +128,7 @@ fn undo_and_redo_restore_the_label_and_its_saved_state() {
 
 #[test]
 fn two_lone_writes_are_two_steps_and_the_labels_sets_between_ticks_are_one() {
-    let (plugin, _) = built();
+    let (plugin, _, _) = built();
     let gain = plugin.ui().set().id(GAIN).expect("declared");
 
     // Each lone write is a gesture of its own, so each is a step. Undo
@@ -145,7 +149,7 @@ fn two_lone_writes_are_two_steps_and_the_labels_sets_between_ticks_are_one() {
 
 #[test]
 fn a_learned_controller_drives_the_gain() {
-    let (mut plugin, saved) = built();
+    let (mut plugin, driver, saved) = built();
     let mut processor = plugin.activate(&ProcessSetup {
         sample_rate: 48_000.0,
         max_frames: 8,
@@ -176,7 +180,7 @@ fn a_learned_controller_drives_the_gain() {
 
     plugin.learn_gain().expect("armed");
     run(&mut processor, &cc(7, 64));
-    plugin.idle(); // The tick commits what the block staged.
+    driver.tick(); // The tick commits what the block staged.
     assert!(plugin.gain_is_learned());
 
     // Controller 7 at 0 is the bottom of the range, -60 dB, in its own block.
@@ -185,9 +189,9 @@ fn a_learned_controller_drives_the_gain() {
 
     // The mapping is saved with the plugin.
     let block = saved.save();
-    let (mut reopened, saved) = built();
+    let (reopened, driver, saved) = built();
     saved.load(&block).expect("a saved block");
-    reopened.idle();
+    driver.tick();
     assert!(reopened.gain_is_learned());
     plugin.deactivate(processor);
 }

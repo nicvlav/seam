@@ -1,13 +1,13 @@
 //! What Seam builds for each instance of a plugin and hands to its
-//! [`Plugin::new`]: its parameters, and its [`Parts`].
+//! [`Plugin::new`]: its parameters, and its [`Parts`]; and the [`Driver`]
+//! that runs the parts' tick.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{OnceCell, RefCell};
 use std::ops::DerefMut;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
-use seam_learn::{Config, Learn, LearnAudio, Learned};
+use seam_learn::{Config, Learn, LearnAudio};
 use seam_params::{DeclError, ParamSet, UiParams, Value};
 use seam_session::{Session, SessionError, SessionUi};
 use seam_undo::{Bound, History, HistoryError};
@@ -25,19 +25,20 @@ use saved::{SavedValue, Synced};
 /// MIDI learn once the plugin turns them on.
 ///
 /// Seam builds them for each instance and hands them to [`Plugin::new`], with
-/// the parameters the plugin's [`Params`](Plugin::Params) declared. A plugin
-/// that keeps them calls [`tick`](Self::tick) from its
-/// [`idle`](Plugin::idle). They hold the main thread's handles, so a plugin
-/// that keeps them is not `Send`. One that wants to be drops them and keeps
-/// its parameters, which are.
+/// the parameters the plugin's [`Params`](Plugin::Params) declared, and ticks
+/// them before each [`idle`](Plugin::idle) for as long as the plugin keeps
+/// them ([`Driver::tick`] says what the tick does). They hold the main
+/// thread's handles, so a plugin that keeps them is not `Send`. One that
+/// wants to be drops them and keeps its parameters, which are.
 ///
 /// # Examples
 ///
 /// A plugin built with no host, as a test builds one: the parts come from
-/// [`for_plugin`](Self::for_plugin), as an exporter's do.
+/// [`for_plugin`](Self::for_plugin), as an exporter's do, and a [`Driver`]
+/// ticks them, as the exporter's engine does.
 ///
 /// ```
-/// use seam_host::{Block, Parts, Plugin, ProcessSetup, Processor, Status};
+/// use seam_host::{Block, Driver, Parts, Plugin, ProcessSetup, Processor, Status};
 /// use seam_params::{Declarer, Float, FloatDecl, Params};
 /// use seam_undo::{Bound, History};
 /// # use seam_host::{AuCodes, Category, Layout, PluginInfo};
@@ -89,10 +90,6 @@ use saved::{SavedValue, Synced};
 ///         let history = parts.undo(Bound::default()).expect("no other history");
 ///         Gain { parts, params, history }
 ///     }
-///
-///     fn idle(&mut self) {
-///         self.parts.tick();
-///     }
 /// #
 /// #   fn activate(&mut self, _setup: &ProcessSetup) -> Silent {
 /// #       Silent
@@ -100,11 +97,12 @@ use saved::{SavedValue, Synced};
 /// }
 ///
 /// let (params, parts) = Parts::for_plugin::<Gain>()?;
-/// let mut gain = Gain::new(params, parts);
+/// let driver = Driver::of(&parts);
+/// let gain = Gain::new(params, parts);
 ///
 /// // An editor's drag, recorded as one undo step at the next tick.
 /// gain.parts.params().write(gain.params.gain.id(), -6.0);
-/// gain.idle();
+/// driver.tick();
 /// assert_eq!(gain.history.len(), 1);
 ///
 /// // What the host's next save holds.
@@ -117,17 +115,47 @@ pub struct Parts {
     set: Arc<ParamSet>,
     saved: Arc<SavedState>,
     params: UiParams,
-    session: SessionUi,
-    history: Option<History>,
-    learn: Option<Rc<RefCell<Learn>>>,
-    /// The values [`save`](Self::save) keeps saved, in the order it was
-    /// called.
-    values: Vec<Box<dyn Synced>>,
+    /// What the tick reaches, which a [`Driver`] holds weakly.
+    ticked: Rc<Ticked>,
     /// Whether the plugin declares MIDI input, which learn needs.
     midi_input: bool,
-    /// Moved by every tick, so the engine can tell a plugin that keeps its
-    /// parts and never ticks them.
-    ticks: Arc<AtomicU64>,
+}
+
+/// The parts a tick runs.
+///
+/// Undo and learn are set once and never borrowed for longer than a call,
+/// and the saved values only while Seam's own code captures them. So code
+/// of the plugin's that runs inside the tick, a participant's apply say,
+/// can reach back into the [`Parts`] and finds nothing held.
+#[derive(Debug)]
+struct Ticked {
+    session: SessionUi,
+    history: OnceCell<History>,
+    learn: OnceCell<Rc<RefCell<Learn>>>,
+    /// The values [`Parts::save`] keeps saved, in the order it was called.
+    values: RefCell<Vec<Box<dyn Synced>>>,
+}
+
+impl Ticked {
+    /// Runs one tick, in the order [`Driver::tick`] gives.
+    fn tick(&self) {
+        if let Some(learn) = self.learn.get() {
+            // What it committed is the mapping, which a plugin asks learn
+            // for.
+            let _learned = learn.borrow_mut().poll();
+        }
+        self.session.tick();
+        if let Some(history) = self.history.get() {
+            history.tick();
+        }
+        self.sync();
+    }
+
+    fn sync(&self) {
+        for value in self.values.borrow_mut().iter_mut() {
+            value.sync();
+        }
+    }
 }
 
 impl Parts {
@@ -158,13 +186,14 @@ impl Parts {
             saved: Arc::new(saved),
             // Both were made above, so each hands out its first handle.
             params: set.take_ui().expect("a new set's first UI handle"),
-            session: session.take_ui().expect("a new session's first UI handle"),
+            ticked: Rc::new(Ticked {
+                session: session.take_ui().expect("a new session's first UI handle"),
+                history: OnceCell::new(),
+                learn: OnceCell::new(),
+                values: RefCell::new(Vec::new()),
+            }),
             set,
-            history: None,
-            learn: None,
-            values: Vec::new(),
             midi_input: P::INFO.midi_input,
-            ticks: Arc::default(),
         };
         Ok((params, parts))
     }
@@ -182,7 +211,7 @@ impl Parts {
 
     /// Returns the session, for a participant the plugin registers itself.
     pub fn session(&self) -> &SessionUi {
-        &self.session
+        &self.ticked.session
     }
 
     /// Returns the saved state the host's save and load go through, for a
@@ -201,12 +230,13 @@ impl Parts {
     /// Returns [`HistoryError::HistoryExists`] when the plugin made a history
     /// of its own over [`params`](Self::params), which is still alive.
     pub fn undo(&mut self, bound: Bound) -> Result<History, HistoryError> {
-        if let Some(history) = &self.history {
+        if let Some(history) = self.ticked.history.get() {
             return Ok(history.clone());
         }
         let history = History::new(&self.params, bound)?;
         history.enroll_params();
-        self.history = Some(history.clone());
+        // Empty, as just checked: nothing between the two runs plugin code.
+        let _ = self.ticked.history.set(history.clone());
         Ok(history)
     }
 
@@ -241,8 +271,10 @@ impl Parts {
         // Each activation takes an audio side of its own.
         let (learn, _audio) = Learn::new(&self.set, config);
         let learn = Rc::new(RefCell::new(learn));
-        Learn::attach(&learn, &self.session)?;
-        self.learn = Some(learn);
+        Learn::attach(&learn, &self.ticked.session)?;
+        // Empty: learn holds its key while it lives, so the attach above
+        // would have failed had learn been on.
+        let _ = self.ticked.learn.set(learn);
         Ok(())
     }
 
@@ -253,8 +285,9 @@ impl Parts {
     /// While learn is off ([`midi_learn`](Self::midi_learn) turns it on), or
     /// while the guard from an earlier call is alive.
     pub fn learn(&self) -> impl DerefMut<Target = Learn> + '_ {
-        self.learn
-            .as_ref()
+        self.ticked
+            .learn
+            .get()
             .expect("MIDI learn is off: call Parts::midi_learn first")
             .borrow_mut()
     }
@@ -271,7 +304,7 @@ impl Parts {
     /// Saves `value` with the session under `key` from now on, and loads
     /// `default` into it from a project saved without the key.
     ///
-    /// A change is captured at the next [`tick`](Self::tick), not when it is
+    /// A change is captured at the next [tick](Driver::tick), not when it is
     /// written. So a save the host makes between the two, about one tick or
     /// 16 ms, still holds the value from before the change; a parameter is
     /// never stale this way. [`sync`](Self::sync) captures at once.
@@ -299,9 +332,11 @@ impl Parts {
     ///
     /// ```
     #[doc = include_str!("../doc/gain.rs")]
+    /// use seam_host::Driver;
     /// use seam_params::Value;
     ///
     /// let (_params, mut parts) = Parts::for_plugin::<Gain>()?;
+    /// let driver = Driver::of(&parts);
     /// let label = Value::new(String::from("Untitled"), parts.set());
     /// parts.save("label", &label, String::from("Untitled"))?;
     ///
@@ -314,7 +349,7 @@ impl Parts {
     /// // before the change.
     /// label.set(String::from("Drums"));
     /// assert_eq!(saved(&parts)?["extra"]["label"], "Untitled");
-    /// parts.tick();
+    /// driver.tick();
     /// assert_eq!(saved(&parts)?["extra"]["label"], "Drums");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -322,8 +357,8 @@ impl Parts {
     where
         T: Clone + Serialize + DeserializeOwned + 'static,
     {
-        let saved = SavedValue::register(&self.session, key, value, default)?;
-        self.values.push(Box::new(saved));
+        let saved = SavedValue::register(&self.ticked.session, key, value, default)?;
+        self.ticked.values.borrow_mut().push(Box::new(saved));
         Ok(())
     }
 
@@ -333,18 +368,67 @@ impl Parts {
     ///
     /// Thread: main.
     pub fn sync(&mut self) {
-        for value in &mut self.values {
-            value.sync();
+        self.ticked.sync();
+    }
+}
+
+/// What an exporter's engine holds to run a plugin's [`Parts`]: a link to
+/// them that does not keep them alive.
+///
+/// Seam makes one for each instance before [`Plugin::new`] takes the parts,
+/// and [ticks](Self::tick) through it before each [`idle`](Plugin::idle), so
+/// a plugin never ticks its parts. It is public for a test that builds a
+/// plugin with no host, which ticks it as the engine would. Clones share the
+/// link.
+///
+/// # Examples
+///
+/// A test ticks the parts as the engine does, and a dropped plugin's not at
+/// all. The [`Parts`] example records an undo step, and the
+/// [`idle`](Plugin::idle) example saves a learned mapping.
+///
+/// ```
+#[doc = include_str!("../doc/gain.rs")]
+/// use seam_host::Driver;
+/// use seam_params::Value;
+///
+/// let (params, mut parts) = Parts::for_plugin::<Gain>()?;
+/// let label = Value::new(String::from("Untitled"), parts.set());
+/// parts.save("label", &label, String::from("Untitled"))?;
+/// let driver = Driver::of(&parts);
+/// let saved = std::sync::Arc::clone(parts.saved());
+/// let saved_label = || -> serde_json::Result<serde_json::Value> {
+///     let block: serde_json::Value = serde_json::from_slice(&saved.save())?;
+///     Ok(block["extra"]["label"].clone())
+/// };
+/// let gain = Gain::new(params, parts);
+///
+/// label.set(String::from("Drums"));
+/// driver.tick();
+/// assert_eq!(saved_label()?, "Drums");
+///
+/// // The parts went with the plugin, so nothing is captured any more.
+/// drop(gain);
+/// label.set(String::from("Bass"));
+/// driver.tick();
+/// assert_eq!(saved_label()?, "Drums");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct Driver {
+    ticked: Weak<Ticked>,
+}
+
+impl Driver {
+    /// Returns the driver of `parts`.
+    pub fn of(parts: &Parts) -> Driver {
+        Driver {
+            ticked: Rc::downgrade(&parts.ticked),
         }
     }
 
-    /// Runs one main-thread tick of every part, in the one order that works,
-    /// and returns what learn committed, if anything.
-    ///
-    /// A plugin that keeps its parts calls it from every
-    /// [`idle`](Plugin::idle). An exporter reports a plugin that keeps them
-    /// and lets an idle pass without a tick, once, as a fault: until it
-    /// ticks, a session the host's load restored never applies.
+    /// Runs one main-thread tick of every part, in the one order that works.
+    /// Once the parts are dropped, it does nothing.
     ///
     /// The order:
     ///
@@ -358,71 +442,27 @@ impl Parts {
     /// 3. The history's tick, when undo is on: it records what changed since
     ///    the last tick. Its place does not matter: it clears the history
     ///    whenever a restore was stored or applied since it last looked.
-    /// 4. [`sync`](Self::sync): it captures each value [`save`](Self::save)
-    ///    keeps saved that moved since the last tick, a write undo replayed
-    ///    included. It skips one whose last write was the restore the
-    ///    session's tick applied, which that apply captured already. Until
-    ///    this step a save holds the value from before the change.
+    /// 4. [`Parts::sync`]: it captures each value [`Parts::save`] keeps saved
+    ///    that moved since the last tick, a write undo replayed included. It
+    ///    skips one whose last write was the restore the session's tick
+    ///    applied, which that apply captured already. Until this step a save
+    ///    holds the value from before the change.
+    ///
+    /// Nothing of the parts is held while the plugin's own code runs inside
+    /// the tick, so a participant the plugin registered may call
+    /// [`Parts::save`] or [`Parts::sync`] from its apply.
     ///
     /// When nothing changed it allocates nothing, and its cost does not grow
     /// with the number of parameters; each saved value costs one atomic load.
     ///
     /// Thread: main.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// The [`Parts`] example records an undo step, and the
-    /// [`idle`](Plugin::idle) example saves a learned mapping.
-    pub fn tick(&mut self) -> Option<Learned> {
-        self.ticks.fetch_add(1, Ordering::Relaxed);
-        let learned = self
-            .learn
-            .as_ref()
-            .and_then(|learn| learn.borrow_mut().poll());
-        self.session.tick();
-        if let Some(history) = &self.history {
-            history.tick();
+    /// When learn is on and the guard [`Parts::learn`] returned is alive.
+    pub fn tick(&self) {
+        if let Some(ticked) = self.ticked.upgrade() {
+            ticked.tick();
         }
-        self.sync();
-        learned
-    }
-
-    /// What the engine watches for a forgotten tick.
-    pub(crate) fn watch(&self) -> TickWatch {
-        TickWatch {
-            ticks: Cell::new(Arc::downgrade(&self.ticks)),
-            seen: Cell::new(self.ticks.load(Ordering::Relaxed)),
-        }
-    }
-}
-
-/// The engine's side of a plugin's tick count: it tells whether a plugin
-/// that still holds its parts let an idle pass without ticking them.
-///
-/// It holds the count weakly, so a plugin that dropped its parts is never
-/// reported.
-pub(crate) struct TickWatch {
-    /// Emptied for good once the parts are dropped or a tick is missed, so
-    /// the miss is told once.
-    ticks: Cell<Weak<AtomicU64>>,
-    seen: Cell<u64>,
-}
-
-impl TickWatch {
-    /// Whether the parts are still held and were not ticked since the last
-    /// call: true at most once. Called after each of the plugin's idles.
-    pub(crate) fn missed(&self) -> bool {
-        let ticks = self.ticks.take();
-        let Some(count) = ticks.upgrade() else {
-            return false;
-        };
-        let now = count.load(Ordering::Relaxed);
-        if now == self.seen.get() {
-            return true;
-        }
-        self.seen.set(now);
-        drop(count);
-        self.ticks.set(ticks);
-        false
     }
 }
