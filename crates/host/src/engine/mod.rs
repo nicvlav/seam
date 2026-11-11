@@ -40,8 +40,7 @@ use timer::{Handle, Timer, abandon};
 use crate::boundary::Patience;
 use crate::boundary::{AudioSlot, Lent, MainThread, Refused};
 use crate::faults::{Fault, Faults, report_refused_declarations};
-use crate::parts::TickWatch;
-use crate::{Layout, MAX_FRAMES, Parts, Plugin, SavedState, Tail};
+use crate::{Driver, Layout, MAX_FRAMES, Parts, Plugin, SavedState, Tail};
 
 /// What `tail` answers for a plugin whose output falls silent with its
 /// input; VST3's `kNoTail` and the C interface's `SEAM_TAIL_NONE`.
@@ -240,10 +239,26 @@ pub(crate) struct Main<P: Plugin, H> {
     /// Inside a tick: a release from one of the host's callbacks then
     /// leaks the engine, since the tick is still using it.
     ticking: Cell<bool>,
-    /// Tells a plugin that keeps its parts and lets a tick pass without
-    /// ticking them.
-    ticks: TickWatch,
+    /// What only the thread the plugin is bound to may hold; `None` for an
+    /// engine bound to no thread.
+    on_thread: Option<OnThread>,
+}
+
+/// The main-thread state that is not `Send`, so that an engine bound to no
+/// thread holds none of it.
+struct OnThread {
+    /// Ticks the plugin's parts before each of its idles.
+    driver: Driver,
     timer: RefCell<Option<Timer>>,
+}
+
+impl<P: Plugin, H> Main<P, H> {
+    /// Whether the state holds what only its own thread may: the parts'
+    /// driver and the timer slot.
+    #[cfg(all(test, feature = "cabi"))]
+    pub(crate) fn holds_on_thread(&self) -> bool {
+        self.on_thread.is_some()
+    }
 }
 
 #[cfg(feature = "vst3")]
@@ -363,16 +378,23 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         P: Send,
         H: Send,
     {
-        // SAFETY: of the main-thread state, the plugin and the host link
-        // are `Send` (the bounds above), so the plugin holds no `Parts`,
-        // which are not. So are the event drain, the tick watch's weak
-        // count, and the `Cell`s and `RefCell`s around them. The one part
-        // that is not, the timer slot, stays `None`: `start_timer` starts
-        // none for state no thread owns. `build` hands the parts to the
-        // plugin on this thread and keeps none of them. The state goes from
-        // thread to thread one loan at a time, and drops wherever the engine
-        // does.
-        Self::build(host, |main| unsafe { MainThread::unbound(main, patience) })
+        Self::build(host, |main| {
+            let main = Main {
+                on_thread: None,
+                ..main
+            };
+            // SAFETY: of the main-thread state, the plugin and the host link
+            // are `Send` (the bounds above), so the plugin holds no `Parts`,
+            // which are not. So are the event drain and the `Cell`s and
+            // `RefCell`s around them. Everything that is not, the parts'
+            // driver and the timer slot, is in `on_thread`, which is `None`
+            // here and stays so: `start_timer` starts no timer without it.
+            // The driver `build` made was dropped just above, on the thread
+            // that made it, and `build` hands the parts to the plugin on this
+            // thread and keeps none of them. The state goes from thread to
+            // thread one loan at a time, and drops wherever the engine does.
+            unsafe { MainThread::unbound(main, patience) }
+        })
     }
 
     fn build(
@@ -386,7 +408,7 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         // Only what is `Send` is kept here: the parts go to the plugin.
         let set = Arc::clone(parts.set());
         let saved = Arc::clone(parts.saved());
-        let ticks = parts.watch();
+        let driver = Driver::of(&parts);
         let drain = set
             .take_host_event_drain()
             .expect("a set Seam just built still has its host event drain");
@@ -402,8 +424,10 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             setup: Cell::new(None),
             active: Cell::new(false),
             ticking: Cell::new(false),
-            ticks,
-            timer: RefCell::new(None),
+            on_thread: Some(OnThread {
+                driver,
+                timer: RefCell::new(None),
+            }),
         };
         let automation = Automation::new(set.len(), H::QUEUES);
         let engine = Box::new(Engine {
@@ -646,14 +670,14 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// counts as a fault, and the timer then never ticks.
     #[cfg(feature = "vst3")]
     pub(crate) fn start_timer(&self) {
-        let Some(main) = self.main.owned() else {
+        let Some(on_thread) = self.main.owned().and_then(|main| main.on_thread.as_ref()) else {
             self.faults.record(Fault::NoTimer);
             return;
         };
         match Timer::start(self.ticker()) {
             Some(timer) => {
                 let _ = self.timer_handle.set(timer.handle());
-                *main.timer.borrow_mut() = Some(timer);
+                *on_thread.timer.borrow_mut() = Some(timer);
             }
             None => self.faults.record(Fault::NoTimer),
         }
@@ -686,9 +710,14 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         });
     }
 
-    /// The plugin's idle call, then what it did, told to the host. A plugin
-    /// that holds its parts and did not tick them in that call is counted
-    /// as a fault, once.
+    /// The plugin's parts' tick and then its idle call, and then what they
+    /// did, told to the host.
+    ///
+    /// Seam's tick runs first, so the plugin's idle sees a session the
+    /// host's load restored applied and a learned mapping committed. Both
+    /// run inside the plugin's borrow: a tick that finds the plugin busy
+    /// runs neither, so the parts are never ticked from inside a call of
+    /// the plugin's.
     ///
     /// A tick that a host's nested message loop delivers from inside one of the
     /// host's callbacks does nothing. The outer tick is still running, and the
@@ -700,13 +729,15 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         main.ticking.set(true);
         let _ticking = Clear(&main.ticking);
         match main.plugin.try_borrow_mut() {
-            Ok(mut plugin) => plugin.idle(),
+            Ok(mut plugin) => {
+                if let Some(on_thread) = &main.on_thread {
+                    on_thread.driver.tick();
+                }
+                plugin.idle();
+            }
             // A host's callback into the plugin from inside one of its own:
             // the next tick runs instead.
             Err(_) => return,
-        }
-        if main.ticks.missed() {
-            self.faults.record(Fault::Unticked);
         }
         self.tell_host(main);
     }
@@ -781,7 +812,9 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
                 self.deactivate(&main);
                 return Release::Leak;
             }
-            main.timer.borrow_mut().take();
+            if let Some(on_thread) = &main.on_thread {
+                on_thread.timer.borrow_mut().take();
+            }
             self.deactivate(&main);
             self.finish_edits(&main);
             self.report_faults();

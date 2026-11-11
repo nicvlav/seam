@@ -2,13 +2,15 @@
 //! tick, loaded back or defaulted, refused under a taken key, and captured
 //! once for a load.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use seam_host::{
-    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
+    AuCodes, Block, Category, Driver, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status,
 };
 use seam_params::{Declarer, Params, Value};
-use seam_session::SessionError;
+use seam_session::{ApplyError, Participant, Section, SessionError};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 
@@ -96,6 +98,7 @@ fn label(parts: &mut Parts, initial: &str) -> Value<String> {
 #[test]
 fn a_saved_value_loads_into_a_second_instance() {
     let mut first = parts();
+    let first_driver = Driver::of(&first);
     let default = View {
         zoom: 1.0,
         panel: "mixer".to_owned(),
@@ -109,17 +112,18 @@ fn a_saved_value_loads_into_a_second_instance() {
         panel: "sends".to_owned(),
     };
     view.set(moved.clone());
-    first.tick();
+    first_driver.tick();
     let block = first.saved().save();
 
     let mut second = parts();
+    let second_driver = Driver::of(&second);
     let reopened = Value::new(default.clone(), second.set());
     second
         .save("view", &reopened, default.clone())
         .expect("a free key");
     second.saved().load(&block).expect("a saved block");
     assert_eq!(reopened.get(), default, "a load applies at the tick");
-    second.tick();
+    second_driver.tick();
     assert_eq!(reopened.get(), moved);
     assert_eq!(second.saved().save(), block);
 }
@@ -129,9 +133,10 @@ fn a_block_saved_without_the_key_loads_the_default() {
     let older = parts().saved().save();
 
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let label = label(&mut parts, "Drums");
     parts.saved().load(&older).expect("a saved block");
-    parts.tick();
+    driver.tick();
     assert_eq!(label.get(), "Untitled");
     assert_eq!(extra(&parts), json!({ "label": "Untitled" }));
 }
@@ -139,6 +144,7 @@ fn a_block_saved_without_the_key_loads_the_default() {
 #[test]
 fn a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved() {
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let label = label(&mut parts, "Drums");
     let mut block: serde_json::Value =
         serde_json::from_slice(&parts.saved().save()).expect("a saved block is JSON");
@@ -146,7 +152,7 @@ fn a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved() {
     let block = serde_json::to_vec(&block).expect("JSON writes");
 
     parts.saved().load(&block).expect("a saved block");
-    parts.tick();
+    driver.tick();
     assert_eq!(label.get(), "Drums", "the value keeps what it held");
     assert_eq!(extra(&parts), json!({ "label": 7 }));
 }
@@ -154,11 +160,12 @@ fn a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved() {
 #[test]
 fn a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync() {
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let label = label(&mut parts, "Untitled");
 
     label.set("Drums".to_owned());
     assert_eq!(extra(&parts), json!({ "label": "Untitled" }));
-    parts.tick();
+    driver.tick();
     assert_eq!(extra(&parts), json!({ "label": "Drums" }));
 
     label.set("Bass".to_owned());
@@ -170,13 +177,14 @@ fn a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync() {
 #[test]
 fn a_value_written_from_another_thread_is_captured_at_the_next_tick() {
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let label = label(&mut parts, "Untitled");
 
     std::thread::scope(|scope| {
         scope.spawn(|| label.set("Drums".to_owned()));
     });
     assert_eq!(extra(&parts), json!({ "label": "Untitled" }));
-    parts.tick();
+    driver.tick();
     assert_eq!(extra(&parts), json!({ "label": "Drums" }));
 }
 
@@ -204,20 +212,21 @@ fn captures() -> u32 {
 #[test]
 fn a_load_is_captured_once_by_its_apply_and_a_later_change_again() {
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let count = Value::new(Counted(1), parts.set());
     parts.save("count", &count, Counted(0)).expect("a free key");
     let block = br#"{"seamStateVersion": 1, "parameters": {}, "extra": {"count": 2}}"#;
 
     let before = captures();
     parts.saved().load(block).expect("a saved block");
-    parts.tick();
+    driver.tick();
     assert_eq!(count.get(), Counted(2));
     assert_eq!(captures() - before, 1, "the apply's capture, and no other");
-    parts.tick();
+    driver.tick();
     assert_eq!(captures() - before, 1);
 
     count.set(Counted(3));
-    parts.tick();
+    driver.tick();
     assert_eq!(captures() - before, 2);
     assert_eq!(extra(&parts), json!({ "count": 3 }));
 }
@@ -225,15 +234,70 @@ fn a_load_is_captured_once_by_its_apply_and_a_later_change_again() {
 #[test]
 fn a_second_save_under_one_key_is_refused() {
     let mut parts = parts();
+    let driver = Driver::of(&parts);
     let label = label(&mut parts, "Drums");
     let other = Value::new("Bass".to_owned(), parts.set());
 
     let refused = parts.save("label", &other, "Untitled".to_owned());
     assert_eq!(refused, Err(SessionError::KeyTaken("label".to_owned())));
     other.set("Keys".to_owned());
-    parts.tick();
+    driver.tick();
     assert_eq!(extra(&parts), json!({ "label": "Drums" }));
     assert_eq!(label.get(), "Drums");
+}
+
+/// A participant the plugin registered by hand that reaches back into the
+/// parts from its apply: it saves a value there, and syncs.
+struct Reaching {
+    parts: Rc<RefCell<Parts>>,
+    label: Value<String>,
+}
+
+impl Participant for Reaching {
+    fn capture(&self) -> Section {
+        Section::Bool(true)
+    }
+
+    fn apply(&mut self, section: Option<&Section>) -> Result<(), ApplyError> {
+        if section.is_some() {
+            let mut parts = self.parts.borrow_mut();
+            parts
+                .save("label", &self.label, "Untitled".to_owned())
+                .expect("a free key");
+            parts.sync();
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn a_participant_may_save_and_sync_from_an_apply_the_tick_runs() {
+    let parts = Rc::new(RefCell::new(parts()));
+    let driver = Driver::of(&parts.borrow());
+    let label = Value::new("Untitled".to_owned(), parts.borrow().set());
+    let reaching = Rc::new(RefCell::new(Reaching {
+        parts: Rc::clone(&parts),
+        label: label.clone(),
+    }));
+    let _registration = parts
+        .borrow()
+        .session()
+        .register("reaching", &reaching)
+        .expect("a free key");
+
+    let block = br#"{"seamStateVersion": 1, "parameters": {},
+        "extra": {"reaching": true, "label": "Drums"}}"#;
+    parts.borrow().saved().load(block).expect("a saved block");
+    driver.tick();
+    assert_eq!(label.get(), "Drums", "saved inside the apply, and loaded");
+    assert_eq!(
+        extra(&parts.borrow()),
+        json!({ "reaching": true, "label": "Drums" })
+    );
+
+    label.set("Bass".to_owned());
+    driver.tick();
+    assert_eq!(extra(&parts.borrow())["label"], "Bass", "and kept saved");
 }
 
 #[cfg(debug_assertions)]

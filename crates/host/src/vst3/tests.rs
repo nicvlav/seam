@@ -211,7 +211,6 @@ impl Plugin for Probe {
     fn idle(&mut self) {
         probe(|state| state.idles += 1);
         assert!(!probe(|state| state.panic_in_idle), "an idle call's bug");
-        self.parts.tick();
         if let Some((key, value)) = probe(|state| state.edit.take()) {
             assert!(self.parts.params().write(self.id(key), value));
         }
@@ -1640,9 +1639,9 @@ thread_local! {
     static TICKS: Cell<u32> = const { Cell::new(0) };
 }
 
-/// A plugin with one session participant, which its tick applies.
+/// A plugin with one session participant, which Seam's tick applies.
 struct WithSession {
-    parts: Parts,
+    _parts: Parts,
     _participant: Rc<RefCell<Kept>>,
     _registration: seam_session::Registration,
 }
@@ -1659,7 +1658,7 @@ impl Plugin for WithSession {
             .register("kept", &participant)
             .expect("registered");
         WithSession {
-            parts,
+            _parts: parts,
             _participant: participant,
             _registration: registration,
         }
@@ -1671,7 +1670,6 @@ impl Plugin for WithSession {
 
     fn idle(&mut self) {
         TICKS.with(|ticks| ticks.set(ticks.get() + 1));
-        self.parts.tick();
     }
 }
 

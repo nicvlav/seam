@@ -284,19 +284,13 @@ exercised by driving the processor directly, as the tests below do.
 
 ## 7. The idle tick
 
-The exporter calls `Plugin::idle` about 60 times a second on the main thread.
-Nothing of the plugin's runs there unless `idle` calls it:
-
-```rust
-fn idle(&mut self) {
-    self.parts.tick();
-}
-```
-
-[`Parts::tick`](../crates/host/src/parts.rs) runs learn, the session, the
-history and the saved values in the one order that works, and owns the
-reasons for it. A plugin that keeps its parts and forgets the call never sees
-a project's saved session applied, so the exporter reports it as a fault.
+About 60 times a second on the main thread, Seam ticks the parts the plugin
+keeps: [`Driver::tick`](../crates/host/src/parts.rs) runs learn, the session,
+the history and the saved values in the one order that works, and owns the
+reasons for it. The plugin writes nothing for it, and the gain writes no
+`idle`. `Plugin::idle` is for a plugin's own main-thread work, and runs right
+after Seam's tick, so it sees a restore applied and a learned mapping
+committed.
 
 ## 8. Test it through a host
 
@@ -310,20 +304,22 @@ reads the modes' names through `parameter` and `text`, and carries the saved
 block through `save` and `load`.
 
 Learn and undo are driven on the plugin itself, since a host cannot reach them.
-The test builds it as an exporter does, keeping the saved state a host would
-save and load through:
+The test builds it as an exporter does, keeping a
+[`Driver`](../crates/host/src/parts.rs) to tick its parts as the exporter's
+engine would, and the saved state a host would save and load through:
 
 ```rust
-fn built() -> (Gain, Arc<SavedState>) {
+fn built() -> (Gain, Driver, Arc<SavedState>) {
     let (params, parts) = Parts::for_plugin::<Gain>().expect("valid declarations");
+    let driver = Driver::of(&parts);
     let saved = Arc::clone(parts.saved());
-    (Gain::new(params, parts), saved)
+    (Gain::new(params, parts), driver, saved)
 }
 ```
 
-Then it arms the gain, feeds a controller through the processor, calls `idle`,
-and saves and reloads to check the mapping survives. Run the example's tests,
-this guide's check among them, with:
+Then it arms the gain, feeds a controller through the processor, ticks the
+driver, and saves and reloads to check the mapping survives. Run the example's
+tests, this guide's check among them, with:
 
 ```sh
 cargo test -p seam-example-gain

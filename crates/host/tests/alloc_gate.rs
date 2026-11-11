@@ -6,8 +6,8 @@
 seam_testkit::install_alloc_gate!();
 
 use seam_host::{
-    AuCodes, Block, Category, Event, EventList, Layout, Parts, Plugin, PluginInfo, ProcessSetup,
-    Processor, Status,
+    AuCodes, Block, Category, Driver, Event, EventList, Layout, Parts, Plugin, PluginInfo,
+    ProcessSetup, Processor, Status,
 };
 use seam_learn::Config;
 use seam_params::{Declarer, Float, FloatDecl, Params};
@@ -96,10 +96,53 @@ fn an_idle_tick_of_a_plugin_s_parts_does_not_allocate() {
         .midi_learn(Config::default())
         .expect("learn's key is free");
     let _audio = parts.learn_audio();
-    parts.tick();
+    let driver = Driver::of(&parts);
+    driver.tick();
     assert_no_allocations("idle ticks of parts with undo and learn on", || {
         for _ in 0..64 {
-            std::hint::black_box(parts.tick());
+            driver.tick();
         }
     });
+}
+
+/// A plugin that keeps its parts, with undo and learn on, so the engine
+/// ticks them.
+#[cfg(all(feature = "cabi", feature = "test-host"))]
+struct Kept {
+    _parts: Parts,
+}
+
+#[cfg(all(feature = "cabi", feature = "test-host"))]
+impl Plugin for Kept {
+    const INFO: PluginInfo = Listening::INFO;
+    type Params = Gain;
+    type Processor = Silent;
+
+    fn new(_: Gain, mut parts: Parts) -> Self {
+        parts.undo(Bound::default()).expect("no other history");
+        parts
+            .midi_learn(Config::default())
+            .expect("learn's key is free");
+        Kept { _parts: parts }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Silent {
+        Silent
+    }
+}
+
+#[cfg(all(feature = "cabi", feature = "test-host"))]
+#[test]
+fn an_idle_tick_through_the_engine_does_not_allocate() {
+    let host = seam_host::cabi::TestHost::<Kept>::new();
+    host.idle();
+    assert_no_allocations(
+        "the engine's idle ticks of a plugin that keeps its parts",
+        || {
+            for _ in 0..64 {
+                host.idle();
+            }
+        },
+    );
+    assert_eq!(host.faults(), 0);
 }

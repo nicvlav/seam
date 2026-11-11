@@ -184,12 +184,13 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 ## Threads
 
 - [Main](docs/glossary.md#main-thread): owns the plugin, builds the `Processor`
-  at activation, takes it back at deactivation. A tick calls `Plugin::idle`
-  about 60 times a second and then tells the host of the plugin's
-  [edits](docs/glossary.md#edit). A session restore applies to its participants
-  on the plugin's idle, when that ticks its parts; `Parts::tick` says what it
-  ticks, and in what order. An exporter reports a plugin that keeps its parts
-  and does not tick them. The JUCE adapter ticks through JUCE on
+  at activation, takes it back at deactivation. A tick, about 60 times a
+  second, ticks the parts the plugin keeps, then calls `Plugin::idle`, then
+  tells the host of the plugin's [edits](docs/glossary.md#edit). A session
+  restore applies to its participants in the parts' tick; `Driver::tick`
+  (`parts.rs`) says what it ticks, and in what order. The engine reaches the
+  parts through a `Driver`, which does not keep them alive, so a plugin that
+  drops its parts is not ticked. The JUCE adapter ticks through JUCE on
   every platform. The VST3 exporter runs its own timer on Windows and macOS, and
   refuses to build for any other platform. There nothing would tick it: no edit
   would reach the host, and a load would never apply session sections to their
@@ -208,7 +209,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   that is not `Send` on the thread that called `create`, and lends one that is
   `Send` to each main-thread call in turn, on any thread (a
   [loan](docs/glossary.md#loan)). The state is `MainThread` (`boundary.rs`),
-  bound to one thread or lent call by call. The rule in full is on `Engine`
+  bound to one thread or lent call by call. Lent state holds nothing that is
+  not `Send`: such a plugin keeps no parts, and the engine keeps no driver and
+  no timer for it. The rule in full is on `Engine`
   (`engine/mod.rs`) for Seam's code, on `Plugin` (`plugin.rs`) for plugin
   authors, and on `SeamPlugin` in `seam.h` for C users ([whether a plugin must
   be Send][send], [the VST3 exporter's shape][vst3], [the C interface][cabi]).

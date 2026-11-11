@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use seam_example_gain::Gain;
 use seam_host::vst3::TestHost;
-use seam_host::{Block, EventList, Layout, Parts, Plugin, ProcessSetup, Processor};
+use seam_host::{Block, Driver, EventList, Layout, Parts, Plugin, ProcessSetup, Processor};
 use seam_params::host_id;
 use seam_testkit::alloc::assert_no_allocations;
 use seam_ump::{ChannelVoice, Voice};
@@ -36,6 +36,7 @@ fn control_change(events: &mut EventList, controller: u8, value: u8) {
 fn learning_and_a_learned_controller_never_allocate() {
     let (params, parts) = Parts::for_plugin::<Gain>().expect("valid declarations");
     let set = Arc::clone(parts.set());
+    let driver = Driver::of(&parts);
     let mut plugin = Gain::new(params, parts);
     let program = set.program();
     let [gain, mode, bypass] = [GAIN, MODE, BYPASS].map(|key| set.id(key).expect("declared"));
@@ -56,7 +57,7 @@ fn learning_and_a_learned_controller_never_allocate() {
         let mut channels: [&mut [f32]; 2] = [&mut left, &mut right];
         processor.process(Block::new(&mut channels, 256, &events, &mut out));
     });
-    plugin.idle();
+    driver.tick();
     assert!(
         plugin.gain_is_learned(),
         "the tick committed what the block captured"

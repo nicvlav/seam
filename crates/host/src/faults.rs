@@ -111,21 +111,17 @@ pub(crate) enum Fault {
     /// No main-thread timer started: the system refused one, or the
     /// instance has no thread of its own to run one on.
     NoTimer,
-    /// The plugin holds its parts and its idle did not tick them, so a
-    /// session the host's load restored never applies. Counted once.
-    Unticked,
 }
 
 impl Fault {
     /// Every kind, each once, in the order a report lists them.
-    const ALL: [Fault; 7] = [
+    const ALL: [Fault; 6] = [
         Fault::Panic,
         Fault::AudioPanic,
         Fault::WrongThread,
         Fault::HeldElsewhere,
         Fault::Reentered,
         Fault::NoTimer,
-        Fault::Unticked,
     ];
 
     fn bit(self) -> u8 {
@@ -154,10 +150,6 @@ impl Fault {
                 "a main-thread timer did not start (the system refused one, or the instance has \
                  no thread of its own), so it never ticks the plugin"
             }
-            Fault::Unticked => {
-                "the plugin keeps its parts but its idle did not tick them, so a project's \
-                 saved session never reaches the plugin; call Parts::tick from Plugin::idle"
-            }
         }
     }
 }
@@ -169,17 +161,16 @@ impl Fault {
 // until the match reads its new place too. The assertion keeps each kind's
 // bit inside the `u8`s that hold them.
 const _: () = {
-    const ALL: [Fault; 7] = Fault::ALL;
+    const ALL: [Fault; 6] = Fault::ALL;
     const FIRST: Fault = ALL[0];
     const SECOND: Fault = ALL[1];
     const THIRD: Fault = ALL[2];
     const FOURTH: Fault = ALL[3];
     const FIFTH: Fault = ALL[4];
     const SIXTH: Fault = ALL[5];
-    const SEVENTH: Fault = ALL[6];
     assert!(Fault::ALL.len() <= u8::BITS as usize);
     match Fault::Panic {
-        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH | SEVENTH => {}
+        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH => {}
     }
 };
 

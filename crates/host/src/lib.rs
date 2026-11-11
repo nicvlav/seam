@@ -158,6 +158,6 @@ pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
 pub use info::{AuCodes, Category, Feature, Layout, PluginInfo};
-pub use parts::Parts;
+pub use parts::{Driver, Parts};
 pub use plugin::{Plugin, Processor, Tail};
 pub use state::{LoadError, MAX_STATE_BYTES, STATE_VERSION, SavedState};
