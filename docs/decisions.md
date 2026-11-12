@@ -130,7 +130,7 @@ comments never cite an id: they state the reason in words, and
 | D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive; a plugin never ticks them, and a test with no host ticks through a `Driver`. | to confirm |
 | D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
-| D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and the labels are checked on the enum, each by a constant `cargo check` evaluates. | to confirm |
+| D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -2283,13 +2283,14 @@ is saved as its index, every hand-written impl used `self as usize`, and the
 derive must never disagree with the cast silently. One constant per written
 discriminant, spanned on it, compares the two, so moving or inserting a
 numbered variant fails `cargo check` there. An enum whose discriminants mean
-something else writes `Choices` by hand. The labels are checked once, by a
-constant spanned on the enum that applies the label rules a choice's
-declaration applies (D90), so a bad label is refused where the enum is
-declared and not on each declaration over it. A struct, a union, a generic
-enum, an enum of fewer than two variants, a variant with fields, a second mark
-on a variant, a mark that is not one string and a mark on the enum itself are
-the derive's own errors.
+something else writes `Choices` by hand. Each label is checked once, by a
+constant spanned on its mark, or on the variant's name when that is the
+label, that applies the rules a choice's declaration applies to one label
+among the earlier ones (D90). So a bad label is refused on itself, where the
+enum is declared, and not on each declaration over it. A struct, a union, a
+generic enum, an enum of fewer than two variants, a variant with fields, a
+second mark on a variant, a mark that is not one string and a mark on the enum
+itself are the derive's own errors.
 
 The derive cannot keep a saved project right when the order changes: the
 order of the variants is the save format. Its doc and the guide say so. A

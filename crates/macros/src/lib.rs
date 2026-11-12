@@ -12,9 +12,10 @@
 //! marked field's declaration and returns the struct. Each declaration is a
 //! named constant that ends in `checked`, so a plain `cargo check` refuses a
 //! key, a range or a label no parameter could have, on the author's own line.
-//! `Choices` writes one `impl Choices` in the enum's order, a constant that
-//! refuses its labels on the enum, and one that refuses each written
-//! discriminant that is not its variant's position, on that discriminant.
+//! `Choices` writes one `impl Choices` in the enum's order, a constant per
+//! label that refuses a label no choice could have, on that label, and one
+//! per written discriminant that refuses one that is not its variant's
+//! position, on that discriminant.
 
 mod choices;
 

@@ -143,7 +143,7 @@ pub use clock::{
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
 pub use declare::{
     BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, Params,
-    discriminant_is_position, key_is_new, labels_are_valid,
+    discriminant_is_position, key_is_new, label_is_valid,
 };
 pub use events::{GestureRecord, HostEvent};
 pub use host_events::HostEventDrain;
@@ -250,9 +250,10 @@ pub use seam_macros::Params;
 ///
 /// While compiling, the derive refuses a struct, a union, a generic enum, an
 /// enum of fewer than two variants and a variant with fields, each on the
-/// author's own line. A plain `cargo check` refuses, on the enum, labels a
-/// choice could not have: an empty one, one with whitespace at an end, and
-/// two that differ only in ASCII case. A discriminant the author writes must
+/// author's own line. A plain `cargo check` refuses a label a choice could
+/// not have, on the label, or on the variant's name when that is the label:
+/// an empty one, one with whitespace at an end, and one that differs only in
+/// ASCII case from an earlier variant's. A discriminant the author writes must
 /// be the variant's position, and any other value is refused on that
 /// discriminant: an enum whose discriminants mean something else writes
 /// [`Choices`](trait@Choices) by hand.

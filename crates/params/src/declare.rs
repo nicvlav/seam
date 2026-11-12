@@ -505,16 +505,17 @@ pub const fn key_is_new(key: &'static str, earlier: &[&'static str]) {
     }
 }
 
-/// Panics, at compile time in `#[derive(Choices)]`, when `labels` break a
-/// rule a choice's labels must keep.
+/// Panics, at compile time in `#[derive(Choices)]`, when `label` breaks a
+/// rule a choice's label keeps among `earlier`, the labels of the variants
+/// before it.
 ///
 /// # Panics
 ///
-/// For such labels, which is the point.
+/// For such a label, which is the point.
 #[doc(hidden)]
-pub const fn labels_are_valid(labels: &'static [&'static str]) {
+pub const fn label_is_valid(label: &'static str, earlier: &[&'static str]) {
     // The rules name no key here: the message is the rule alone.
-    if let Err(error) = rules::labels("", labels) {
+    if let Err(error) = rules::label_among("", label, earlier) {
         panic!("{}", error.rule());
     }
 }

@@ -49,9 +49,9 @@ delivered to a plugin through an exporter.
 - `seam-params`: `#[derive(Choices)]`, under the same feature, writes a
   choice's enum: its labels and both mappings, in the order of the variants.
   A label is the variant's name unless a `#[choice("...")]` mark gives one. A
-  written discriminant must be the variant's position, and the labels are
-  checked on the enum: `cargo check` refuses either. The example gain's
-  `Mode` derives it.
+  written discriminant must be the variant's position, and a label no choice
+  could have is refused: `cargo check` reports either on the author's line.
+  The example gain's `Mode` derives it.
 - `seam-undo`: an undo history that polls once per tick. One gesture is one
   step, transactions group steps, and host automation, restores and learned
   writes never record. A restore clears the history, and the history is bounded

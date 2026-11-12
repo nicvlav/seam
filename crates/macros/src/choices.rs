@@ -59,13 +59,14 @@ pub(crate) fn choices(input: &DeriveInput) -> syn::Result<Tokens> {
     let positions: Vec<_> = (0..idents.len()).map(Literal::usize_unsuffixed).collect();
     let (last, earlier) = idents.split_last().expect("two variants or more");
     let earlier_positions = positions.get(..earlier.len()).unwrap_or_default();
-    // The labels are refused on the enum, once, and not on each declaration
-    // of a choice over it.
-    let labels_checked = quote_spanned! { name.span() =>
-        const _: () = ::seam_params::labels_are_valid(
-            <#name as ::seam_params::Choices>::LABELS,
-        );
-    };
+    // Each label is refused on itself, once, and not on each declaration of
+    // a choice over the enum.
+    let labels_checked = labels.iter().enumerate().map(|(at, label)| {
+        let earlier = labels.get(..at).unwrap_or_default();
+        quote_spanned! { label.span() =>
+            const _: () = ::seam_params::label_is_valid(#label, &[#(#earlier),*]);
+        }
+    });
     Ok(quote! {
         #[automatically_derived]
         impl ::seam_params::Choices for #name {
@@ -85,7 +86,7 @@ pub(crate) fn choices(input: &DeriveInput) -> syn::Result<Tokens> {
             }
         }
 
-        #labels_checked
+        #(#labels_checked)*
         #(#checks)*
     })
 }

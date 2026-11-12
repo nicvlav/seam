@@ -997,8 +997,8 @@ move its line here; when a decision gains code, add one.
 
 - `crates/macros/src/lib.rs`: `derive_choices`
 - `crates/macros/src/choices.rs`: module, `choices`, `label`, `misplaced_marks`
-- `crates/params/src/declare.rs`: `labels_are_valid`, `discriminant_is_position`
-- `crates/params/src/declare/rules.rs`: `labels`
+- `crates/params/src/declare.rs`: `label_is_valid`, `discriminant_is_position`
+- `crates/params/src/declare/rules.rs`: `labels`, `label_among`
 - `examples/gain/src/lib.rs`: `Mode`
 - test `crates/params/tests/derive.rs`: `a_derived_enum_maps_as_its_twin_written_by_hand`, `a_mark_gives_a_variant_s_label_and_a_variant_without_one_shows_its_name`, `written_discriminants_that_are_the_positions_compile_and_map`
 - test `crates/params/src/declare/derive_refusals.rs`: `ChoicesOnStruct`, `ChoicesOnUnion`, `VariantWithFields`, `GenericEnum`, `OneVariant`, `DiscriminantNotPosition`, `PaddedLabel`, `EmptyLabel`, `LabelsDifferInCase`, `MarkNotAString`, `TwoMarks`, `MarkOnEnum`

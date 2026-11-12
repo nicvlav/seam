@@ -812,9 +812,12 @@ The owner decided on 2026-11-11, from a review of the plan, that a derive
 writes `Choices`, that a variant's label is its name unless a mark gives one,
 and that a written discriminant must equal the variant's position. The same
 review moved the label check onto the enum and refused an enum of one variant
-there. Built on 2026-11-11, with one choice made while building it: a
+there. Built on 2026-11-11, with two choices made while building it: a
 `#[choice]` mark on the enum itself is refused, where the compiler would
-otherwise accept it and ignore it.
+otherwise accept it and ignore it; and each label is checked on itself rather
+than once on the enum, so the error names the label at fault, after the owner
+asked the same day to take what was worth taking from a general enum-naming
+derive.
 
 ## Rules
 

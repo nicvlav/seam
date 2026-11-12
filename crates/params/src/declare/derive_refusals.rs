@@ -526,7 +526,7 @@ struct OneVariant;
 /// ```
 struct DiscriminantNotPosition;
 
-/// A label with whitespace at an end, refused on the enum.
+/// A label with whitespace at an end, refused on the label.
 ///
 /// ```compile_fail,E0080
 /// use seam_params::Choices;
@@ -551,7 +551,7 @@ struct DiscriminantNotPosition;
 /// ```
 struct PaddedLabel;
 
-/// An empty label, refused on the enum.
+/// An empty label, refused on the label.
 ///
 /// ```compile_fail,E0080
 /// use seam_params::Choices;
@@ -575,7 +575,7 @@ struct PaddedLabel;
 /// ```
 struct EmptyLabel;
 
-/// Two labels that differ only in ASCII case, refused on the enum.
+/// Two labels that differ only in ASCII case, refused on the second.
 ///
 /// ```compile_fail,E0080
 /// use seam_params::Choices;
