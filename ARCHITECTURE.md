@@ -240,6 +240,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   for MIDI 2.0 assignable controllers is bound through `IMidiMapping2`. The
   `vst3` crate's `Midi2Controller` is four bytes where the SDK's is two, so the
   exporter must define its own.
+- Learn into a plain value: its target writes with `Origin::Learn` and opens
+  no gesture, so a learned value is never an undo step and the target's
+  `held` is `Value::gesture_open`. Seam has no ready-made target for one.
 - CLAP: an exporter over the same engine, ticked through the host's
   timer-support extension. Open: a CLAP host may lack timer support.
 - Learn's snapshot fallback: should a later `triple_buffer` break what the

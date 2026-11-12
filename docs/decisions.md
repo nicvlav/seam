@@ -84,7 +84,7 @@ comments never cite an id: they state the reason in words, and
 | D45 | [What happens to registrations when the `SessionUi` they were made through drops? (S2)](#d45-registrations-when-a-sessionui-drops) | They end, as if each `Registration` had dropped: their sections stay in every save, their keys are free for a later handle, and `connected` turns false. | decided |
 | D46 | [What does a derived write do to a plain value's open gesture? (D43, U15, U16)](#d46-a-derived-write-and-a-plain-values-open-gesture) | By its origin. A restore or a replay rebases the gesture; a write derived from a user's or the plugin's own change joins it; one derived from a host or learned change leaves it alone. | decided |
 | D47 | [When does a lone NRPN high byte settle as coarse? (L3, D30)](#d47-when-a-lone-nrpn-high-byte-settles-as-coarse) | When a learn poll finds the same unsettled capture an earlier poll found, and a whole audio block after the one that staged it has ended. A second high byte with no low byte between still settles it at once on the audio thread. | decided |
-| D48 | [How does a plain `Value` serve as a learn `Target`? (L7, D29, D33)](#d48-a-plain-value-as-a-learn-target) | Open. `Value` reports only whether some gesture is open, so `Target::held` cannot leave out learn's own burst. Needed before a plugin learns into a plain value. | held |
+| D48 | [How does a plain `Value` serve as a learn `Target`? (L7, D29, D33)](#d48-a-plain-value-as-a-learn-target) | As a parameter does: learn writes it with `Origin::Learn` and opens no gesture, so a learned value is never an undo step, any gesture open on the value is the user's, and `Target::held` is `Value::gesture_open`. Seam has no ready-made target for one, since no plugin learns into one yet. | decided |
 | D49 | [May a session participant write a parameter through the UI handle while it applies? (U16, P6)](#d49-a-participant-writing-a-parameter-during-apply) | No: it writes through `ProgramParams::sync`, which records nothing and tells the host no gesture. A user or edit write through `UiParams` while the applying mark is up fails a debug assertion. | decided |
 | D50 | [How does each activation get learn's audio side? (L5)](#d50-learns-audio-side-per-activation) | `Learn::replace_audio()` makes a fresh one that reads the current mappings; the one handed out before keeps its last table and sees no later edit. Under an exporter the engine takes it (D91). | decided |
 | D51 | [Must a plugin be `Send`? (U5, S6, L7, H1)](#d51-whether-a-plugin-must-be-send) | No. The exporter calls the plugin and drops it on its main thread only. Only a plugin that is `Send` may leave that thread: the C interface binds it to no thread. | decided |
@@ -127,14 +127,13 @@ comments never cite an id: they state the reason in words, and
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
-| D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive, and runs learn's audio side before each block, taken through it at each activation; a plugin never ticks them or runs learn, and a test with no host does both through a `Driver`. | to confirm |
+| D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive, and runs learn's audio side before each block, taken through it at each activation; a plugin never ticks them or runs learn, and a test with no host does both through a `Driver`. | decided |
 | D92 | [When does a plain value saved through `Parts::saved_value` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
 | D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | decided |
 | D95 | [When does a call at the plugin boundary panic, and when does it return a `Result`? (D90, D91)](#d95-mistakes-panic-failures-return-a-result) | A mistake fixed in the plugin's source, such as a call made twice or a switch turned on without what it needs, panics with what to change; a failure that can depend on data at run time returns a `Result`. So `Parts::undo` and `Parts::midi_learn` return no `Result`, and `Parts::saved_value` keeps one. | decided |
 
-**Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
-the first plugin that learns into a plain value. Each keeps its recommendation
+**Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
 until decided, and no rule depends on it.
 
 The rest default without asking: host and learn writes become visible to every
@@ -848,17 +847,25 @@ once on the audio thread.
 **Question and C++ Seam.** How does a plain `Value` serve as a learn `Target`?
 (L7, D29, D33) Not applicable: C++ had no "the user owns it" rule (L7).
 
-**Recommendation.** Open. `Value` reports only whether some gesture is open, so
-`Target::held` cannot leave out learn's own burst: counting every gesture splits
-one sweep into many bursts, leaving learn's out lets MIDI write through the
-user's drag, and a grab inside an open burst merges the sweep into the user's
-undo step. Undo's D33 also refuses while a steady MIDI stream keeps the burst
-open.
+**Rust.** As a parameter does. A target over a plain `Value` writes each
+learned value with `Value::set_from` and `Origin::Learn`, and opens no gesture
+in `begin`. Undo records no learned write: the history's baseline follows it,
+as it follows a host's write. So a learned value is never an undo step, and a
+gesture open on the value is always the user's: the target's `Target::held` is
+`Value::gesture_open`, and learn holds its values back while the user drags.
+A user's gesture open while learn writes keeps its own before and after, and
+an undo refused under D33 waits only for the user. Seam has no ready-made
+target for a plain value, since no plugin learns into one yet.
 
-The recommendation: tag a `Value` gesture as the user's or learn's, with its own
-before and after, and have D33 wait only for the user's. The cheaper
-`Value::gestures() -> u32` fixes `held` alone. Needed before a plugin learns
-into a plain value.
+**Alternatives.** Learn's burst was a gesture on the value, as `Target`'s
+example once suggested. `Value` reports only whether some gesture is open, so
+`held` could not leave learn's burst out: counting every gesture split one
+sweep into many bursts, leaving learn's out let MIDI write through the user's
+drag, and a grab inside an open burst merged the sweep into the user's undo
+step. D33 also refused while a steady MIDI stream kept the burst open. Tagging
+each gesture as the user's or learn's, with its own before and after, would
+have fixed all three, and a gesture count would have fixed `held` alone.
+Opening no gesture removes the need for either.
 
 [History](decision-history.md#d48-a-plain-value-as-a-learn-target)
 

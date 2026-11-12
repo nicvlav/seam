@@ -89,11 +89,16 @@ pub struct CustomId(pub(crate) u64);
 /// A target learn writes on the UI thread: plugin state that is not a
 /// parameter, a plain value say. Learn owns it once registered.
 ///
-/// A burst of learned values is one gesture, so a sweep is one undo step.
-/// [`begin`](Self::begin) opens it at the first value. [`apply`](Self::apply)
-/// takes the newest value each poll tick that has one. [`end`](Self::end)
-/// closes it once 15 ticks pass with no value, or when the target is
-/// unmapped or detached, or learn drops.
+/// Learn hands a target its values in bursts. [`begin`](Self::begin) opens
+/// one at the first value. [`apply`](Self::apply) takes the newest value each
+/// poll tick that has one. [`end`](Self::end) closes it once 15 ticks pass
+/// with no value, or when the target is unmapped or detached, or learn drops.
+///
+/// A learned value is never an undo step, as for a parameter. So a target
+/// over a plain [`Value`](seam_params::Value) opens no gesture: `apply`
+/// writes with [`Value::set_from`](seam_params::Value::set_from) and
+/// [`Origin::Learn`](seam_params::Origin::Learn), and any gesture open on
+/// the value is the user's.
 ///
 /// Learn calls a target only while it holds itself mutably, inside `poll` or
 /// a mapping change. A target that reaches the [`Learn`](crate::Learn) that
@@ -149,14 +154,13 @@ pub struct CustomId(pub(crate) u64);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub trait Target {
-    /// Starts a burst: open one gesture, `Value::begin` say. The [`Target`]
-    /// example shows the calls in order.
+    /// Starts a burst. The [`Target`] example shows the calls in order.
     fn begin(&mut self);
 
     /// Takes the newest learned value, 0 to 1 after the mapping's curve.
     fn apply(&mut self, normalized: f64);
 
-    /// Ends the burst: close the gesture.
+    /// Ends the burst.
     fn end(&mut self);
 
     /// Returns whether the user holds this target's control now.
@@ -166,9 +170,9 @@ pub trait Target {
     /// once they let go. The answer must not count learn's own burst. The
     /// default is `false`.
     ///
-    /// Open: how a plain `Value` serves as a target is not decided. It
-    /// reports only whether some gesture is open, so it cannot tell learn's
-    /// burst from the user's drag and cannot implement this correctly yet.
+    /// A target over a plain [`Value`](seam_params::Value) that opens no
+    /// gesture answers with
+    /// [`Value::gesture_open`](seam_params::Value::gesture_open).
     fn held(&self) -> bool {
         false
     }

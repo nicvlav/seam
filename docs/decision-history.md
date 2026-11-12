@@ -252,7 +252,12 @@ the low byte. Confirmed by the owner on 2026-11-07.
 
 [The decision](decisions.md#d48-a-plain-value-as-a-learn-target)
 
-The recommendation is the review's.
+The recommendation is the review's: tag each gesture on a `Value` as the
+user's or learn's. The owner decided on 2026-11-10, choosing the shape of the
+plugin boundary, that a learned controller move is never an undo step, for a
+plain value as for a parameter. A plain value's target therefore opens no
+gesture, which removes what the recommendation answered, and it was not
+built. Recorded as decided on 2026-11-12.
 
 ### D49. A participant writing a parameter during apply
 
@@ -790,6 +795,9 @@ at the take panics rather than activating without learn. Built on 2026-11-12:
 the engine takes it through `Driver::learn_audio` at each activation, and
 `Parts::learn_audio` went. D50's question now names the activation, not its
 processor.
+
+The owner confirmed the decision on 2026-11-12 as built, the line a refused
+declaration writes included.
 
 ### D92. When a saved plain value is captured
 
