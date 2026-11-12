@@ -975,7 +975,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/parts.rs`: `Parts::save`, `Parts::sync`, `Driver::tick`
 - `crates/host/src/parts/saved.rs`: module, `Synced`, `ValueSection`, `SavedValue`, `SavedValue::register`, `SavedValue::sync`
 - `examples/gain/src/lib.rs`: `Gain`
-- test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`
+- test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_value_another_apply_writes_after_its_own_is_captured_at_the_tick`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`
 - test `examples/gain/tests/gain.rs`: `the_label_saves_and_loads_back`, `undo_and_redo_restore_the_label_and_its_saved_state`
 
 ### D93. A derive that writes `declare`

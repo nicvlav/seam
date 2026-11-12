@@ -448,9 +448,10 @@ impl Driver {
     ///    whenever a restore was stored or applied since it last looked.
     /// 4. [`Parts::sync`]: it captures each value [`Parts::save`] keeps saved
     ///    that moved since the last tick, a write undo replayed included. It
-    ///    skips one whose last write was the restore the session's tick
-    ///    applied, which that apply captured already. Until this step a save
-    ///    holds the value from before the change.
+    ///    skips one whose last write was its own apply's, which the session's
+    ///    tick captured already, but not one another participant's apply
+    ///    wrote after it. Until this step a save holds the value from before
+    ///    the change.
     ///
     /// Nothing of the parts is held while the session's tick runs, so a
     /// participant the plugin registered may call [`Parts::save`] or

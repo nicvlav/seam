@@ -1,6 +1,6 @@
 //! A plain value saved with the session through `Parts::save`: captured at the
 //! tick, loaded back or defaulted, refused under a taken key, and captured
-//! once for a load.
+//! once for a load, and again for a write another apply makes after it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -229,6 +229,46 @@ fn a_load_is_captured_once_by_its_apply_and_a_later_change_again() {
     driver.tick();
     assert_eq!(captures() - before, 2);
     assert_eq!(extra(&parts), json!({ "count": 3 }));
+}
+
+/// A preset the plugin registered by hand after the label: its apply names
+/// the label after the preset it loads.
+struct Preset {
+    label: Value<String>,
+}
+
+impl Participant for Preset {
+    fn capture(&self) -> Section {
+        Section::Null
+    }
+
+    fn apply(&mut self, section: Option<&Section>) -> Result<(), ApplyError> {
+        if let Some(name) = section.and_then(Section::as_str) {
+            self.label.set(name.to_owned());
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn a_value_another_apply_writes_after_its_own_is_captured_at_the_tick() {
+    let mut parts = parts();
+    let driver = Driver::of(&parts);
+    let label = label(&mut parts, "Untitled");
+    let preset = Rc::new(RefCell::new(Preset {
+        label: label.clone(),
+    }));
+    let _registration = parts
+        .session()
+        .register("preset", &preset)
+        .expect("a free key");
+
+    let block = br#"{"seamStateVersion": 1, "parameters": {},
+        "extra": {"label": "Drums", "preset": "Bass"}}"#;
+    parts.saved().load(block).expect("a saved block");
+    driver.tick();
+    assert_eq!(label.get(), "Bass", "the preset applied after the label");
+    assert_eq!(extra(&parts)["label"], "Bass", "and the save holds it");
 }
 
 #[test]

@@ -128,7 +128,7 @@ comments never cite an id: they state the reason in words, and
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
 | D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive; a plugin never ticks them, and a test with no host ticks through a `Driver`. | to confirm |
-| D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was a restore's, which the session's apply captured already. A save between a change and the next tick holds the value from before the change. | decided |
+| D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
@@ -2196,9 +2196,10 @@ value: it captures the value as JSON through serde, and applies a restored
 section, or the default the call was given for a project without the key.
 `Driver::tick` ends with `Parts::sync`, which compares each saved value's change
 count with the count it last saw, one atomic load, and captures the value when
-it moved. When the newest write was a restore's, the session's apply pass
-captured it as it applied, so `sync` notes the count and captures nothing: a
-load never looks like an edit. So a save between a change and the next tick,
+it moved. When the newest write was the value's own apply, the session's apply
+pass captured it as it applied, so `sync` notes the count and captures nothing:
+a load is captured once. A write another participant's apply makes after it is
+a restore's too, and is captured as any other write. So a save between a change and the next tick,
 about 16 ms, holds the value from before the change, and `sync` captures at
 once for a caller that cannot wait; a parameter is never stale this way. The
 whole value is captured whenever it moved, so large state saves under several
