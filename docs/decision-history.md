@@ -826,7 +826,7 @@ there. Built on 2026-11-11, with two choices made while building it: a
 otherwise accept it and ignore it; and each label is checked on itself rather
 than once on the enum, so the error names the label at fault, after the owner
 asked the same day to take what was worth taking from a general enum-naming
-derive.
+derive. The owner confirmed both on 2026-11-12.
 
 ### D95. Mistakes panic, failures return a `Result`
 
@@ -836,7 +836,8 @@ The owner decided on 2026-11-11, from a review of a plan to cut what a plugin
 writes, that a mistake fixed in the plugin's source panics and a failure that
 can depend on data returns a `Result`, and that `Parts::undo` and
 `Parts::midi_learn` follow it. Built on 2026-11-12, with no choice made while
-building it beyond the wording of the two panics.
+building it beyond the wording of the two panics. The owner confirmed it on
+2026-11-12.
 
 ## Rules
 
