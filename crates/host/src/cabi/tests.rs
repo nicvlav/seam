@@ -1457,6 +1457,65 @@ fn an_unbound_instance_holds_no_driver_and_no_timer() {
     assert_eq!(bound.release(), crate::engine::Release::Free);
 }
 
+#[test]
+fn an_unbound_instance_takes_no_audio_side_of_learn() {
+    let unbound = Instance::<Mover>::new_unbound(None, &crate::engine::LOAN_WAIT);
+    let main = unbound.main().expect("lent here");
+    assert!(unbound.activate(&main, crate::engine::Setup::FALLBACK, Layout::STEREO));
+    drop(main);
+    assert_eq!(unbound.holds_learn_audio(), Some(false));
+    assert_eq!(unbound.release(), crate::engine::Release::Free);
+}
+
+/// Keeps its parts with learn on, so each activation takes learn's audio
+/// side.
+struct Learner {
+    _parts: Parts,
+}
+
+impl Plugin for Learner {
+    const INFO: PluginInfo = PluginInfo {
+        midi_input: true,
+        ..Probe::INFO
+    };
+    type Params = Table;
+    type Processor = Through;
+
+    fn new(_: Table, mut parts: Parts) -> Self {
+        parts.midi_learn(seam_learn::Config::default());
+        Learner { _parts: parts }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Through {
+        Through
+    }
+}
+
+#[test]
+fn a_release_refused_on_another_thread_drops_learn_s_audio_side_there() {
+    let instance = Instance::<Learner>::new(None);
+    let main = instance.main().expect("bound here");
+    assert!(instance.activate(&main, crate::engine::Setup::FALLBACK, Layout::STEREO));
+    drop(main);
+    assert_eq!(instance.holds_learn_audio(), Some(true));
+    let release = std::thread::scope(|scope| scope.spawn(|| instance.release()).join())
+        .expect("released there, the host not aborted");
+    assert_eq!(release, crate::engine::Release::Leak);
+    assert_eq!(
+        instance.holds_learn_audio(),
+        None,
+        "dropped with the processor, inside the release's guard"
+    );
+    assert_eq!(
+        instance.faults(),
+        1,
+        "the refused release, and nothing else"
+    );
+    // The plugin may not drop off its thread, so it leaks, as a shell
+    // leaks it.
+    Box::leak(instance);
+}
+
 thread_local! {
     /// The instance [`Busy`] has its host tick from inside its activation.
     static BUSY: Cell<*mut SeamInstance> = const { Cell::new(std::ptr::null_mut()) };

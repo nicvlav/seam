@@ -95,10 +95,13 @@ delivered to a plugin through an exporter.
   mistake in the plugin's source, such as either turned on twice, panics with
   what to change, which refuses the instance. While a plugin keeps its parts,
   Seam ticks them and the session before each `Plugin::idle`, which holds only
-  the plugin's own work; a plugin never ticks them. A plugin declares its
-  saved-state migration as `Plugin::SCHEMA_VERSION` and `Plugin::migrate`.
-  `Parts::for_plugin` builds a plugin's parts with no host, for tests, which
-  tick them through a `Driver`.
+  the plugin's own work; a plugin never ticks them. With learn on, each
+  activation takes learn's audio side and each block runs it over the block's
+  MIDI before the processor, so a processor holds no part of learn and never
+  calls it. A plugin declares its saved-state migration as
+  `Plugin::SCHEMA_VERSION` and `Plugin::migrate`. `Parts::for_plugin` builds a
+  plugin's parts with no host, for tests, which tick them and take learn's
+  audio side through a `Driver`.
 - `seam-host`: a plain value saved with the session in one call.
   `Parts::saved_value` makes a value of any type serde can write and read,
   starting at a default, and keeps it saved under a key, as JSON; a project

@@ -782,6 +782,15 @@ On 2026-11-11 the owner decided D95, which settles learn's refusal of a
 plugin with no MIDI input as a panic, and adds one for learn turned on twice.
 Built on 2026-11-12. The line a refused declaration writes still waits.
 
+On 2026-11-11 the owner also agreed that Seam, not the plugin's processor,
+runs learn's audio side, and took a review's amendments to that plan the same
+day: it runs once per block before the first piece, not once per piece; the
+link it comes through stays `Driver::of`, off `Parts`; and a borrow of learn
+at the take panics rather than activating without learn. Built on 2026-11-12:
+the engine takes it through `Driver::learn_audio` at each activation, and
+`Parts::learn_audio` went. D50's question now names the activation, not its
+processor.
+
 ### D92. When a saved plain value is captured
 
 [The decision](decisions.md#d92-when-a-saved-plain-value-is-captured)

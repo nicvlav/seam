@@ -1,7 +1,7 @@
 //! What seam-host runs over and over does not allocate: the per-block event
-//! list a format exporter fills and a processor reads, and a plugin's idle
-//! tick when nothing changed, which every instance runs about 60 times a
-//! second.
+//! list a format exporter fills and a processor reads, a block through an
+//! exporter with learn's audio side in it, and a plugin's idle tick when
+//! nothing changed, which every instance runs about 60 times a second.
 
 seam_testkit::install_alloc_gate!();
 
@@ -93,8 +93,8 @@ fn an_idle_tick_of_a_plugin_s_parts_does_not_allocate() {
     let (_params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
     let _history = parts.undo(Bound::default());
     parts.midi_learn(Config::default());
-    let _audio = parts.learn_audio();
     let driver = Driver::of(&parts);
+    let _audio = driver.learn_audio();
     driver.tick();
     assert_no_allocations("idle ticks of parts with undo and learn on", || {
         for _ in 0..64 {
@@ -137,6 +137,24 @@ fn an_idle_tick_through_the_engine_does_not_allocate() {
         || {
             for _ in 0..64 {
                 host.idle();
+            }
+        },
+    );
+    assert_eq!(host.faults(), 0);
+}
+
+#[cfg(all(feature = "cabi", feature = "test-host"))]
+#[test]
+fn a_block_through_the_engine_with_learn_on_does_not_allocate() {
+    let host = seam_host::cabi::TestHost::<Kept>::new();
+    assert_eq!(host.activate(48_000.0, 256, Layout::STEREO), Ok(()));
+    let (mut left, mut right) = (vec![0.25f32; 600], vec![-0.25f32; 600]);
+    host.process_in_place(&mut [&mut left, &mut right], 256);
+    assert_no_allocations(
+        "blocks that run learn's audio side, then the processor",
+        || {
+            for frames in [256, 600, 1, 255] {
+                host.process_in_place(&mut [&mut left, &mut right], frames);
             }
         },
     );

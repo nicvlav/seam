@@ -15,8 +15,8 @@ use serde_json::{Map, Value as Json};
 
 use crate::faults::written;
 use crate::{
-    AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
-    Tail, boundary_faults,
+    AuCodes, Block, Category, Driver, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor,
+    Status, Tail, boundary_faults,
 };
 
 /// The parameters every plugin here declares: one gain, which hosts list
@@ -170,6 +170,9 @@ trait Shell {
     /// The host's load of a block, and what it was answered.
     fn load(&mut self, block: &[u8]) -> Result<(), Self::Refused>;
     fn expect_faults(&self, count: u64);
+    /// Whether the running processor came with learn's audio side; `None`
+    /// with no processor.
+    fn holds_learn_audio(&self) -> Option<bool>;
 }
 
 /// A shell's test host that can create an instance its plugin runs on
@@ -261,6 +264,10 @@ impl<P: Plugin> Shell for crate::vst3::TestHost<P> {
     fn expect_faults(&self, count: u64) {
         crate::vst3::TestHost::expect_faults(self, count);
     }
+
+    fn holds_learn_audio(&self) -> Option<bool> {
+        self.component().holds_learn_audio()
+    }
 }
 
 #[cfg(feature = "cabi")]
@@ -337,6 +344,10 @@ impl<P: Plugin> Shell for crate::cabi::TestHost<P> {
 
     fn expect_faults(&self, count: u64) {
         crate::cabi::TestHost::expect_faults(self, count);
+    }
+
+    fn holds_learn_audio(&self) -> Option<bool> {
+        crate::cabi::TestHost::holds_learn_audio(self)
     }
 }
 
@@ -737,7 +748,8 @@ impl Plugin for Idleless {
             .learn()
             .arm(params.gain.id(), Takes::CONTROLLER)
             .expect("a target");
-        let learn = parts.learn_audio();
+        // As an activation would take it; this plugin is never activated.
+        let learn = Driver::of(&parts).learn_audio().expect("learn is on");
         let registration = zoom(&parts);
         handed(|handed| {
             handed.history = Some(history);
@@ -829,6 +841,106 @@ fn a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported<S: Shell>() {
     }
     assert_eq!(written(), Vec::<String>::new());
     host.expect_faults(0);
+}
+
+/// Keeps its parts with learn on, so each activation takes learn's audio
+/// side.
+struct Learning {
+    _parts: Parts,
+    params: Gain,
+}
+
+impl Plugin for Learning {
+    const INFO: PluginInfo = PluginInfo {
+        midi_input: true,
+        ..Probe::INFO
+    };
+    type Params = Gain;
+    type Processor = Adder;
+
+    fn new(params: Gain, mut parts: Parts) -> Self {
+        parts.midi_learn(Config::default());
+        Learning {
+            _parts: parts,
+            params,
+        }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Adder {
+        Adder(self.params.clone())
+    }
+}
+
+/// Keeps its parts with learn off.
+struct Unlearned {
+    _parts: Parts,
+    params: Gain,
+}
+
+impl Plugin for Unlearned {
+    const INFO: PluginInfo = Learning::INFO;
+    type Params = Gain;
+    type Processor = Adder;
+
+    fn new(params: Gain, parts: Parts) -> Self {
+        Unlearned {
+            _parts: parts,
+            params,
+        }
+    }
+
+    fn activate(&mut self, _: &ProcessSetup) -> Adder {
+        Adder(self.params.clone())
+    }
+}
+
+through_every_shell!(
+    Learning:
+    each_activation_takes_learn_s_audio_side_and_drops_the_last_off_the_audio_thread,
+);
+
+through_every_shell!(
+    Unlearned:
+    an_activation_takes_no_audio_side_of_learn_while_learn_is_off,
+);
+
+through_every_shell!(
+    Probe:
+    an_activation_takes_no_audio_side_of_learn_from_parts_the_plugin_dropped,
+);
+
+fn each_activation_takes_learn_s_audio_side_and_drops_the_last_off_the_audio_thread<S: Shell>() {
+    let mut host = S::create();
+    assert_eq!(host.holds_learn_audio(), None, "no processor yet");
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.holds_learn_audio(), Some(true));
+    host.start();
+    assert_eq!(host.play(1.0), [1.0; 8], "a block runs learn, then plays");
+    // A rebuild takes a fresh one, and the last goes with its processor, on
+    // this thread: dropped on the audio thread, it would panic.
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.holds_learn_audio(), Some(true));
+    assert_eq!(host.play(1.0), [1.0; 8]);
+    host.deactivate();
+    assert_eq!(host.holds_learn_audio(), None);
+    assert_eq!(seen(|seen| (seen.drops, seen.drops_marked)), (2, 0));
+    host.expect_faults(0);
+}
+
+fn an_activation_takes_no_audio_side_of_learn<S: Shell>() {
+    let mut host = S::create();
+    assert_eq!(host.activate(), Ok(()));
+    assert_eq!(host.holds_learn_audio(), Some(false));
+    assert_eq!(host.play(1.0), [1.0; 8]);
+    host.expect_faults(0);
+}
+
+fn an_activation_takes_no_audio_side_of_learn_while_learn_is_off<S: Shell>() {
+    an_activation_takes_no_audio_side_of_learn::<S>();
+}
+
+fn an_activation_takes_no_audio_side_of_learn_from_parts_the_plugin_dropped<S: Shell>() {
+    an_activation_takes_no_audio_side_of_learn::<S>();
 }
 
 /// Version 1 of its schema renamed `level` to `gain`.

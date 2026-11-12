@@ -188,7 +188,7 @@ nothing the audio thread touches is allocated in a block:
 
 ```rust
 fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
-    GainProcessor::new(self.params.clone(), self.parts.learn_audio())
+    GainProcessor::new(self.params.clone())
 }
 ```
 
@@ -282,21 +282,22 @@ parts.midi_learn(Config::default());
 
 It registers learn's own participant, so its mappings save under their own
 key. Like `undo`, it panics on a mistake in the plugin's source: learn turned
-on twice, or a plugin that declares no MIDI input. `activate` above hands each
-fresh processor learn's audio side, a
-[`LearnAudio`](../crates/learn/src/audio.rs), from `parts.learn_audio()`. The
-processor calls `learn.process(block.events)` at the top of `process`.
-Learned writes then land before the parameters are read, in the block the
-controller arrived in.
+on twice, or a plugin that declares no MIDI input. Seam runs the rest: each
+activation takes learn's audio side, a
+[`LearnAudio`](../crates/learn/src/audio.rs), and each block runs it over the
+block's MIDI before the processor. Learned writes then land before the
+parameters are read, in the block the controller arrived in, and the
+processor holds nothing of learn.
 
 To learn, the plugin calls `Learn::arm`, through `parts.learn()`, on the
 gain's id, the parameter's `id()`, with `Takes::CONTROLLER`. The next
-controller the processor sees is captured on the audio thread, and the next
-tick commits it.
+controller a block brings is captured on the audio thread, and the next tick
+commits it.
 
 The plugin declares `midi_input: true` in its `INFO`; learn refuses a plugin
 that does not. Open: no exporter delivers MIDI events yet, so learn is
-exercised by driving the processor directly, as the tests below do.
+exercised by a test that runs learn's audio side itself, as the tests below
+do.
 
 ## 7. The idle tick
 
@@ -319,10 +320,11 @@ changes given by host id, in the host's 0 to 1 (`normalize` converts dB first),
 reads the modes' names through `parameter` and `text`, and carries the saved
 block through `save` and `load`.
 
-Learn and undo are driven on the plugin itself, since a host cannot reach them.
-The test builds it as an exporter does, keeping a
-[`Driver`](../crates/host/src/parts.rs) to tick its parts as the exporter's
-engine would, and the saved state a host would save and load through:
+Learn and undo are driven on the plugin itself, since a host cannot reach
+them, nor yet send MIDI. The test builds the plugin as an exporter does,
+keeping a [`Driver`](../crates/host/src/parts.rs) to do what the exporter's
+engine would: tick the parts, and run learn's audio side before each block.
+It keeps the saved state a host would save and load through too:
 
 ```rust
 fn built() -> (Gain, Driver, Arc<SavedState>) {
@@ -333,8 +335,10 @@ fn built() -> (Gain, Driver, Arc<SavedState>) {
 }
 ```
 
-Then it arms the gain, feeds a controller through the processor, ticks the
-driver, and saves and reloads to check the mapping survives. Run the example's
+Then it activates the plugin and takes learn's audio side from the driver,
+as an activation does, arms the gain, runs a controller through learn's audio
+side and then the processor, ticks the driver, and saves and reloads to check
+the mapping survives. Run the example's
 tests, this guide's check among them, with:
 
 ```sh

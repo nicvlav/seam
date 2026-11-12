@@ -77,7 +77,10 @@ Read these in order to change what happens to a block.
 3. A [block](docs/glossary.md#block) is `Engine::process` (`engine/process.rs`).
    On the audio thread it hands the exporter a `Points` over the engine's
    `Automation` to fill (step 4), applies it to the parameter set, and flushes
-   denormals. Then `run_held` takes the processor out of its `AudioSlot`, and
+   denormals. Then `run_held` takes the processor out of its `AudioSlot`.
+   When the plugin's parts have learn on, learn's audio side, which the
+   activation took through the parts' `Driver`, runs once over the block's
+   MIDI, so learned writes land before the processor reads. Then `pieces`
    calls `Processor::process` with a `Block` (`crates/host/src/audio.rs`) in
    [pieces](docs/glossary.md#piece) of at most the activation's `max_frames`.
    `Channels::run` (`boundary/channels.rs`) builds each piece's channels in
@@ -185,9 +188,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 ## Threads
 
 - [Main](docs/glossary.md#main-thread): owns the plugin, builds the `Processor`
-  at activation, takes it back at deactivation. A tick, about 60 times a
-  second, ticks the parts the plugin keeps, then calls `Plugin::idle`, then
-  tells the host of the plugin's [edits](docs/glossary.md#edit). A session
+  at activation, with learn's audio side when the parts have learn on, and
+  takes both back at deactivation. A tick, about 60 times a second, ticks the
+  parts the plugin keeps, then calls `Plugin::idle`, then tells the host of
+  the plugin's [edits](docs/glossary.md#edit). A session
   restore applies to its participants in the parts' tick; `Driver::tick`
   (`parts.rs`) says what it ticks, and in what order. The engine reaches the
   parts through a `Driver`, which does not keep them alive, so a plugin that
@@ -197,10 +201,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   would reach the host, and a load would never apply session sections to their
   participants ([what ticks a plugin][tick], [when a restore
   applies][applies]).
-- Audio: owns the processor and never waits. A host write may arrive here, and
-  so may the C interface's `get`, which the JUCE adapter's parameter reads call
-  there ([the C interface][cabi]). The audio thread reads parameter values
-  straight from the set's atomic cells.
+- Audio: owns the processor and learn's audio side, and never waits. A host
+  write may arrive here, and so may the C interface's `get`, which the JUCE
+  adapter's parameter reads call there ([the C interface][cabi]). The audio
+  thread reads parameter values straight from the set's atomic cells.
 - Any but audio: the host's save and load, and its text and query calls. Save
   and load go through `SavedState`. Text and query calls read the declarations,
   the parameter store, and the latency, tail and layout the main thread last

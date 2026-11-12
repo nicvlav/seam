@@ -82,9 +82,10 @@ gestures that closed.
 
 ### Driver
 
-What runs a plugin's [parts](#parts) each [tick](#tick): a link to them that
-does not keep them alive, which an exporter's engine holds and ticks just
-before `Plugin::idle`. A test with no host makes one from the parts
+What runs a plugin's [parts](#parts): a link to them that does not keep them
+alive, which an exporter's engine holds. The engine ticks it just before
+`Plugin::idle`, and takes learn's audio side from it at each
+[activation](#activation). A test with no host makes one from the parts
 ([`Driver`](../crates/host/src/parts.rs)).
 
 ### Edit

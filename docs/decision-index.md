@@ -505,6 +505,7 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d50-learns-audio-side-per-activation)
 
+- `crates/host/src/parts.rs`: `Driver::learn_audio`
 - `crates/learn/src/mappings.rs`: `Learn::replace_audio`
 - test `crates/learn/tests/saved.rs`: `a_fresh_audio_side_reads_the_current_mappings_and_the_old_one_stops`
 
@@ -954,18 +955,20 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#d91-who-builds-a-plugins-parts)
 
 - `crates/host/src/cabi/juce.rs`: `juce_settings`
-- `crates/host/src/engine/mod.rs`: `Engine::new_unbound`, `Engine::build`, `Engine::tick`, `Main::on_thread`, `OnThread`
+- `crates/host/src/engine/mod.rs`: `Engine::new_unbound`, `Engine::build`, `Engine::tick`, `Engine::activate`, `Main::on_thread`, `OnThread`
+- `crates/host/src/engine/process.rs`: `Audio::learn`, `pieces`
 - `crates/host/src/faults.rs`: module, `report_refused_declarations`
-- `crates/host/src/parts.rs`: module, `Parts`, `Parts::for_plugin`, `Parts::undo`, `Parts::midi_learn`, `Parts::learn`, `Parts::learn_audio`, `Ticked`, `Ticked::tick`, `Driver`, `Driver::of`, `Driver::tick`
-- `crates/host/src/plugin.rs`: `Plugin`, `Plugin::Params`, `Plugin::new`, `Plugin::idle`
+- `crates/host/src/parts.rs`: module, `Parts`, `Parts::for_plugin`, `Parts::undo`, `Parts::midi_learn`, `Parts::learn`, `Ticked`, `Ticked::tick`, `Driver`, `Driver::of`, `Driver::tick`, `Driver::learn_audio`
+- `crates/host/src/plugin.rs`: `Plugin`, `Plugin::Params`, `Plugin::new`, `Plugin::idle`, `Processor::process`
 - `examples/eq/src/lib.rs`: `ExampleEq`
 - `examples/eq/src/params.rs`: `EqParams`, `BandParams::declare`
 - `examples/gain/src/lib.rs`: `Gain`, `GainParams`
-- test `crates/host/src/cabi/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter`, `Busy`, `an_unbound_instance_holds_no_driver_and_no_timer`, `a_tick_while_the_plugin_is_busy_skips_seam_s_tick_and_its_idle`
-- test `crates/host/src/engine/tests.rs`: `Restoring`, `Idleless`, `the_parameters_new_is_handed_are_the_ones_the_host_writes`, `seam_ticks_the_parts_before_the_plugin_s_idle`, `a_plugin_that_writes_no_idle_still_has_its_parts_ticked`, `a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported`
+- test `crates/host/src/cabi/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_cabi_exporter`, `Busy`, `an_unbound_instance_holds_no_driver_and_no_timer`, `a_tick_while_the_plugin_is_busy_skips_seam_s_tick_and_its_idle`, `an_unbound_instance_takes_no_audio_side_of_learn`, `Learner`, `a_release_refused_on_another_thread_drops_learn_s_audio_side_there`
+- test `crates/host/src/engine/process/tests.rs`: `a_learned_controller_is_written_before_the_processor_reads_in_its_own_block`, `a_controller_in_a_later_piece_is_read_by_every_piece_of_its_block`, `a_controller_a_block_brings_while_a_target_is_armed_is_learned_at_the_next_poll`
+- test `crates/host/src/engine/tests.rs`: `Restoring`, `Idleless`, `Learning`, `Unlearned`, `the_parameters_new_is_handed_are_the_ones_the_host_writes`, `seam_ticks_the_parts_before_the_plugin_s_idle`, `a_plugin_that_writes_no_idle_still_has_its_parts_ticked`, `a_plugin_that_dropped_its_parts_is_ticked_with_nothing_reported`, `each_activation_takes_learn_s_audio_side_and_drops_the_last_off_the_audio_thread`, `an_activation_takes_no_audio_side_of_learn_while_learn_is_off`, `an_activation_takes_no_audio_side_of_learn_from_parts_the_plugin_dropped`
 - test `crates/host/src/vst3/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter`
-- test `crates/host/tests/alloc_gate.rs`: `an_idle_tick_of_a_plugin_s_parts_does_not_allocate`, `an_idle_tick_through_the_engine_does_not_allocate`
-- test `crates/host/tests/plugin.rs`: `one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture`, `learn_is_refused_to_a_plugin_that_takes_no_midi`
+- test `crates/host/tests/alloc_gate.rs`: `an_idle_tick_of_a_plugin_s_parts_does_not_allocate`, `an_idle_tick_through_the_engine_does_not_allocate`, `a_block_through_the_engine_with_learn_on_does_not_allocate`
+- test `crates/host/tests/plugin.rs`: `one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture`, `learn_is_refused_to_a_plugin_that_takes_no_midi`, `the_driver_hands_out_learn_s_audio_side_only_while_learn_is_on_and_the_parts_live`
 - test `crates/host/tests/saved_values.rs`: `a_participant_may_make_a_saved_value_and_sync_from_an_apply_the_tick_runs`
 
 ### D92. When a saved plain value is captured

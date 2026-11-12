@@ -6,8 +6,8 @@
 //! saved state, undo, the session, learn and the VST3 export. The guide
 //! `docs/first-plugin.md` walks through it.
 //!
-//! Open: no exporter delivers MIDI events yet, so learn works only when a
-//! test drives the processor directly.
+//! Open: no exporter delivers MIDI events yet, so learn works only in a test
+//! that runs learn's audio side itself.
 
 #[cfg(feature = "vst3")]
 seam_host::export_vst3!(Gain);
@@ -15,7 +15,7 @@ seam_host::export_vst3!(Gain);
 use seam_host::{
     AuCodes, Block, Category, Layout, Parts, Plugin, PluginInfo, ProcessSetup, Processor, Status,
 };
-use seam_learn::{Config, LearnAudio, LearnError, Takes};
+use seam_learn::{Config, LearnError, Takes};
 use seam_params::{Bool, Changes, Choice, Choices, Float, Params, UiParams, Value};
 use seam_undo::{Bound, History};
 
@@ -79,7 +79,7 @@ impl Gain {
         &self.history
     }
 
-    /// Arms the gain for MIDI learn: the next controller the processor sees
+    /// Arms the gain for MIDI learn: the next controller a block brings
     /// drives it, once the next tick commits it.
     ///
     /// # Errors
@@ -139,14 +139,13 @@ impl Plugin for Gain {
     }
 
     fn activate(&mut self, _setup: &ProcessSetup) -> GainProcessor {
-        GainProcessor::new(self.params.clone(), self.parts.learn_audio())
+        GainProcessor::new(self.params.clone())
     }
 }
 
 /// The audio-thread half: a gain and a mode over the first two channels.
 #[derive(Debug)]
 pub struct GainProcessor {
-    learn: LearnAudio,
     params: GainParams,
     /// What the fields below were last read from.
     changes: Changes,
@@ -156,9 +155,8 @@ pub struct GainProcessor {
 }
 
 impl GainProcessor {
-    fn new(params: GainParams, learn: LearnAudio) -> Self {
+    fn new(params: GainParams) -> Self {
         let mut processor = GainProcessor {
-            learn,
             params,
             changes: Changes::new(),
             gain: 1.0,
@@ -183,9 +181,6 @@ impl GainProcessor {
 
 impl Processor for GainProcessor {
     fn process(&mut self, block: Block<'_, '_>) -> Status {
-        // Learned controllers write the gain first, so they apply in this
-        // block.
-        self.learn.process(block.events);
         self.retune();
         if self.bypassed {
             return Status::Continue;

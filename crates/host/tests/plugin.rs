@@ -234,7 +234,7 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
     // A drag, and a controller learned in the same tick.
     let on = params.on.id();
     parts.params().write(on, 0.0);
-    let mut audio = parts.learn_audio();
+    let mut audio = driver.learn_audio().expect("learn is on");
     parts.learn().arm(on, Takes::CONTROLLER).expect("a target");
     let voice = Voice::Midi1ControlChange {
         controller: 74,
@@ -261,6 +261,43 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
         block["extra"][SESSION_KEY]["mappings"][0]["target"], "on",
         "the same tick's save holds the mapping"
     );
+}
+
+#[test]
+fn the_driver_hands_out_learn_s_audio_side_only_while_learn_is_on_and_the_parts_live() {
+    use seam_learn::{Config, Control, Mapping, Source};
+    use seam_ump::{ChannelVoice, EventList, Voice};
+
+    let (params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
+    let driver = Driver::of(&parts);
+    assert!(driver.learn_audio().is_none(), "learn is off");
+
+    parts.midi_learn(Config::default());
+    let on = params.on.id();
+    parts
+        .learn()
+        .map(on, Mapping::new(Source::any(Control::Cc(74))))
+        .expect("mapped");
+    // Taken after the mapping was made, as a later activation takes it.
+    let mut audio = driver.learn_audio().expect("learn is on");
+    let voice = Voice::Midi1ControlChange {
+        controller: 74,
+        value: 0,
+    };
+    let mut events = EventList::with_capacity(1);
+    events.push(
+        ChannelVoice {
+            group: 0,
+            channel: 0,
+            voice,
+        }
+        .event(0),
+    );
+    audio.process(&events);
+    assert!(!params.on.get(), "its first block read the mapping");
+
+    drop(parts);
+    assert!(driver.learn_audio().is_none(), "the parts are gone");
 }
 
 #[test]

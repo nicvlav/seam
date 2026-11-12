@@ -50,6 +50,11 @@ use crate::parts::Parts;
 ///   refused fails the instance's creation, with the reason in the fault
 ///   report. While the plugin keeps the parts, Seam ticks them before each
 ///   [`idle`](Self::idle).
+/// - **Learn.** When the plugin turned learn on
+///   ([`Parts::midi_learn`]), each activation takes a fresh audio side of
+///   learn, and each block runs it over the block's MIDI before the
+///   processor's first call, so learned writes are in the parameters it
+///   reads. The processor holds no part of learn.
 /// - **Bypass.** A parameter declared with
 ///   [`as_bypass`](seam_params::BoolDecl::as_bypass) is the one the host
 ///   drives as bypass, and the processor implements it. A plugin that
@@ -290,7 +295,7 @@ pub trait Plugin: 'static {
     ///
     /// ```
     /// use seam_host::{Block, Driver, Parts, Plugin, ProcessSetup, Processor, Status};
-    /// use seam_learn::{Config, LearnAudio, SESSION_KEY, Takes};
+    /// use seam_learn::{Config, SESSION_KEY, Takes};
     /// use seam_params::{Declarer, Float, FloatDecl, Params};
     /// use seam_undo::{Bound, History};
     /// # use seam_host::{AuCodes, Category, Layout, PluginInfo};
@@ -308,14 +313,12 @@ pub trait Plugin: 'static {
     ///     }
     /// }
     ///
-    /// /// The processor: learn's audio side reads each block's MIDI first.
-    /// struct Voices {
-    ///     learn: LearnAudio,
-    /// }
+    /// /// The processor. Learned controllers have written the cutoff by the
+    /// /// time it runs.
+    /// struct Voices;
     ///
     /// impl Processor for Voices {
-    ///     fn process(&mut self, block: Block<'_, '_>) -> Status {
-    ///         self.learn.process(block.events);
+    ///     fn process(&mut self, _block: Block<'_, '_>) -> Status {
     ///         Status::Sleep
     ///     }
     /// }
@@ -355,7 +358,7 @@ pub trait Plugin: 'static {
     ///     }
     ///
     ///     fn activate(&mut self, _setup: &ProcessSetup) -> Voices {
-    ///         Voices { learn: self.parts.learn_audio() }
+    ///         Voices
     ///     }
     ///
     ///     fn idle(&mut self) {
@@ -379,7 +382,9 @@ pub trait Plugin: 'static {
     /// tick(&mut synth);
     /// assert_eq!(synth.history.len(), 1);
     ///
-    /// // The user arms learn and turns controller 74, which the host's block brings.
+    /// // The user arms learn and turns controller 74, which the host's block
+    /// // brings. Learn's audio side runs over the block before the processor,
+    /// // as the engine runs it.
     /// # let setup = ProcessSetup {
     /// #     sample_rate: 48_000.0,
     /// #     max_frames: 1,
@@ -388,6 +393,7 @@ pub trait Plugin: 'static {
     /// #     max_out_events: 0,
     /// # };
     /// let mut voices = synth.activate(&setup);
+    /// let mut learn = driver.learn_audio().expect("learn is on");
     /// synth.parts.learn().arm(cutoff, Takes::CONTROLLER)?;
     /// # let voice = Voice::Midi1ControlChange { controller: 74, value: 64 };
     /// # let mut events = EventList::with_capacity(1);
@@ -395,6 +401,7 @@ pub trait Plugin: 'static {
     /// # let (mut left, mut right) = ([0.0_f32; 1], [0.0_f32; 1]);
     /// # let mut out = EventList::with_capacity(0);
     /// # let mut channels = [&mut left[..], &mut right[..]];
+    /// learn.process(&events);
     /// voices.process(Block::new(&mut channels, 1, &events, &mut out));
     /// assert!(!synth.cutoff_learned);
     /// tick(&mut synth);
@@ -484,6 +491,9 @@ pub trait Processor: Send + 'static {
     /// behaviour. The exporter therefore copies the input in only when the
     /// host's buffers are separate. Even the first block after activation
     /// allocates nothing.
+    ///
+    /// Learned controllers have written the parameters before this call, as
+    /// the host's automation has: [`Parts::midi_learn`] says how.
     ///
     /// Open: no exporter carries a block's MIDI either way yet, as
     /// [`PluginInfo::midi_input`] says.
