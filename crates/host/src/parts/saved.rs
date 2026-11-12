@@ -21,6 +21,10 @@ pub(super) trait Synced: fmt::Debug {
 struct ValueSection<T> {
     value: Value<T>,
     default: T,
+    /// The change count its last apply's write left, which the session's
+    /// apply pass captured; `None` before one, or when a write from another
+    /// thread came after it.
+    applied: Option<u64>,
 }
 
 impl<T> Participant for ValueSection<T>
@@ -45,6 +49,8 @@ where
         };
         // Written while the restore applies, so undo records none of it.
         self.value.set(value);
+        let reading = self.value.read();
+        self.applied = (reading.origin == Origin::Restore).then_some(reading.changes);
         Ok(())
     }
 }
@@ -56,7 +62,7 @@ pub(super) struct SavedValue<T> {
     seen: u64,
     registration: Registration,
     /// The session holds its participant weakly, so this keeps it alive.
-    _section: Rc<RefCell<ValueSection<T>>>,
+    section: Rc<RefCell<ValueSection<T>>>,
 }
 
 impl<T> SavedValue<T>
@@ -74,13 +80,14 @@ where
         let section = Rc::new(RefCell::new(ValueSection {
             value: value.clone(),
             default,
+            applied: None,
         }));
         let registration = session.register(key, &section)?;
         Ok(SavedValue {
             value: value.clone(),
             seen: value.changes(),
             registration,
-            _section: section,
+            section,
         })
     }
 }
@@ -90,16 +97,21 @@ where
     T: Clone,
 {
     fn sync(&mut self) {
-        if self.value.changes() == self.seen {
+        let changes = self.value.changes();
+        if changes == self.seen {
             return;
         }
-        // The count and the origin from one lock, so a write after it moves
-        // the count again and the next sync sees it.
-        let reading = self.value.read();
-        self.seen = reading.changes;
-        // The session's apply pass captured a restore's write as it applied
-        // it. Capturing it again would make a load look like an edit.
-        if reading.origin != Origin::Restore {
+        self.seen = changes;
+        // The session's apply pass captured what this value's own apply
+        // wrote, so a load is captured once. Any other write is captured,
+        // one another participant's apply made after it included. The
+        // section is borrowed only while it applies, which never syncs.
+        let applied = self
+            .section
+            .try_borrow()
+            .ok()
+            .and_then(|section| section.applied);
+        if applied != Some(changes) {
             self.registration.changed();
         }
     }

@@ -788,7 +788,9 @@ load is captured once, was a choice made while planning, told to the owner
 that day. Built on 2026-11-11, with one choice made while building it: a
 value serde cannot write as JSON fails a debug assertion, and saves nothing in
 a release build. The owner confirmed the decision on 2026-11-11, both choices
-included.
+included. The same day the skip narrowed from any write a restore made to the
+value's own apply's: a value another participant's apply wrote after its own
+apply was never captured, so a save held the value from before the load.
 
 ### D93. A derive that writes `declare`
 
