@@ -1,15 +1,22 @@
-//! The derive behind `seam_params::Params`, which writes a struct's
-//! `declare` from a `#[param(...)]` mark on each field.
+//! The derives behind `seam_params::Params`, which writes a struct's
+//! `declare` from a `#[param(...)]` mark on each field, and
+//! `seam_params::Choices`, which writes an enum's labels and mappings from
+//! its variants.
 //!
-//! Use it through `seam-params` with its `derive` feature, where it is
-//! documented with examples: the code it writes names `::seam_params`, so it
-//! cannot be used without that crate.
+//! Use them through `seam-params` with its `derive` feature, where they are
+//! documented with examples: the code they write names `::seam_params`, so
+//! they cannot be used without that crate.
 //!
-//! The derive writes what a person would write by hand, and nothing else: one
-//! `impl Params` whose `declare` adds each marked field's declaration and
-//! returns the struct. Each declaration is a named constant that ends in
-//! `checked`, so a plain `cargo check` refuses a key, a range or a label no
-//! parameter could have, on the author's own line.
+//! Each derive writes what a person would write by hand, and constants that
+//! check it. `Params` writes one `impl Params` whose `declare` adds each
+//! marked field's declaration and returns the struct. Each declaration is a
+//! named constant that ends in `checked`, so a plain `cargo check` refuses a
+//! key, a range or a label no parameter could have, on the author's own line.
+//! `Choices` writes one `impl Choices` in the enum's order, a constant that
+//! refuses its labels on the enum, and one that refuses each written
+//! discriminant that is not its variant's position, on that discriminant.
+
+mod choices;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as Tokens};
@@ -32,6 +39,18 @@ const FLAGS: &[&str] = &["bypass"];
 pub fn derive_params(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match params(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+/// Writes `seam_params::Choices` for a fieldless enum.
+///
+/// Documented, with examples, as `seam_params::Choices`.
+#[proc_macro_derive(Choices, attributes(choice))]
+pub fn derive_choices(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match choices::choices(&input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }

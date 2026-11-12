@@ -11,8 +11,8 @@
 //!   its parameter, and [`ParamSet::declare`] freezes them into a
 //!   [`ParamSet`], with one store each: an atomic value and change counter.
 //!   With the `derive` feature, `#[derive(Params)]` writes `declare` from a
-//!   mark on each field. [`ParamSetBuilder`] builds a set from a plain table
-//!   of [`ParamDecl`]s.
+//!   mark on each field, and `#[derive(Choices)]` writes a choice's enum.
+//!   [`ParamSetBuilder`] builds a set from a plain table of [`ParamDecl`]s.
 //! - One handle per writer: [`AudioParams`] (host and [learned
 //!   writes][learned-write]), [`UiParams`] (user [`Gesture`]s, [`Edit`]s, undo
 //!   replays) and [`ProgramParams`] ([syncs][sync] and a saved state's
@@ -142,7 +142,8 @@ pub use clock::{
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
 pub use declare::{
-    BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, Params, key_is_new,
+    BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, Params,
+    discriminant_is_position, key_is_new, labels_are_valid,
 };
 pub use events::{GestureRecord, HostEvent};
 pub use host_events::HostEventDrain;
@@ -193,25 +194,10 @@ pub use watch::Watch;
 /// ```
 /// use seam_params::{Bool, Choice, Choices, Float, ParamSet, Params};
 ///
-/// #[derive(Debug, Clone, Copy, PartialEq)]
+/// #[derive(Debug, Clone, Copy, PartialEq, Choices)]
 /// enum Mode {
 ///     Clean,
 ///     Warm,
-/// }
-///
-/// impl Choices for Mode {
-///     const LABELS: &'static [&'static str] = &["Clean", "Warm"];
-///
-///     fn from_index(index: usize) -> Self {
-///         match index {
-///             0 => Mode::Clean,
-///             _ => Mode::Warm,
-///         }
-///     }
-///
-///     fn index(self) -> usize {
-///         self as usize
-///     }
 /// }
 ///
 /// #[derive(Params)]
@@ -244,3 +230,62 @@ pub use watch::Watch;
 #[cfg(feature = "derive")]
 #[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
 pub use seam_macros::Params;
+
+/// Writes [`Choices`](trait@Choices) for a fieldless enum: its labels, and
+/// its two mappings, in the order the variants are written.
+///
+/// A variant's label is its name, unless a `#[choice("...")]` mark on it
+/// gives one. A label is shown and never saved, so renaming a variant changes
+/// only the text a host shows. [`from_index`](Choices::from_index) gives the
+/// last variant for an index past the end.
+///
+/// The order of the variants is the save format. A choice is saved as its
+/// index, so a variant added at the end keeps saved projects right, but it
+/// moves every position a host sees: automation a host recorded against the
+/// shorter list plays other values. A variant moved, or inserted before the
+/// last, loads an older project into the wrong value unless the plugin's
+/// `SCHEMA_VERSION` goes up and its `migrate` maps the old index to the new.
+/// The derive keeps the labels and both mappings in one order; it cannot see
+/// the order a saved project was written in.
+///
+/// While compiling, the derive refuses a struct, a union, a generic enum, an
+/// enum of fewer than two variants and a variant with fields, each on the
+/// author's own line. A plain `cargo check` refuses, on the enum, labels a
+/// choice could not have: an empty one, one with whitespace at an end, and
+/// two that differ only in ASCII case. A discriminant the author writes must
+/// be the variant's position, and any other value is refused on that
+/// discriminant: an enum whose discriminants mean something else writes
+/// [`Choices`](trait@Choices) by hand.
+///
+/// # Examples
+///
+/// ```
+/// use seam_params::{Choice, Choices, ParamSet, Params};
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Choices)]
+/// enum Slope {
+///     #[choice("12 dB/oct")]
+///     Gentle,
+///     #[choice("24 dB/oct")]
+///     Steep,
+///     Brick,
+/// }
+///
+/// #[derive(Params)]
+/// struct Filter {
+///     #[param("slope", "Slope", Slope::Steep)]
+///     slope: Choice<Slope>,
+/// }
+///
+/// assert_eq!(Slope::LABELS, ["12 dB/oct", "24 dB/oct", "Brick"]);
+/// assert_eq!(Slope::Steep.index(), 1);
+/// assert_eq!(Slope::from_index(usize::MAX), Slope::Brick);
+///
+/// let (set, filter) = ParamSet::declare::<Filter>()?;
+/// assert_eq!(filter.slope.get(), Slope::Steep);
+/// assert_eq!(set.decl(filter.slope.id()).name, "Slope");
+/// # Ok::<(), seam_params::DeclError>(())
+/// ```
+#[cfg(feature = "derive")]
+#[cfg_attr(docsrs, doc(cfg(feature = "derive")))]
+pub use seam_macros::Choices;

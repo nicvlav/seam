@@ -14,7 +14,7 @@ publish = false
 
 # ARCHITECTURE.md's three tiers (core, projections, shells), as the seven layers
 # scripts/check-core-deps.py keeps, each crate depending only on lower ones:
-#   0  seam-testkit (test tools), seam-macros (the parameters' derive)
+#   0  seam-testkit (test tools), seam-macros (the parameters' derives)
 #   1  seam-params, seam-ump
 #   2  seam-undo, seam-session
 #   3  seam-learn (the core's top), seam-bridge (the page)
@@ -52,7 +52,7 @@ windows-sys = "0.61.2"
 # Pinned exactly: the snapshot's soundness rests on this version's source,
 # as crates/learn/src/snapshot.rs checks it.
 triple_buffer = "=9.0.0"
-# The parameters' derive (seam-macros). The versions xtask already locks, so
+# The parameters' derives (seam-macros). The versions xtask already locks, so
 # no third syn joins the build.
 proc-macro2 = "1.0.107"
 quote = "1.0.47"

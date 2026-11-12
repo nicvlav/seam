@@ -1,10 +1,11 @@
 //! `#[derive(Params)]`: a derived struct declares what the same struct
 //! written by hand declares, in the same order, and a struct may hold another
-//! of either kind.
+//! of either kind. `#[derive(Choices)]`: a derived enum maps as the same enum
+//! written by hand does.
 
 use seam_params::{
-    Bool, BoolDecl, Choice, ChoiceDecl, Choices, DeclError, Declarer, Float, FloatDecl, ParamDecl,
-    ParamSet, Params,
+    Bool, BoolDecl, Choice, ChoiceDecl, Choices, DeclError, Declarer, Float, FloatDecl, Kind,
+    ParamDecl, ParamSet, Params,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,4 +209,74 @@ struct Nothing {}
 fn a_struct_of_no_fields_declares_an_empty_set() {
     let (set, Nothing {}) = ParamSet::declare::<Nothing>().expect("valid declarations");
     assert_eq!(set.len(), 0);
+}
+
+/// `Mode`, derived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Choices)]
+enum DerivedMode {
+    Clean,
+    Warm,
+    Hot,
+}
+
+#[test]
+fn a_derived_enum_maps_as_its_twin_written_by_hand() {
+    assert_eq!(DerivedMode::LABELS, Mode::LABELS);
+    let pairs = [
+        (DerivedMode::Clean, Mode::Clean),
+        (DerivedMode::Warm, Mode::Warm),
+        (DerivedMode::Hot, Mode::Hot),
+    ];
+    for (derived, by_hand) in pairs {
+        assert_eq!(derived.index(), by_hand.index());
+    }
+    for index in [0, 1, 2, 3, usize::MAX] {
+        assert_eq!(
+            DerivedMode::from_index(index).index(),
+            Mode::from_index(index).index(),
+            "{index}"
+        );
+    }
+    assert_eq!(DerivedMode::from_index(usize::MAX), DerivedMode::Hot);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Choices)]
+enum Slope {
+    #[choice("12 dB/oct")]
+    Gentle,
+    Steep,
+}
+
+#[derive(Params)]
+struct Filter {
+    #[param("slope", "Slope", Slope::Gentle)]
+    slope: Choice<Slope>,
+}
+
+#[test]
+fn a_mark_gives_a_variant_s_label_and_a_variant_without_one_shows_its_name() {
+    assert_eq!(Slope::LABELS, ["12 dB/oct", "Steep"]);
+    let (set, filter) = ParamSet::declare::<Filter>().expect("valid declarations");
+    assert_eq!(
+        set.decl(filter.slope.id()).kind,
+        Kind::Choice(&["12 dB/oct", "Steep"])
+    );
+}
+
+#[test]
+fn written_discriminants_that_are_the_positions_compile_and_map() {
+    #[derive(Debug, Clone, Copy, PartialEq, Choices)]
+    #[repr(u8)]
+    enum Numbered {
+        Off = 0,
+        Low = 1,
+        High = 2,
+    }
+
+    let all = [Numbered::Off, Numbered::Low, Numbered::High];
+    for (position, value) in all.into_iter().enumerate() {
+        assert_eq!(value.index(), position);
+        assert_eq!(value as usize, position);
+        assert_eq!(Numbered::from_index(position), value);
+    }
 }

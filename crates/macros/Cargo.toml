@@ -1,6 +1,6 @@
 [package]
 name = "seam-macros"
-description = "The derive behind seam-params' Params: a struct of parameters declared from a mark on each field"
+description = "The derives behind seam-params' Params and Choices: a struct of parameters declared from a mark on each field, and an enum of a choice's values"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

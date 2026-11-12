@@ -991,6 +991,18 @@ move its line here; when a decision gains code, add one.
 - test `crates/params/tests/derive.rs`: module, `a_derived_struct_declares_what_the_one_written_by_hand_declares`, `a_derived_struct_and_one_written_by_hand_hold_each_other`, `a_key_two_structs_share_is_refused_when_the_set_is_built`, `a_struct_of_no_fields_declares_an_empty_set`
 - test `crates/params/src/declare/derive_refusals.rs`: module, `FloatArgumentsOnBool`, `OptionTheKindLacks`, `FlagTheKindLacks`, `MisspeltOption`, `ChoiceGivenOtherEnum`, `ArgumentAfterOption`, `RangeBackwards`, `DefaultOutside`, `KeyWithSlash`, `KeyTwice`, `NeitherParameterNorStruct`, `MarkOnOtherType`, `OnEnum`, `OnTupleStruct`, `OnGenericStruct`
 
+### D94. A derive that writes `Choices`
+
+[Record section](decisions.md#d94-a-derive-that-writes-choices)
+
+- `crates/macros/src/lib.rs`: `derive_choices`
+- `crates/macros/src/choices.rs`: module, `choices`, `label`, `misplaced_marks`
+- `crates/params/src/declare.rs`: `labels_are_valid`, `discriminant_is_position`
+- `crates/params/src/declare/rules.rs`: `labels`
+- `examples/gain/src/lib.rs`: `Mode`
+- test `crates/params/tests/derive.rs`: `a_derived_enum_maps_as_its_twin_written_by_hand`, `a_mark_gives_a_variant_s_label_and_a_variant_without_one_shows_its_name`, `written_discriminants_that_are_the_positions_compile_and_map`
+- test `crates/params/src/declare/derive_refusals.rs`: `ChoicesOnStruct`, `ChoicesOnUnion`, `VariantWithFields`, `GenericEnum`, `OneVariant`, `DiscriminantNotPosition`, `PaddedLabel`, `EmptyLabel`, `LabelsDifferInCase`, `MarkNotAString`, `TwoMarks`, `MarkOnEnum`
+
 ## Parameters
 
 ### P1. One store per parameter

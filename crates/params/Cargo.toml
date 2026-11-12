@@ -17,7 +17,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# `#[derive(Params)]`, which writes a struct's `declare`.
+# `#[derive(Params)]`, which writes a struct's `declare`, and
+# `#[derive(Choices)]`, which writes an enum's labels and mappings.
 derive = ["dep:seam-macros"]
 
 [dependencies]

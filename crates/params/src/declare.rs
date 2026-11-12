@@ -505,6 +505,35 @@ pub const fn key_is_new(key: &'static str, earlier: &[&'static str]) {
     }
 }
 
+/// Panics, at compile time in `#[derive(Choices)]`, when `labels` break a
+/// rule a choice's labels must keep.
+///
+/// # Panics
+///
+/// For such labels, which is the point.
+#[doc(hidden)]
+pub const fn labels_are_valid(labels: &'static [&'static str]) {
+    // The rules name no key here: the message is the rule alone.
+    if let Err(error) = rules::labels("", labels) {
+        panic!("{}", error.rule());
+    }
+}
+
+/// Panics, at compile time in `#[derive(Choices)]`, when a variant's written
+/// `discriminant` is not its `position` in the enum.
+///
+/// # Panics
+///
+/// For such a discriminant, which is the point.
+#[doc(hidden)]
+pub const fn discriminant_is_position(discriminant: usize, position: usize) {
+    assert!(
+        discriminant == position,
+        "a written discriminant must be its variant's position, the index a choice is saved \
+         as; a variant moved or inserted changes what saved projects load"
+    );
+}
+
 /// A struct of parameters that declares each one and keeps what it is
 /// handed.
 ///

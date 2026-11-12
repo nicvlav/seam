@@ -1,4 +1,5 @@
-//! The mistakes `#[derive(Params)]` refuses while compiling, as doc tests.
+//! The mistakes `#[derive(Params)]` and `#[derive(Choices)]` refuse while
+//! compiling, as doc tests.
 //!
 //! Each `compile_fail` example sits beside a twin with the mistake fixed,
 //! which compiles: a `compile_fail` example passes on any error at all, so
@@ -386,3 +387,290 @@ struct OnTupleStruct;
 /// }
 /// ```
 struct OnGenericStruct;
+
+/// `Choices` derived for a struct.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// struct Mode {
+///     index: usize,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct ChoicesOnStruct;
+
+/// `Choices` derived for a union.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// union Mode {
+///     index: usize,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct ChoicesOnUnion;
+
+/// A variant with fields.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm(u8),
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct VariantWithFields;
+
+/// A generic enum.
+///
+/// ```compile_fail
+/// use std::marker::PhantomData;
+///
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode<T: Copy> {
+///     Clean,
+///     Warm(PhantomData<T>),
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct GenericEnum;
+
+/// An enum of one variant: a choice has two values at least.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct OneVariant;
+
+/// A written discriminant that is not the variant's position, refused on
+/// the discriminant. One that is the position compiles.
+///
+/// ```compile_fail,E0080
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean = 0,
+///     Hot = 2,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean = 0,
+///     Hot = 1,
+/// }
+/// ```
+struct DiscriminantNotPosition;
+
+/// A label with whitespace at an end, refused on the enum.
+///
+/// ```compile_fail,E0080
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     #[choice("Warm ")]
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     #[choice("Warm too")]
+///     Warm,
+/// }
+/// ```
+struct PaddedLabel;
+
+/// An empty label, refused on the enum.
+///
+/// ```compile_fail,E0080
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     #[choice("")]
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct EmptyLabel;
+
+/// Two labels that differ only in ASCII case, refused on the enum.
+///
+/// ```compile_fail,E0080
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice("warm")]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice("clean")]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct LabelsDifferInCase;
+
+/// A mark that is not one string.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice(12)]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice("12")]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct MarkNotAString;
+
+/// Two marks on one variant.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice("A")]
+///     #[choice("B")]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     #[choice("A")]
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct TwoMarks;
+
+/// A mark on the enum, not on a variant.
+///
+/// ```compile_fail
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// #[choice("Mode")]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+///
+/// ```
+/// use seam_params::Choices;
+///
+/// #[derive(Clone, Copy, Choices)]
+/// enum Mode {
+///     Clean,
+///     Warm,
+/// }
+/// ```
+struct MarkOnEnum;

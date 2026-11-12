@@ -23,7 +23,7 @@ const LABEL_KEY: &str = "label";
 const DEFAULT_LABEL: &str = "Untitled";
 
 /// What each mode does to the sound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Choices)]
 enum Mode {
     /// Gain only.
     Clean,
@@ -31,22 +31,6 @@ enum Mode {
     Warm,
     /// Gain with three times the drive, then a soft clip.
     Hot,
-}
-
-impl Choices for Mode {
-    const LABELS: &'static [&'static str] = &["Clean", "Warm", "Hot"];
-
-    fn from_index(index: usize) -> Self {
-        match index {
-            0 => Mode::Clean,
-            1 => Mode::Warm,
-            _ => Mode::Hot,
-        }
-    }
-
-    fn index(self) -> usize {
-        self as usize
-    }
 }
 
 /// The parameters, in the order hosts list them, each declared where it is

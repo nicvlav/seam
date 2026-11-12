@@ -804,6 +804,18 @@ the derive checks option and flag names against a list a test keeps equal to
 the declarations' methods, and it refuses a generic struct rather than write
 code that cannot compile. The owner confirmed both on 2026-11-11.
 
+### D94. A derive that writes `Choices`
+
+[The decision](decisions.md#d94-a-derive-that-writes-choices)
+
+The owner decided on 2026-11-11, from a review of the plan, that a derive
+writes `Choices`, that a variant's label is its name unless a mark gives one,
+and that a written discriminant must equal the variant's position. The same
+review moved the label check onto the enum and refused an enum of one variant
+there. Built on 2026-11-11, with one choice made while building it: a
+`#[choice]` mark on the enum itself is refused, where the compiler would
+otherwise accept it and ignore it.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish
