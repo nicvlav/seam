@@ -729,12 +729,10 @@ impl Plugin for Idleless {
     type Processor = Adder;
 
     fn new(params: Gain, mut parts: Parts) -> Self {
-        let history = parts.undo(Bound::default()).expect("no other history");
+        let history = parts.undo(Bound::default());
         let level = Value::new(0.0_f32, parts.set());
         history.enroll(&level, "Level").expect("a new value");
-        parts
-            .midi_learn(Config::default())
-            .expect("learn's key is free");
+        parts.midi_learn(Config::default());
         parts
             .learn()
             .arm(params.gain.id(), Takes::CONTROLLER)

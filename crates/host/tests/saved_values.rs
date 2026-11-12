@@ -1,6 +1,7 @@
-//! A plain value saved with the session through `Parts::save`: captured at the
-//! tick, loaded back or defaulted, refused under a taken key, and captured
-//! once for a load, and again for a write another apply makes after it.
+//! A plain value saved with the session through `Parts::saved_value`:
+//! captured at the tick, loaded back or defaulted to what a new instance
+//! starts with, refused under a taken key, and captured once for a load, and
+//! again for a write another apply makes after it.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -86,12 +87,14 @@ fn extra(parts: &Parts) -> serde_json::Value {
     block["extra"].clone()
 }
 
-/// A label saved under `"label"`, `"Untitled"` by default, holding `initial`.
+/// A label saved under `"label"`, `"Untitled"` by default, holding
+/// `initial`, which the next save holds.
 fn label(parts: &mut Parts, initial: &str) -> Value<String> {
-    let label = Value::new(initial.to_owned(), parts.set());
-    parts
-        .save("label", &label, "Untitled".to_owned())
+    let label = parts
+        .saved_value("label", "Untitled".to_owned())
         .expect("a free key");
+    label.set(initial.to_owned());
+    parts.sync();
     label
 }
 
@@ -103,9 +106,8 @@ fn a_saved_value_loads_into_a_second_instance() {
         zoom: 1.0,
         panel: "mixer".to_owned(),
     };
-    let view = Value::new(default.clone(), first.set());
-    first
-        .save("view", &view, default.clone())
+    let view = first
+        .saved_value("view", default.clone())
         .expect("a free key");
     let moved = View {
         zoom: 2.5,
@@ -117,9 +119,8 @@ fn a_saved_value_loads_into_a_second_instance() {
 
     let mut second = parts();
     let second_driver = Driver::of(&second);
-    let reopened = Value::new(default.clone(), second.set());
-    second
-        .save("view", &reopened, default.clone())
+    let reopened = second
+        .saved_value("view", default.clone())
         .expect("a free key");
     second.saved().load(&block).expect("a saved block");
     assert_eq!(reopened.get(), default, "a load applies at the tick");
@@ -139,6 +140,24 @@ fn a_block_saved_without_the_key_loads_the_default() {
     driver.tick();
     assert_eq!(label.get(), "Untitled");
     assert_eq!(extra(&parts), json!({ "label": "Untitled" }));
+}
+
+#[test]
+fn a_new_instance_starts_with_what_a_block_saved_without_the_key_loads() {
+    let older = parts().saved().save();
+
+    let mut fresh = parts();
+    let started = fresh
+        .saved_value("label", "Untitled".to_owned())
+        .expect("a free key");
+
+    let mut loaded = parts();
+    let driver = Driver::of(&loaded);
+    let label = label(&mut loaded, "Drums");
+    loaded.saved().load(&older).expect("a saved block");
+    driver.tick();
+    assert_eq!(label.get(), started.get());
+    assert_eq!(extra(&loaded), extra(&fresh));
 }
 
 #[test]
@@ -213,8 +232,7 @@ fn captures() -> u32 {
 fn a_load_is_captured_once_by_its_apply_and_a_later_change_again() {
     let mut parts = parts();
     let driver = Driver::of(&parts);
-    let count = Value::new(Counted(1), parts.set());
-    parts.save("count", &count, Counted(0)).expect("a free key");
+    let count = parts.saved_value("count", Counted(0)).expect("a free key");
     let block = br#"{"seamStateVersion": 1, "parameters": {}, "extra": {"count": 2}}"#;
 
     let before = captures();
@@ -276,21 +294,22 @@ fn a_second_save_under_one_key_is_refused() {
     let mut parts = parts();
     let driver = Driver::of(&parts);
     let label = label(&mut parts, "Drums");
-    let other = Value::new("Bass".to_owned(), parts.set());
 
-    let refused = parts.save("label", &other, "Untitled".to_owned());
-    assert_eq!(refused, Err(SessionError::KeyTaken("label".to_owned())));
-    other.set("Keys".to_owned());
+    let refused = parts.saved_value("label", "Keys".to_owned());
+    assert_eq!(
+        refused.map(|value| value.get()),
+        Err(SessionError::KeyTaken("label".to_owned()))
+    );
     driver.tick();
     assert_eq!(extra(&parts), json!({ "label": "Drums" }));
     assert_eq!(label.get(), "Drums");
 }
 
 /// A participant the plugin registered by hand that reaches back into the
-/// parts from its apply: it saves a value there, and syncs.
+/// parts from its apply: it makes a saved value there, and syncs.
 struct Reaching {
     parts: Rc<RefCell<Parts>>,
-    label: Value<String>,
+    label: Option<Value<String>>,
 }
 
 impl Participant for Reaching {
@@ -301,23 +320,23 @@ impl Participant for Reaching {
     fn apply(&mut self, section: Option<&Section>) -> Result<(), ApplyError> {
         if section.is_some() {
             let mut parts = self.parts.borrow_mut();
-            parts
-                .save("label", &self.label, "Untitled".to_owned())
+            let label = parts
+                .saved_value("label", "Untitled".to_owned())
                 .expect("a free key");
             parts.sync();
+            self.label = Some(label);
         }
         Ok(())
     }
 }
 
 #[test]
-fn a_participant_may_save_and_sync_from_an_apply_the_tick_runs() {
+fn a_participant_may_make_a_saved_value_and_sync_from_an_apply_the_tick_runs() {
     let parts = Rc::new(RefCell::new(parts()));
     let driver = Driver::of(&parts.borrow());
-    let label = Value::new("Untitled".to_owned(), parts.borrow().set());
     let reaching = Rc::new(RefCell::new(Reaching {
         parts: Rc::clone(&parts),
-        label: label.clone(),
+        label: None,
     }));
     let _registration = parts
         .borrow()
@@ -329,7 +348,8 @@ fn a_participant_may_save_and_sync_from_an_apply_the_tick_runs() {
         "extra": {"reaching": true, "label": "Drums"}}"#;
     parts.borrow().saved().load(block).expect("a saved block");
     driver.tick();
-    assert_eq!(label.get(), "Drums", "saved inside the apply, and loaded");
+    let label = reaching.borrow().label.clone().expect("made in the apply");
+    assert_eq!(label.get(), "Drums", "made inside the apply, and loaded");
     assert_eq!(
         extra(&parts.borrow()),
         json!({ "reaching": true, "label": "Drums" })
@@ -347,8 +367,8 @@ fn a_value_serde_cannot_write_as_json_is_a_contract_panic() {
 
     let mut parts = parts();
     // JSON's object keys are strings, and a pair is not one.
-    let pairs = Value::new(BTreeMap::from([((1_u8, 2_u8), 3_u8)]), parts.set());
+    let pairs = BTreeMap::from([((1_u8, 2_u8), 3_u8)]);
     seam_testkit::contract::expect_contract_panic("serde cannot write a saved value", || {
-        let _ = parts.save("pairs", &pairs, BTreeMap::new());
+        let _ = parts.saved_value("pairs", pairs);
     });
 }

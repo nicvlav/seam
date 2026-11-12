@@ -208,8 +208,14 @@ parameters and drops its parts, so it stays `Send`.
 Undo is one call in `new`, which turns it on with every parameter enrolled:
 
 ```rust
-let history = parts.undo(Bound::default()).expect("no other history");
+let history = parts.undo(Bound::default());
 ```
+
+It returns no `Result`. Its one failure, a history the plugin made of its
+own, is a mistake in the plugin's source, so it panics with what to change,
+and an exporter then refuses to build the instance. The style guide's
+[rule](style.md#seams-own-rules) says which calls panic and which return a
+`Result`.
 
 The `History` it returns records changes to what is enrolled in it. Only
 writes through the parts' [`UiParams`](../crates/params/src/ui.rs) handle,
@@ -234,15 +240,14 @@ assert_eq!(plugin.ui().value(gain), -6.0);
 ## 5. A value that is not a parameter
 
 The label is state the host knows nothing about. A
-[`Value<String>`](../crates/params/src/value.rs) holds it, and three lines in
-`new` give it a life:
+[`Value<String>`](../crates/params/src/value.rs) holds it, and two statements
+in `new` give it a life:
 
 ```rust
-let label = Value::new(DEFAULT_LABEL.to_owned(), parts.set());
-history.enroll(&label, "Rename").expect("a new value");
-parts
-    .save(LABEL_KEY, &label, DEFAULT_LABEL.to_owned())
+let label = parts
+    .saved_value(LABEL_KEY, DEFAULT_LABEL.to_owned())
     .expect("a free key");
+history.enroll(&label, "Rename").expect("a new value");
 ```
 
 Enrolling it makes its changes undo steps: the sets between two ticks are one
@@ -258,25 +263,26 @@ assert_eq!(plugin.history().undo(), Ok(true));
 assert_eq!(plugin.label(), "Untitled");
 ```
 
-[`Parts::save`](../crates/host/src/parts.rs) saves it with the project under a
-stable key, `"label"`, as JSON through serde, so any value serde can write and
-read is saved the same way. A project saved before the label existed loads the
-default. A change, an undo's included, reaches the saved block at the next
-tick; that method says why and what it costs. A load writes the parameters at
-once, before it returns, but the label at the next tick.
+[`Parts::saved_value`](../crates/host/src/parts.rs) makes it and saves it with
+the project under a stable key, `"label"`, as JSON through serde, so any value
+serde can write and read is saved the same way. The default is written once:
+a new instance starts with it, and a project saved before the label existed
+loads it. Undo is a separate call, since a value such as a view setting is
+saved and not undone. A change, an undo's included, reaches the saved block
+at the next tick; that method says why and what it costs. A load writes the
+parameters at once, before it returns, but the label at the next tick.
 
 ## 6. MIDI learn
 
 Learn is one more call in `new`:
 
 ```rust
-parts
-    .midi_learn(Config::default())
-    .expect("learn's key is free");
+parts.midi_learn(Config::default());
 ```
 
 It registers learn's own participant, so its mappings save under their own
-key; the call fails only when that key is taken. `activate` above hands each
+key. Like `undo`, it panics on a mistake in the plugin's source: learn turned
+on twice, or a plugin that declares no MIDI input. `activate` above hands each
 fresh processor learn's audio side, a
 [`LearnAudio`](../crates/learn/src/audio.rs), from `parts.learn_audio()`. The
 processor calls `learn.process(block.events)` at the top of `process`.

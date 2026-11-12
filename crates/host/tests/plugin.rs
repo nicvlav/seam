@@ -211,10 +211,8 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
     use seam_undo::Bound;
 
     let (params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
-    let history = parts.undo(Bound::default()).expect("no other history");
-    parts
-        .midi_learn(Config::default())
-        .expect("learn's key is free");
+    let history = parts.undo(Bound::default());
+    parts.midi_learn(Config::default());
     let zoom = Rc::new(RefCell::new(Zoom(1.0)));
     let _registration = parts.session().register("zoom", &zoom).expect("a free key");
     let saved = Arc::clone(parts.saved());
@@ -269,23 +267,34 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
 #[should_panic(expected = "MIDI learn needs MIDI input")]
 fn learn_is_refused_to_a_plugin_that_takes_no_midi() {
     let (_, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
-    let _ = parts.midi_learn(seam_learn::Config::default());
+    parts.midi_learn(seam_learn::Config::default());
 }
 
 #[test]
-fn undo_is_refused_while_the_plugin_s_own_history_is_alive() {
-    use seam_undo::{Bound, History, HistoryError};
+#[should_panic(expected = "MIDI learn's session key is taken")]
+fn learn_turned_on_twice_panics() {
+    let (_, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
+    parts.midi_learn(seam_learn::Config::default());
+    parts.midi_learn(seam_learn::Config::default());
+}
 
-    let (_, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
+#[test]
+fn undo_panics_while_the_plugin_s_own_history_is_alive() {
+    use seam_testkit::contract::expect_contract_panic;
+    use seam_undo::{Bound, History};
+
+    let (params, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
     let own = History::new(parts.params(), Bound::default()).expect("the first history");
-    assert_eq!(
-        parts.undo(Bound::default()).err(),
-        Some(HistoryError::HistoryExists)
-    );
+    expect_contract_panic("use the one Parts::undo returns", || {
+        let _ = parts.undo(Bound::default());
+    });
     drop(own);
-    let _history = parts.undo(Bound::default()).expect("no other history");
-    assert!(
-        parts.undo(Bound::default()).is_ok(),
-        "a second call hands back the same history"
-    );
+
+    let history = parts.undo(Bound::default());
+    let again = parts.undo(Bound::default());
+    let driver = Driver::of(&parts);
+    parts.params().write(params.on.id(), 0.0);
+    driver.tick();
+    assert_eq!(history.len(), 1);
+    assert_eq!(again.len(), 1, "a second call hands back the same history");
 }

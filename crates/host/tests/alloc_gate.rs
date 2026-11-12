@@ -91,10 +91,8 @@ impl Plugin for Listening {
 #[test]
 fn an_idle_tick_of_a_plugin_s_parts_does_not_allocate() {
     let (_params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
-    let _history = parts.undo(Bound::default()).expect("no other history");
-    parts
-        .midi_learn(Config::default())
-        .expect("learn's key is free");
+    let _history = parts.undo(Bound::default());
+    parts.midi_learn(Config::default());
     let _audio = parts.learn_audio();
     let driver = Driver::of(&parts);
     driver.tick();
@@ -119,10 +117,8 @@ impl Plugin for Kept {
     type Processor = Silent;
 
     fn new(_: Gain, mut parts: Parts) -> Self {
-        parts.undo(Bound::default()).expect("no other history");
-        parts
-            .midi_learn(Config::default())
-            .expect("learn's key is free");
+        parts.undo(Bound::default());
+        parts.midi_learn(Config::default());
         Kept { _parts: parts }
     }
 

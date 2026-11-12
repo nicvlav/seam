@@ -73,6 +73,12 @@ Seam's other crates reach it is `#[doc(hidden)]`, and no public doc links to it.
 - **Panics.** A documented panic must be able to happen, a `debug_assert!`
   included. Where Clippy's `missing_panics_doc` fires on one that cannot,
   `#[expect(..., reason = "...")]` says why.
+- **Mistakes and failures.** A mistake fixed in the caller's source, such as
+  a call made twice or a switch turned on without what it needs, panics, with
+  what to change in the message. It shows the first time the code runs and
+  never depends on a user's data. A failure that can depend on data at run
+  time, such as a key built from a name or a block a host hands back, returns
+  a `Result`.
 - **Names.** `take_*` hands out what exists once, `None` while it lives. A
   getter has no `get_` prefix and no side effect. A key is the stable string a
   thing is declared under; an id is a cheap handle looked up from it once.
