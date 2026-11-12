@@ -116,8 +116,7 @@ jobs:
   # "Real-time sanitizer"). It sees only what the tests execute, and only below
   # a function that carries the mark, which crates/ adds under the cfg
   # `seam_rtsan`. A canary that allocates inside a marked call must abort, so
-  # the lane cannot pass while checking nothing. The lane has not run yet; the
-  # first run settles whether the nightly ships the runtime for this target.
+  # the lane cannot pass while checking nothing.
   rtsan:
     name: realtime sanitizer
     runs-on: ubuntu-24.04
