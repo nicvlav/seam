@@ -2199,9 +2199,10 @@ count with the count it last saw, one atomic load, and captures the value when
 it moved. When the newest write was the value's own apply, the session's apply
 pass captured it as it applied, so `sync` notes the count and captures nothing:
 a load is captured once. A write another participant's apply makes after it is
-a restore's too, and is captured as any other write. So a save between a change and the next tick,
-about 16 ms, holds the value from before the change, and `sync` captures at
-once for a caller that cannot wait; a parameter is never stale this way. The
+a restore's too, and is captured as any other write. So a save between a
+change and the next tick, about 16 ms, holds the value from before the change,
+and `sync` captures at once for a caller that cannot wait; a parameter is
+never stale this way. The
 whole value is captured whenever it moved, so large state saves under several
 keys. A section serde cannot read as the value's type fails its apply, as any
 participant's does (D14). A value serde cannot write as JSON fails a debug
