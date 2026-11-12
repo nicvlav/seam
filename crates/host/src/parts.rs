@@ -1,6 +1,6 @@
 //! What Seam builds for each instance of a plugin and hands to its
 //! [`Plugin::new`]: its parameters, and its [`Parts`]; and the [`Driver`]
-//! that runs the parts' tick.
+//! an engine runs the parts through.
 
 use std::cell::{OnceCell, RefCell};
 use std::ops::DerefMut;
@@ -291,10 +291,10 @@ impl Parts {
 
     /// Returns learn's main-thread side, to arm, map or clear.
     ///
-    /// Under an exporter, learn's audio side is Seam's: calling
+    /// Under an exporter, learn's audio side is Seam's. Calling
     /// [`replace_audio`](Learn::replace_audio) on this learn retires the one
-    /// the running activation's blocks go through: it keeps the mappings it
-    /// last read and sees no later one.
+    /// the running activation's blocks go through, which then keeps the
+    /// mappings it last read and sees no later one.
     ///
     /// # Panics
     ///
@@ -504,8 +504,8 @@ impl Driver {
     /// While the guard [`Parts::learn`] returned is alive. The engine never
     /// holds one when it calls this.
     pub fn learn_audio(&self) -> Option<LearnAudio> {
-        let learn = Rc::clone(self.ticked.upgrade()?.learn.get()?);
-        let audio = learn.borrow_mut().replace_audio();
+        let ticked = self.ticked.upgrade()?;
+        let audio = ticked.learn.get()?.borrow_mut().replace_audio();
         Some(audio)
     }
 }
