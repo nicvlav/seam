@@ -91,7 +91,7 @@ real-time sanitizer, which needs Linux.
 | `JUCE adapter` (macOS, started by hand) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
 | `JUCE adapter` (Windows, started by hand) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `plugin validators (windows)` lane passes Seam's own. |
 | Nightly: `miri` | `seam-host`'s tests, the core crates' unit tests and some integration tests find no undefined behaviour under Stacked Borrows and Tree Borrows (see [Miri](#miri)). |
-| Nightly: `rtsan` (Linux) | A canary that allocates inside a marked call aborts, and the allocation gates and the gate matrix pass under RealtimeSanitizer. Not run yet; see [Real-time sanitizer](#real-time-sanitizer). |
+| Nightly: `rtsan` (Linux) | A canary that allocates inside a marked call aborts, and the allocation gates and the gate matrix pass under RealtimeSanitizer. See [Real-time sanitizer](#real-time-sanitizer). |
 | Nightly: `fuzz` | Each of four `cargo-fuzz` targets ran ten minutes with no crash, no panic and no broken fixpoint (see [Fuzzing](#fuzzing)). |
 | Nightly: `soak` (Linux, Windows) | The matrix's conditions, drawn at random for 30 minutes, with random parameter moves, produced no allocation, fault, NaN, denormal or drift from the processor driven directly. |
 | Weekly: `soak` | The same for 3 hours. |
@@ -288,9 +288,10 @@ A panic on the audio path allocates its payload, and std's hook writes it to
 stderr, inside a marked call, so the sanitizer reports it. It happens only
 after a fault, and the report is the right outcome.
 
-Open: unverified until CI runs it. The sanitizer's runtime must ship with the
-nightly for this target, which Windows cannot show; the first run settles it.
-The sanitizer sees only the paths the tests run, and only on Linux and macOS.
+The lane first ran on 2026-11-10: the pinned nightly ships the sanitizer's
+runtime for the Linux target, the canary aborted with RealtimeSanitizer's
+report, and the allocation gates and the gate matrix passed under it. The
+sanitizer sees only the paths the tests run, and only on Linux and macOS.
 
 ## 3. Concurrency is tested on real threads, without sleeps
 
