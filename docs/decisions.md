@@ -86,7 +86,7 @@ comments never cite an id: they state the reason in words, and
 | D47 | [When does a lone NRPN high byte settle as coarse? (L3, D30)](#d47-when-a-lone-nrpn-high-byte-settles-as-coarse) | When a learn poll finds the same unsettled capture an earlier poll found, and a whole audio block after the one that staged it has ended. A second high byte with no low byte between still settles it at once on the audio thread. | decided |
 | D48 | [How does a plain `Value` serve as a learn `Target`? (L7, D29, D33)](#d48-a-plain-value-as-a-learn-target) | Open. `Value` reports only whether some gesture is open, so `Target::held` cannot leave out learn's own burst. Needed before a plugin learns into a plain value. | held |
 | D49 | [May a session participant write a parameter through the UI handle while it applies? (U16, P6)](#d49-a-participant-writing-a-parameter-during-apply) | No: it writes through `ProgramParams::sync`, which records nothing and tells the host no gesture. A user or edit write through `UiParams` while the applying mark is up fails a debug assertion. | decided |
-| D50 | [How does each activation's processor get learn's audio side? (L5)](#d50-learns-audio-side-per-activation) | `Learn::replace_audio()` makes a fresh one that reads the current mappings; the one handed out before keeps its last table and sees no later edit. | decided |
+| D50 | [How does each activation get learn's audio side? (L5)](#d50-learns-audio-side-per-activation) | `Learn::replace_audio()` makes a fresh one that reads the current mappings; the one handed out before keeps its last table and sees no later edit. Under an exporter the engine takes it (D91). | decided |
 | D51 | [Must a plugin be `Send`? (U5, S6, L7, H1)](#d51-whether-a-plugin-must-be-send) | No. The exporter calls the plugin and drops it on its main thread only. Only a plugin that is `Send` may leave that thread: the C interface binds it to no thread. | decided |
 | D52 | [Who makes the `RestoreClock`? (D19, D20, D39)](#d52-who-makes-the-restoreclock) | The `ParamSet`: `ParamSetBuilder::build` makes one, and nothing else can, so every history, value, list, session and load of one plugin shares one clock by construction. | decided |
 | D53 | [What ticks a plugin with no editor open? (U5, S6, L7, D47)](#d53-what-ticks-a-plugin-with-no-editor-open) | One main-thread timer per instance, at 60 Hz for the instance's life, editor open or not, ticks the plugin's parts and then calls `Plugin::idle`; the editor never ticks. The VST3 exporter and the JUCE adapter supply the timer; CLAP's exporter is to use the host's timer-support extension, and a CLAP host may lack timer support (still to settle). | decided |
@@ -127,7 +127,7 @@ comments never cite an id: they state the reason in words, and
 | D88 | [What does a test host answer for a call the plugin refused? (D60)](#d88-a-call-a-test-host-was-refused) | `Err(Refused)`: the VST3 host's carries the `tresult` it was answered, the C interface's stands for its `false`. | decided |
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
-| D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive; a plugin never ticks them, and a test with no host ticks through a `Driver`. | to confirm |
+| D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive, and runs learn's audio side before each block, taken through it at each activation; a plugin never ticks them or runs learn, and a test with no host does both through a `Driver`. | to confirm |
 | D92 | [When does a plain value saved through `Parts::saved_value` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
 | D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | to confirm |
@@ -878,13 +878,15 @@ the mark.
 
 ### D50. Learn's audio side per activation
 
-**Question and C++ Seam.** How does each activation's processor get learn's
-audio side? (L5) Not applicable: C++ ran learn inside the processor.
+**Question and C++ Seam.** How does each activation get learn's audio side?
+(L5) Not applicable: C++ ran learn inside the processor.
 
 **Rust.** `Learn::replace_audio()` makes a fresh one that reads the current
 mappings; the one handed out before keeps its last table and sees no later edit.
 A VST3 host reactivates at every sample-rate or block-size change, and
-`Learn::new` made the only one.
+`Learn::new` made the only one. Under an exporter the engine takes it at each
+activation, through the parts' `Driver` (D91). A plugin that builds learn by
+hand calls `replace_audio` itself.
 
 **Alternatives.** The alternative was a `Plugin::deactivate` that hands the old
 processor back.
@@ -2165,6 +2167,24 @@ The driver is not `Send`, so the engine keeps one, beside the timer, only for
 a plugin bound to its thread; a plugin that is `Send` holds no parts. A test
 with no host makes a `Driver` from the parts and ticks through it.
 
+Seam runs learn's audio side too, so a plugin's processor never does. At each
+activation, after `Plugin::activate` returns and inside the plugin's borrow,
+the engine takes a fresh one through `Driver::learn_audio` (D50) and keeps it
+beside the processor: it goes to the audio thread with the processor and
+comes back with it, so it is never dropped there. Each block runs it once,
+over the whole block's MIDI, after the host's automation lands and before the
+first piece. The processor then reads learned writes in the block their
+controller arrived in, and learn counts a host's blocks, which times its wait
+for the second half of a 14-bit pair. In a block that plays in pieces, a
+controller in a later piece applies from the block's start, as the host's
+automation does. A plugin with learn off, one that dropped its parts, and so
+a `Send` one, has none. Learn borrowed at the take panics inside the
+exporter's guard, and the activation fails with a fault, rather than going on
+without learn. `Parts` hands out no audio side. `Parts::learn` still lends
+`Learn`, whose `replace_audio` would retire the engine's; its doc says so. A
+test with no host takes one through its `Driver` and runs it before each
+block it hands the processor.
+
 **Alternatives.** The alternatives were each plugin building its parts and
 handing the saved state back through a getter, `Plugin::saved`, which wrote
 the same construction in every plugin and tied nothing to the table the trait
@@ -2184,6 +2204,14 @@ returning what learn committed was left with it: nothing read it, and a plugin
 asks learn for the mapping. A signal that learn committed a mapping comes back
 with the page, whose context menu learns and clears a mapping; it decides
 between a hook on `Plugin` and a change count on learn that the page polls.
+
+The processor holding learn's audio side and running it at the top of its
+`process`, from `Parts::learn_audio` in `activate`, was built first and left
+for the same reason as the plugin's tick: a forgotten call learned nothing,
+and a call made after the parameters were read heard learned writes a block
+late, and neither gave any sign. Running it once per piece, where the
+processor's call had sat, was left too: the host's automation lands once per
+block, and learn would have counted pieces as blocks.
 
 [History](decision-history.md#d91-who-builds-a-plugins-parts)
 

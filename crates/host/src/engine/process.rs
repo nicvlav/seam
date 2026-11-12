@@ -22,6 +22,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use seam_learn::LearnAudio;
 use seam_params::audio_thread;
 
 use super::{Engine, HostLink, Points, Setup};
@@ -42,6 +43,10 @@ pub(super) struct Audio<R> {
     /// The block's MIDI out. Every piece pushes to it, and what a piece
     /// pushed moves to the block's frames once the piece returns.
     out_events: EventList,
+    /// Learn's audio side, while the plugin's parts have learn on: it runs
+    /// over each block's MIDI before the processor does. It comes and goes
+    /// with the processor, so it is never dropped on the audio thread.
+    pub(super) learn: Option<LearnAudio>,
     /// Set when a block panicked in this processor, which then plays
     /// silence. The flag lives with the processor, so the one an activation
     /// builds starts clean.
@@ -89,6 +94,7 @@ impl<R> Audio<R> {
             events: EventList::with_capacity(max_events),
             piece_events: EventList::with_capacity(max_events),
             out_events: EventList::with_capacity(max_out_events),
+            learn: None,
             faulted: false,
         }
     }
@@ -188,8 +194,10 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
     /// One block of `frames` frames.
     ///
     /// First comes the host's automation for it, which `automation` hands over
-    /// queue by queue and which lands before the block. Then the processor
-    /// runs, in pieces when the block is longer than the activation promised.
+    /// queue by queue and which lands before the block. Then learn's audio
+    /// side runs over the block's MIDI, when the plugin's parts have learn
+    /// on, and then the processor, in pieces when the block is longer than
+    /// the activation promised.
     ///
     /// A panic in the processor is caught while it is still held (see
     /// [`run_held`]): the block is silent, and so is every block until the
@@ -274,6 +282,12 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
 /// The processor over the block, in pieces of at most the activation's
 /// frames, answering the last piece's status.
 ///
+/// Learn's audio side runs first, once, over the whole block's events, as the
+/// host's automation lands before the block: so every piece reads what a
+/// learned controller wrote, and learn counts a host's blocks, which times
+/// its wait for the second half of a 14-bit pair. In a block that plays in
+/// pieces, a controller in a later piece applies from the block's start.
+///
 /// Each piece is handed the block's events that fall in it, at frames from
 /// its own start. An event past the block's end plays at its last frame, in
 /// the last piece: dropping it could lose a note-off and leave a note
@@ -301,8 +315,12 @@ unsafe fn pieces<R: Processor>(
         events,
         piece_events,
         out_events,
+        learn,
         ..
     } = audio;
+    if let Some(learn) = learn {
+        learn.process(events);
+    }
     out_events.clear();
     let mut status = Status::Continue;
     let mut offset = 0;

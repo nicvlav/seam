@@ -47,6 +47,8 @@ fn learning_and_a_learned_controller_never_allocate() {
         max_events: 4,
         max_out_events: 0,
     });
+    // As an activation takes it, and as each block runs it.
+    let mut learn = driver.learn_audio().expect("learn is on");
     let mut events = EventList::with_capacity(4);
     let mut out = EventList::with_capacity(0);
     let (mut left, mut right) = (vec![0.25f32; 256], vec![-0.25f32; 256]);
@@ -54,6 +56,7 @@ fn learning_and_a_learned_controller_never_allocate() {
     plugin.learn_gain().expect("armed");
     control_change(&mut events, 7, 64);
     assert_no_allocations("the first block, capturing a controller to learn", || {
+        learn.process(&events);
         let mut channels: [&mut [f32]; 2] = [&mut left, &mut right];
         processor.process(Block::new(&mut channels, 256, &events, &mut out));
     });
@@ -68,6 +71,7 @@ fn learning_and_a_learned_controller_never_allocate() {
         program.sync(mode, f32::from(round % 3));
         program.sync(bypass, f32::from(u8::from(round % 8 == 7)));
         assert_no_allocations("a block, the learned controller moving the gain", || {
+            learn.process(&events);
             let mut channels: [&mut [f32]; 2] = [&mut left, &mut right];
             processor.process(Block::new(&mut channels, 256, &events, &mut out));
         });

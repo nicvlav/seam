@@ -157,6 +157,8 @@ fn a_learned_controller_drives_the_gain() {
         max_events: 4,
         max_out_events: 0,
     });
+    // As an activation takes it, and as each block runs it.
+    let mut learn = driver.learn_audio().expect("learn is on");
     let cc = |controller, value| {
         let mut events = EventList::with_capacity(1);
         let voice = Voice::Midi1ControlChange { controller, value };
@@ -170,7 +172,8 @@ fn a_learned_controller_drives_the_gain() {
         );
         events
     };
-    let run = |processor: &mut _, events: &EventList| {
+    let mut run = |processor: &mut _, events: &EventList| {
+        learn.process(events);
         let (mut left, mut right) = ([0.5_f32; 8], [0.5_f32; 8]);
         let mut out = EventList::with_capacity(0);
         let mut channels = [&mut left[..], &mut right[..]];

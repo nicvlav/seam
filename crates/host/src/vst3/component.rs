@@ -136,6 +136,13 @@ impl<P: Plugin> Component<P> {
         self.engine.get().map(|owned| unsafe { owned.0.as_ref() })
     }
 
+    /// Whether the engine's processor came with learn's audio side; `None`
+    /// before `initialize` or with no processor.
+    #[cfg(test)]
+    pub(crate) fn holds_learn_audio(&self) -> Option<bool> {
+        self.engine()?.holds_learn_audio()
+    }
+
     /// The main bus layout: the engine's, or the first declared before
     /// `initialize`.
     fn layout(&self) -> Layout {

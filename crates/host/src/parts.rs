@@ -249,9 +249,13 @@ impl Parts {
 
     /// Turns MIDI learn on, its mappings saved with the session.
     ///
-    /// A processor takes learn's audio side at each activation, from
-    /// [`learn_audio`](Self::learn_audio), and the plugin's main thread reaches
-    /// learn through [`learn`](Self::learn).
+    /// Seam runs both of learn's sides: the poll at each
+    /// [tick](Driver::tick), and the audio side over each block's MIDI
+    /// before the processor runs, so learned writes are in the parameters
+    /// when it reads them. The plugin turns learn on in
+    /// [`new`](Plugin::new). Turned on later, the audio side arrives with
+    /// the next activation. The plugin's main thread reaches learn through
+    /// [`learn`](Self::learn).
     ///
     /// # Panics
     ///
@@ -287,6 +291,11 @@ impl Parts {
 
     /// Returns learn's main-thread side, to arm, map or clear.
     ///
+    /// Under an exporter, learn's audio side is Seam's: calling
+    /// [`replace_audio`](Learn::replace_audio) on this learn retires the one
+    /// the running activation's blocks go through: it keeps the mappings it
+    /// last read and sees no later one.
+    ///
     /// # Panics
     ///
     /// While learn is off ([`midi_learn`](Self::midi_learn) turns it on), or
@@ -298,15 +307,6 @@ impl Parts {
             .get()
             .expect("MIDI learn is off: call Parts::midi_learn first")
             .borrow_mut()
-    }
-
-    /// Returns a fresh audio side of learn, for one activation's processor.
-    ///
-    /// # Panics
-    ///
-    /// As [`learn`](Self::learn).
-    pub fn learn_audio(&self) -> LearnAudio {
-        self.learn().replace_audio()
     }
 
     /// Returns a plain value that starts at `default` and is saved with the
@@ -389,17 +389,20 @@ impl Parts {
 /// What an exporter's engine holds to run a plugin's [`Parts`]: a link to
 /// them that does not keep them alive.
 ///
-/// Seam makes one for each instance before [`Plugin::new`] takes the parts,
-/// and [ticks](Self::tick) through it before each [`idle`](Plugin::idle), so
-/// a plugin never ticks its parts. It is public for a test that builds a
-/// plugin with no host, which ticks it as the engine would. Clones share the
-/// link.
+/// Seam makes one for each instance before [`Plugin::new`] takes the parts.
+/// Through it the engine [ticks](Self::tick) the parts before each
+/// [`idle`](Plugin::idle), and takes learn's [audio side](Self::learn_audio)
+/// at each activation, which it runs over each block's MIDI before the
+/// processor. So a plugin never ticks its parts and its processor never
+/// runs learn. It is public for a test that builds a plugin with no host,
+/// which does both as the engine would. Clones share the link.
 ///
 /// # Examples
 ///
-/// A test ticks the parts as the engine does, and a dropped plugin's not at
-/// all. The [`Parts`] example records an undo step, and the
-/// [`idle`](Plugin::idle) example saves a learned mapping.
+/// A test ticks the parts as the engine does, and once the plugin that kept
+/// them is dropped, a tick does nothing. The [`Parts`] example records an
+/// undo step, and the [`idle`](Plugin::idle) example learns a controller and
+/// saves its mapping.
 ///
 /// ```
 #[doc = include_str!("../doc/gain.rs")]
@@ -482,5 +485,27 @@ impl Driver {
         if let Some(ticked) = self.ticked.upgrade() {
             ticked.tick();
         }
+    }
+
+    /// Returns a fresh audio side of learn for one activation, or `None`
+    /// while learn is off or once the parts are dropped.
+    ///
+    /// The engine takes one at each activation and runs it over each block's
+    /// MIDI before the processor's call. The one it replaces keeps the
+    /// mappings it last read until it is dropped, off the audio thread, with
+    /// the activation it served. A test with no host takes one after
+    /// [`Plugin::activate`] and runs it before each block it hands the
+    /// processor; the [`idle`](Plugin::idle) example does.
+    ///
+    /// Thread: main.
+    ///
+    /// # Panics
+    ///
+    /// While the guard [`Parts::learn`] returned is alive. The engine never
+    /// holds one when it calls this.
+    pub fn learn_audio(&self) -> Option<LearnAudio> {
+        let learn = Rc::clone(self.ticked.upgrade()?.learn.get()?);
+        let audio = learn.borrow_mut().replace_audio();
+        Some(audio)
     }
 }

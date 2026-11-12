@@ -365,10 +365,10 @@ impl Learn {
     /// Replaces the audio side with a fresh one, for a new activation.
     ///
     /// A VST3 host reactivates at every sample-rate or block-size change, and
-    /// each activation's processor needs its own [`LearnAudio`]. The new one
-    /// reads the current mappings from its first block. The previous one
-    /// keeps the table it last read, sees no later change, and is dropped off
-    /// the audio thread like any other.
+    /// each activation needs its own [`LearnAudio`]. The new one reads the
+    /// current mappings from its first block. The previous one keeps the
+    /// table it last read, sees no later change, and is dropped off the audio
+    /// thread like any other.
     ///
     /// Thread: any but audio.
     ///
@@ -382,8 +382,8 @@ impl Learn {
     /// # let (mut learn, mut audio) = Learn::new(&set, Config::default());
     /// learn.map(gain, Mapping::new(Source::any(Control::Cc(7))))?;
     ///
-    /// // The host reactivates the plugin: the new processor gets its own audio
-    /// // side, which starts from the mappings made so far.
+    /// // The host reactivates the plugin: the new activation gets its own
+    /// // audio side, which starts from the mappings made so far.
     /// let mut reactivated = learn.replace_audio();
     /// reactivated.process(&block(&[(7, 127)])); // controller 7 moves
     /// assert_eq!(set.value(gain), 1.0);

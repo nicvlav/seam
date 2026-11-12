@@ -43,8 +43,8 @@ use crate::table::Route;
 /// # let (mut learn, mut audio) = Learn::new(&set, Config::default());
 /// learn.map(gain, Mapping::new(Source::any(Control::Cc(7))))?;
 ///
-/// // The processor calls this once per block, before it reads its
-/// // parameters: here a block that moves controller 7 to 127.
+/// // Whoever holds it calls this once per block, before the parameters
+/// // are read: here a block that moves controller 7 to 127.
 /// audio.process(&block(&[(7, 127)]));
 /// assert_eq!(set.value(gain), 1.0);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -82,7 +82,7 @@ impl LearnAudio {
     /// undo step, nothing told to the host. A mapped UI-tier target gets the
     /// newest value staged for [`Learn::poll`](crate::Learn::poll), and while
     /// a target is armed the newest legal message is staged for the poll to
-    /// learn. The list is read and never changed, so the processor gets every
+    /// learn. The list is read and never changed, so a processor gets every
     /// packet as the host sent it. The [`LearnAudio`] example shows a block.
     ///
     /// Thread: audio.

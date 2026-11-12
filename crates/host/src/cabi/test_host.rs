@@ -236,6 +236,14 @@ impl<P: Plugin> TestHost<P> {
         unsafe { super::instance::<P>(self.instance) }.map_or(0, super::Instance::<P>::faults)
     }
 
+    /// Whether the instance's processor came with learn's audio side; `None`
+    /// with no processor, or once the instance is destroyed.
+    #[cfg(test)]
+    pub(crate) fn holds_learn_audio(&self) -> Option<bool> {
+        // SAFETY: as in `faults`.
+        unsafe { super::instance::<P>(self.instance) }?.holds_learn_audio()
+    }
+
     /// Declares that the test provokes `count` more faults on purpose: a
     /// panic or a call on the wrong thread.
     pub fn expect_faults(&self, count: u64) {

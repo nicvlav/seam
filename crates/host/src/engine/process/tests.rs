@@ -1,4 +1,9 @@
 use std::num::NonZeroUsize;
+use std::sync::Arc;
+
+use seam_learn::{Config, Control, Learn, Learned, Mapping, Source, Takes};
+use seam_params::{Kind, ParamDecl, ParamId, ParamSet};
+use seam_ump::{ChannelVoice, Voice};
 
 use super::{Audio, pieces};
 use crate::{Block, Event, Layout, Processor, Status};
@@ -122,5 +127,105 @@ fn a_block_of_one_piece_hands_its_events_on_and_the_next_starts_clean() {
     assert!(
         audio.out_events.as_slice().is_empty(),
         "the last block sent none"
+    );
+}
+
+/// Records, for each piece, the gain it read and the controllers it was
+/// handed.
+#[derive(Debug)]
+struct Reads {
+    set: Arc<ParamSet>,
+    gain: ParamId,
+    pieces: Vec<(f32, usize)>,
+}
+
+impl Processor for Reads {
+    fn process(&mut self, block: Block<'_, '_>) -> Status {
+        let events = block.events.as_slice().len();
+        self.pieces.push((self.set.value(self.gain), events));
+        Status::Continue
+    }
+}
+
+/// A MIDI 1.0 control change at `offset`.
+fn control_change(offset: u32, controller: u8, value: u8) -> Event {
+    let voice = Voice::Midi1ControlChange { controller, value };
+    ChannelVoice {
+        group: 0,
+        channel: 0,
+        voice,
+    }
+    .event(offset)
+}
+
+/// A gain from 0 to 1 that starts at 0, learn over it, and block state whose
+/// processor reads the gain, with learn's audio side in it, in pieces of up
+/// to 64 frames.
+fn learning() -> (Learn, Audio<Reads>, ParamId) {
+    let decl = ParamDecl::new("gain", "Gain", Kind::continuous(0.0, 1.0, 0.0, None), 0.0);
+    let set = ParamSet::from_decls([decl]).expect("valid");
+    let gain = set.id("gain").expect("declared");
+    let (learn, learn_audio) = Learn::new(&set, Config::default());
+    let reads = Reads {
+        set,
+        gain,
+        pieces: Vec::new(),
+    };
+    let max_frames = NonZeroUsize::new(64).expect("not 0");
+    let mut audio = Audio::around(reads, Layout::new(0, 0), max_frames, 4, 0);
+    audio.learn = Some(learn_audio);
+    (learn, audio, gain)
+}
+
+#[test]
+fn a_learned_controller_is_written_before_the_processor_reads_in_its_own_block() {
+    let (mut learn, mut audio, gain) = learning();
+    learn
+        .map(gain, Mapping::new(Source::any(Control::Cc(7))))
+        .expect("mapped");
+    audio.events.push(control_change(10, 7, 127));
+    // SAFETY: a layout of no channels, so no buffer is read or written.
+    unsafe { pieces(&mut audio, 32, &[], &[]) };
+
+    assert_eq!(
+        audio.processor.pieces,
+        [(1.0, 1)],
+        "the controller's value, and the controller itself"
+    );
+}
+
+#[test]
+fn a_controller_in_a_later_piece_is_read_by_every_piece_of_its_block() {
+    let (mut learn, mut audio, gain) = learning();
+    learn
+        .map(gain, Mapping::new(Source::any(Control::Cc(7))))
+        .expect("mapped");
+    audio.events.push(control_change(100, 7, 127));
+    // SAFETY: as above.
+    unsafe { pieces(&mut audio, 150, &[], &[]) };
+
+    assert_eq!(
+        audio.processor.pieces,
+        [(1.0, 0), (1.0, 1), (1.0, 0)],
+        "learn ran once over the whole block before the first piece, as the \
+         host's automation lands, and the controller still reaches its piece"
+    );
+}
+
+#[test]
+fn a_controller_a_block_brings_while_a_target_is_armed_is_learned_at_the_next_poll() {
+    let (mut learn, mut audio, gain) = learning();
+    learn.arm(gain, Takes::CONTROLLER).expect("a target");
+    audio.events.push(control_change(0, 74, 64));
+    // SAFETY: as above.
+    unsafe { pieces(&mut audio, 16, &[], &[]) };
+
+    assert!(
+        matches!(learn.poll(), Some(Learned::Mapped { .. })),
+        "the block staged it, the poll commits it"
+    );
+    assert_eq!(
+        learn.mapping(gain).map(|mapping| mapping.source.control),
+        Some(Control::Cc(74))
     );
 }

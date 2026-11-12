@@ -247,7 +247,8 @@ pub(crate) struct Main<P: Plugin, H> {
 /// The main-thread state that is not `Send`, so that an engine bound to no
 /// thread holds none of it.
 struct OnThread {
-    /// Ticks the plugin's parts before each of its idles.
+    /// Ticks the plugin's parts before each of its idles, and gives each
+    /// activation learn's audio side.
     driver: Driver,
     timer: RefCell<Option<Timer>>,
 }
@@ -295,7 +296,9 @@ impl<P: Plugin, H> Main<P, H> {
 ///   thread owns the processor and never waits.
 /// - **Activation** builds a fresh processor for the setup and layout it is
 ///   given and hands it to the audio thread, replacing any running one,
-///   which goes back to the plugin. An activation while active rebuilds, so
+///   which goes back to the plugin. With it goes a fresh audio side of
+///   learn, when the plugin's parts have learn on, which each block runs
+///   before the processor. An activation while active rebuilds, so
 ///   a processor that panicked recovers at any activation. A reset asked of
 ///   the processor it replaces is dropped: the new one has nothing to clear.
 /// - **Host writes** from the audio thread always land. A write through a
@@ -389,10 +392,11 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             // `RefCell`s around them. Everything that is not, the parts'
             // driver and the timer slot, is in `on_thread`, which is `None`
             // here and stays so: `start_timer` starts no timer without it.
-            // The driver `build` made was dropped just above, on the thread
-            // that made it, and `build` hands the parts to the plugin on this
-            // thread and keeps none of them. The state goes from thread to
-            // thread one loan at a time, and drops wherever the engine does.
+            // The driver `build` made stays in the shadowed `main` above and
+            // drops as this closure returns, on the thread that made it, and
+            // `build` hands the parts to the plugin on this thread and keeps
+            // none of them. The state goes from thread to thread one loan at
+            // a time, and drops wherever the engine does.
             unsafe { MainThread::unbound(main, patience) }
         })
     }
@@ -556,6 +560,16 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         self.faults.count()
     }
 
+    /// Whether the processor in the audio slot came with learn's audio side;
+    /// `None` with no processor there.
+    #[cfg(test)]
+    pub(crate) fn holds_learn_audio(&self) -> Option<bool> {
+        self.audio
+            .hold()
+            .as_ref()
+            .map(|audio| audio.learn.is_some())
+    }
+
     /// The timer's handle, once it started.
     #[cfg(all(test, feature = "vst3"))]
     pub(crate) fn timer_handle(&self) -> Option<timer::Handle> {
@@ -614,9 +628,15 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
             self.faults.record(Fault::Reentered);
             return false;
         };
-        let audio = Audio::new(&mut *plugin, setup, layout, |midi| {
+        let mut audio = Audio::new(&mut *plugin, setup, layout, |midi| {
             if midi { MAX_EVENTS } else { 0 }
         });
+        // Inside the plugin's borrow, so none of its methods holds learn's
+        // guard, which would make the take panic.
+        audio.learn = main
+            .on_thread
+            .as_ref()
+            .and_then(|on_thread| on_thread.driver.learn_audio());
         let previous = install(&self.audio, &self.reset, audio);
         self.answers.set_layout(layout);
         main.active.set(true);
