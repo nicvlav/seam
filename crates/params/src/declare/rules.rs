@@ -71,23 +71,39 @@ pub(crate) const fn labels(
     }
     let mut index = 0;
     while index < labels.len() {
-        let label = labels[index];
-        match whitespace(label) {
-            Whitespace::All => return Err(DeclError::EmptyChoiceLabel(key)),
-            Whitespace::AtAnEnd => return Err(DeclError::PaddedChoiceLabel { key, label }),
-            Whitespace::Inside => {}
-        }
-        let mut earlier = 0;
-        while earlier < index {
-            if labels[earlier]
-                .as_bytes()
-                .eq_ignore_ascii_case(label.as_bytes())
-            {
-                return Err(DeclError::DuplicateChoiceLabel { key, label });
-            }
-            earlier += 1;
+        let (earlier, rest) = labels.split_at(index);
+        if let [label, ..] = rest
+            && let Err(error) = label_among(key, label, earlier)
+        {
+            return Err(error);
         }
         index += 1;
+    }
+    Ok(())
+}
+
+/// The rules one label keeps among the labels before it: not empty, not
+/// padded with whitespace as `str::trim` reads it, and not one of `earlier`
+/// but for ASCII case.
+pub(crate) const fn label_among(
+    key: &'static str,
+    label: &'static str,
+    earlier: &[&'static str],
+) -> Result<(), DeclError> {
+    match whitespace(label) {
+        Whitespace::All => return Err(DeclError::EmptyChoiceLabel(key)),
+        Whitespace::AtAnEnd => return Err(DeclError::PaddedChoiceLabel { key, label }),
+        Whitespace::Inside => {}
+    }
+    let mut at = 0;
+    while at < earlier.len() {
+        if earlier[at]
+            .as_bytes()
+            .eq_ignore_ascii_case(label.as_bytes())
+        {
+            return Err(DeclError::DuplicateChoiceLabel { key, label });
+        }
+        at += 1;
     }
     Ok(())
 }

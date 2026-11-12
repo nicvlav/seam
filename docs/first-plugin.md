@@ -49,7 +49,7 @@ seam-ump.workspace = true
 
 `seam-host` builds no exporter by default, so the crate's own `vst3` feature
 turns the VST3 one on, and the tests add the test host. `seam-params`'s
-`derive` feature gives `#[derive(Params)]`. Each
+`derive` feature gives `#[derive(Params)]` and `#[derive(Choices)]`. Each
 `workspace = true` takes its value from the repository's root manifest;
 [your own crate](#your-own-crate) says what replaces it outside this
 repository.
@@ -116,15 +116,25 @@ example EQ's [`EqParams`](../examples/eq/src/params.rs) does: its six bands
 come from a table, a band's shape is not a parameter, and a high-pass has no
 gain.
 
-`Mode` names the choice's values, in the order of its labels:
+`Mode` names the choice's values, and derives
+[`Choices`](../crates/params/src/lib.rs):
 
 ```rust
-impl Choices for Mode {
-    const LABELS: &'static [&'static str] = &["Clean", "Warm", "Hot"];
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Choices)]
+enum Mode {
 ```
 
-`from_index` must give a mode for any index, since the audio thread calls it;
-`Hot` takes every index past the last.
+The derive writes the labels, each a variant's name unless a
+`#[choice("...")]` mark on the variant gives another, and the mappings between
+a mode and its index, in the order of the variants. `Hot` takes every index
+past the last, since the audio thread may read any.
+
+That order is the save format: a mode is saved as its index. A variant added
+at the end keeps saved projects right, but moves every position the host
+sees, so automation recorded against the shorter list plays other values. A
+variant moved, or inserted before the last, needs a higher `SCHEMA_VERSION`
+and a `migrate` that maps the old index to the new (section 3), or an older
+project loads the wrong mode.
 
 Each field is a [typed parameter](../crates/params/src/param.rs) that carries
 its store: `get` returns the gain in dB as an `f32`, the mode as a `Mode` and

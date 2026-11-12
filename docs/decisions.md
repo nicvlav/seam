@@ -130,6 +130,7 @@ comments never cite an id: they state the reason in words, and
 | D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive; a plugin never ticks them, and a test with no host ticks through a `Driver`. | to confirm |
 | D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
+| D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -2262,6 +2263,51 @@ leaving a misspelt option to the compiler, whose hint names the method,
 `with_step`, where the mark wants `step`.
 
 [History](decision-history.md#d93-a-derive-that-writes-declare)
+
+### D94. A derive that writes `Choices`
+
+**Question and C++ Seam.** How does a plugin name a choice's values without
+writing `Choices` by hand, and what does the derive refuse? (D89, D93) Not
+applicable: the C++ Seam's choices were JUCE's string arrays.
+
+**Rust.** `#[derive(Choices)]` writes the `Choices` impl a person would
+write, from the enum alone: `LABELS`, and `from_index` and `index` as matches,
+all three in the order of the variants, so the three cannot drift apart as
+they can by hand. A variant's label is its name, unless a `#[choice("...")]`
+mark on it gives one. A label is shown and never saved, so renaming a variant
+changes only what a host shows. `from_index` gives the last variant for an
+index past the end.
+
+A discriminant the author writes must equal the variant's position: a choice
+is saved as its index, every hand-written impl used `self as usize`, and the
+derive must never disagree with the cast silently. One constant per written
+discriminant, spanned on it, compares the two, so moving or inserting a
+numbered variant fails `cargo check` there. An enum whose discriminants mean
+something else writes `Choices` by hand. Each label is checked once, by a
+constant spanned on its mark, or on the variant's name when that is the
+label, that applies the rules a choice's declaration applies to one label
+among the earlier ones (D90). So a bad label is refused on itself, where the
+enum is declared, and not on each declaration over it. A struct, a union, a
+generic enum, an enum of fewer than two variants, a variant with fields, a
+second mark on a variant, a mark that is not one string and a mark on the enum
+itself are the derive's own errors.
+
+The derive cannot keep a saved project right when the order changes: the
+order of the variants is the save format. Its doc and the guide say so. A
+variant added at the end keeps saved projects right but moves every host
+position; a variant moved or inserted needs a higher `SCHEMA_VERSION` and a
+`migrate`. It lives in `seam-macros` beside `Params`' derive and is
+re-exported under the same feature. The `Choices` trait's own example stays
+hand-written, where the contract is shown, and builds without the feature.
+
+**Alternatives.** The alternatives were a mark required on every variant,
+which writes each label twice for the common case where the name is the
+label; a written discriminant ignored, which lets the derive's index and the
+enum's cast disagree unseen; and the labels checked only at each declaration
+of a choice over the enum, which reports one mistake on every `#[param]` mark
+that uses it, and never for an enum no declaration uses yet.
+
+[History](decision-history.md#d94-a-derive-that-writes-choices)
 
 ## How to read this
 

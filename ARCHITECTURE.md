@@ -25,8 +25,9 @@ reading how Seam works inside, start with
   parameters](docs/glossary.md#typed-parameter), the value
   [store](docs/glossary.md#store), write [origins](docs/glossary.md#origin),
   [gestures](docs/glossary.md#gesture), change counters.
-- `crates/macros`: `#[derive(Params)]`, which `params` re-exports under its
-  `derive` feature: a proc-macro crate below the core, on `syn`.
+- `crates/macros`: `#[derive(Params)]` and `#[derive(Choices)]`, which
+  `params` re-exports under its `derive` feature: a proc-macro crate below the
+  core, on `syn`.
 - `crates/undo`: undo history over parameters, plain values and lists.
 - `crates/session`: saved state: who contributes to it,
   [restore](docs/glossary.md#restore), late

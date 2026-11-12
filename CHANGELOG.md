@@ -46,6 +46,12 @@ delivered to a plugin through an exporter.
   no mark declares a struct of parameters. Each declaration is checked while
   compiling, and so is a key two fields of the struct share: `cargo check`
   reports it on the mark. The example gain derives its parameters.
+- `seam-params`: `#[derive(Choices)]`, under the same feature, writes a
+  choice's enum: its labels and both mappings, in the order of the variants.
+  A label is the variant's name unless a `#[choice("...")]` mark gives one. A
+  written discriminant must be the variant's position, and a label no choice
+  could have is refused: `cargo check` reports either on the author's line.
+  The example gain's `Mode` derives it.
 - `seam-undo`: an undo history that polls once per tick. One gesture is one
   step, transactions group steps, and host automation, restores and learned
   writes never record. A restore clears the history, and the history is bounded
