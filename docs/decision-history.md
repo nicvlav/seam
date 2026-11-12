@@ -785,9 +785,10 @@ other two still wait for the owner.
 The owner decided on 2026-11-10 that a value saved through `Parts::save` is
 captured at the tick, not at the write. Skipping a restore's write, so that a
 load is captured once, was a choice made while planning, told to the owner
-that day. Built on 2026-11-11, with one choice made while building it that
-waits for the owner: a value serde cannot write as JSON fails a debug
-assertion, and saves nothing in a release build.
+that day. Built on 2026-11-11, with one choice made while building it: a
+value serde cannot write as JSON fails a debug assertion, and saves nothing in
+a release build. The owner confirmed the decision on 2026-11-11, both choices
+included.
 
 ### D93. A derive that writes `declare`
 
@@ -796,10 +797,10 @@ assertion, and saves nothing in a release build.
 The owner decided on 2026-11-10 that a derive writes `declare`, with this
 notation and the kind taken from the field's type, landing after the
 hand-written form, and that a mistake in a declaration is a compile error
-where it can be. Built on 2026-11-11, with two choices made while building it
-that wait for the owner: the derive checks option and flag names against a list
-a test keeps equal to the declarations' methods, and it refuses a generic
-struct rather than write code that cannot compile.
+where it can be. Built on 2026-11-11, with two choices made while building it:
+the derive checks option and flag names against a list a test keeps equal to
+the declarations' methods, and it refuses a generic struct rather than write
+code that cannot compile. The owner confirmed both on 2026-11-11.
 
 ## Rules
 
