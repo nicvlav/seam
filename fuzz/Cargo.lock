@@ -250,6 +250,7 @@ dependencies = [
  "seam-session",
  "seam-ump",
  "seam-undo",
+ "serde",
  "serde_json",
 ]
 
