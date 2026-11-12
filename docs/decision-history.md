@@ -778,6 +778,10 @@ and that the handle the engine and tests tick through is `Driver`, made by
 first of the three choices above no longer stands. Built the same day. The
 other two still wait for the owner.
 
+On 2026-11-11 the owner decided D95, which settles learn's refusal of a
+plugin with no MIDI input as a panic, and adds one for learn turned on twice.
+Built on 2026-11-12. The line a refused declaration writes still waits.
+
 ### D92. When a saved plain value is captured
 
 [The decision](decisions.md#d92-when-a-saved-plain-value-is-captured)
@@ -791,6 +795,11 @@ a release build. The owner confirmed the decision on 2026-11-11, both choices
 included. The same day the skip narrowed from any write a restore made to the
 value's own apply's: a value another participant's apply wrote after its own
 apply was never captured, so a save held the value from before the load.
+
+Amended 2026-11-11: the owner decided, from a review of a plan to cut what a
+plugin writes, that one call makes the value and saves it,
+`Parts::saved_value(key, default)`, and that `Parts::save` goes. The rule for
+when a value is captured did not change. Built on 2026-11-12.
 
 ### D93. A derive that writes `declare`
 
@@ -818,6 +827,16 @@ otherwise accept it and ignore it; and each label is checked on itself rather
 than once on the enum, so the error names the label at fault, after the owner
 asked the same day to take what was worth taking from a general enum-naming
 derive.
+
+### D95. Mistakes panic, failures return a `Result`
+
+[The decision](decisions.md#d95-mistakes-panic-failures-return-a-result)
+
+The owner decided on 2026-11-11, from a review of a plan to cut what a plugin
+writes, that a mistake fixed in the plugin's source panics and a failure that
+can depend on data returns a `Result`, and that `Parts::undo` and
+`Parts::midi_learn` follow it. Built on 2026-11-12, with no choice made while
+building it beyond the wording of the two panics.
 
 ## Rules
 

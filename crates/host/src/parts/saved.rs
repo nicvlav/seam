@@ -55,7 +55,7 @@ where
     }
 }
 
-/// One value [`Parts::save`](super::Parts::save) registered.
+/// One value [`Parts::saved_value`](super::Parts::saved_value) made.
 pub(super) struct SavedValue<T> {
     value: Value<T>,
     /// The value's change count when the session last had it.

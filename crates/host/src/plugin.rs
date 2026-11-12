@@ -349,8 +349,8 @@ pub trait Plugin: 'static {
     ///     type Processor = Voices;
     ///
     ///     fn new(params: SynthParams, mut parts: Parts) -> Self {
-    ///         let history = parts.undo(Bound::default()).expect("no other history");
-    ///         parts.midi_learn(Config::default()).expect("learn's key is free");
+    ///         let history = parts.undo(Bound::default());
+    ///         parts.midi_learn(Config::default());
     ///         Synth { parts, params, history, cutoff_learned: false }
     ///     }
     ///

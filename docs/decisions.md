@@ -128,9 +128,10 @@ comments never cite an id: they state the reason in words, and
 | D89 | [How does plugin code name a parameter and read its value? (P1, P10)](#d89-how-plugin-code-names-a-parameter) | As a typed parameter, `Float`, `Bool` or `Choice<E>`, that carries its store and is read with `get`, as an `f32`, a `bool` or the plugin's enum, on any thread. `ParamSet::bind` makes one by key, once, and checks the declaration. `Changes` holds a stamp and asks once per block whether any of the parameters it is given moved. | decided |
 | D90 | [How does a plugin declare its parameters? (P1, P10, D89)](#d90-how-a-plugin-declares-its-parameters) | In one function that returns them: `Params::declare` adds each through a `Declarer`, and a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`, hands back its kind of parameter. A mistake is a compile error where it can be, through `checked`, and otherwise one `DeclError` when `ParamSet::declare` builds the set. | decided |
 | D91 | [Who builds a plugin's parameter set, session and saved state? (D51, D52, D53, D90)](#d91-who-builds-a-plugins-parts) | Seam, once per instance: `Parts::for_plugin` declares the plugin's `Params` and builds the set, the session and the saved state over it, and `Plugin::new` takes the parameters and the `Parts`. The plugin owns its parts, and Seam ticks them before each `idle` through a `Driver`, a link that does not keep them alive; a plugin never ticks them, and a test with no host ticks through a `Driver`. | to confirm |
-| D92 | [When does a plain value saved through `Parts::save` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
+| D92 | [When does a plain value saved through `Parts::saved_value` reach the session? (D44, D91)](#d92-when-a-saved-plain-value-is-captured) | At the tick: `Driver::tick` ends with `Parts::sync`, which captures each saved value whose change count moved, and skips one whose newest write was its own apply's, which the session's apply pass captured already. A save between a change and the next tick holds the value from before the change. | decided |
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
 | D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | to confirm |
+| D95 | [When does a call at the plugin boundary panic, and when does it return a `Result`? (D90, D91)](#d95-mistakes-panic-failures-return-a-result) | A mistake fixed in the plugin's source, such as a call made twice or a switch turned on without what it needs, panics with what to change; a failure that can depend on data at run time returns a `Result`. So `Parts::undo` and `Parts::midi_learn` return no `Result`, and `Parts::saved_value` keeps one. | to confirm |
 
 **Open.** D25 and D48 are held until their stage needs them: D25 `seam-ci`, D48
 the first plugin that learns into a plain value. Each keeps its recommendation
@@ -2143,7 +2144,9 @@ turns them on with `undo` and `midi_learn`. So a plugin that keeps them is not
 example EQ does. Learn sits in a shared cell inside the parts, since the
 session holds it as a participant; `Parts::learn` lends it, and plugin code
 never names `Rc` or `RefCell`. `midi_learn` panics for a plugin that declares
-no MIDI input, since no controller would reach learn.
+no MIDI input, since no controller would reach learn, and for learn turned on
+twice; `undo` panics while a history the plugin made itself is alive. Neither
+returns a `Result` (D95).
 
 Seam ticks the parts, just before each `Plugin::idle`, so a plugin never
 does, and `idle` holds only the plugin's own work. The engine makes a `Driver`
@@ -2187,14 +2190,17 @@ between a hook on `Plugin` and a change count on learn that the page polls.
 ### D92. When a saved plain value is captured
 
 **Question and C++ Seam.** When does a plain value saved through
-`Parts::save` reach the session, and how does Seam know it moved? (D44, D91)
+`Parts::saved_value` reach the session, and how does Seam know it moved? (D44,
+D91)
 The C++ Seam had no such call: each owner of saved state was a participant
 that told the registry of each change itself, as a participant a plugin writes
 by hand still does (D44).
 
-**Rust.** At the tick. `Parts::save` registers a participant Seam owns for the
-value: it captures the value as JSON through serde, and applies a restored
-section, or the default the call was given for a project without the key.
+**Rust.** At the tick. `Parts::saved_value` makes the value, starting at the
+default it is given, and registers a participant Seam owns for it: it captures
+the value as JSON through serde, and applies a restored section, or the same
+default for a project without the key, so a new instance and an older project
+start alike.
 `Driver::tick` ends with `Parts::sync`, which compares each saved value's change
 count with the count it last saw, one atomic load, and captures the value when
 it moved. When the newest write was the value's own apply, the session's apply
@@ -2213,7 +2219,16 @@ assertion where it is captured; a release build saves nothing under its key.
 the value to know what saves it, so a type of its own for the author to hold;
 and a participant written by hand, as the example gain had, which calls
 `Registration::changed` after every write, undo and redo included, and holds
-the old value for good where one call is forgotten.
+the old value for good where one call is forgotten. The call was first
+`Parts::save(key, &value, default)`, over a value the plugin made: the default
+was written twice, as the value's start and as what a project without the key
+loads, and nothing made the two agree. Keeping it beside `saved_value` would
+have left that trap for whoever used it, and nothing needs it: a value is a
+shared handle, cloned to another owner; a default that differs on purpose, so
+an older project keeps its behaviour, is what `Plugin::migrate` is for; and
+anything else is a participant written by hand. `save` without its default was
+the other form left: two calls still, and a value written before the call
+would load that write for a project without the key.
 
 [History](decision-history.md#d92-when-a-saved-plain-value-is-captured)
 
@@ -2308,6 +2323,46 @@ of a choice over the enum, which reports one mistake on every `#[param]` mark
 that uses it, and never for an enum no declaration uses yet.
 
 [History](decision-history.md#d94-a-derive-that-writes-choices)
+
+### D95. Mistakes panic, failures return a `Result`
+
+**Question and C++ Seam.** When does a call at the plugin boundary panic, and
+when does it return a `Result`? (D90, D91) Not applicable: the C++ Seam's
+plugins set up JUCE's parts in their own constructors.
+
+**Rust.** A mistake fixed in the caller's source, such as a call made twice or
+a switch turned on without what it needs, panics, with what to change in the
+message. It shows the first time the code runs and never depends on a user's
+data. A failure that can depend on data at run time, such as a key built from
+a name or a block a host hands back, returns a `Result`. It is D90's rule for
+declarations applied to setup: a mistake there is one error when the instance
+is built, and plugin code has nothing to handle. A panic in `Plugin::new`
+refuses the instance and writes its line, as a refused declaration does (D60,
+D75).
+
+Applied where the plugin's parts are set up: `Parts::undo` returns the
+`History`, and panics while a history the plugin made over `Parts::params` is
+alive; a second call still returns the same history. `Parts::midi_learn`
+returns nothing, and panics when learn's section key is taken, by learn turned
+on twice or a participant the plugin registered, and for a plugin that
+declares no MIDI input. `Parts::saved_value` keeps its `Result`, since its key
+is a string a plugin may build at run time. The core crates keep their
+signatures, `History::enroll` and `Learn::arm` among them: the rule is written
+in `docs/style.md` for what comes next, and applied where the plugin boundary
+already changed, not swept through the workspace.
+
+**Alternatives.** The alternatives were a `Result` from every call, so each
+call in `new` took an `expect` with a message the author had to invent for a
+mistake in their own source, and the calls disagreed: `midi_learn` panicked
+for a plugin with no MIDI input and returned an error for a taken key, `learn`
+panicked while learn was off, and `undo` returned an error; and `Plugin::new`
+returning a `Result`, so that each `expect` became a `?`. Every plugin would
+then pay `Result` and `Ok`, most for calls that cannot fail, every `impl
+Plugin` would break again, and refusing to build an instance on a run-time
+failure, a missing file say, would become the easy path, with a host then
+opening the user's project without the plugin.
+
+[History](decision-history.md#d95-mistakes-panic-failures-return-a-result)
 
 ## How to read this
 

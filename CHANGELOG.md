@@ -91,15 +91,18 @@ delivered to a plugin through an exporter.
   builds the set, the session and the saved state over it, and hands
   `Plugin::new` the parameters and the `Parts`. A declaration refused fails the
   instance, with the reason in the fault report. `Parts::undo` and
-  `Parts::midi_learn` turn undo and learn on. While a plugin keeps its parts,
+  `Parts::midi_learn` turn undo and learn on, and return no `Result`: a
+  mistake in the plugin's source, such as either turned on twice, panics with
+  what to change, which refuses the instance. While a plugin keeps its parts,
   Seam ticks them and the session before each `Plugin::idle`, which holds only
   the plugin's own work; a plugin never ticks them. A plugin declares its
   saved-state migration as `Plugin::SCHEMA_VERSION` and `Plugin::migrate`.
   `Parts::for_plugin` builds a plugin's parts with no host, for tests, which
   tick them through a `Driver`.
 - `seam-host`: a plain value saved with the session in one call.
-  `Parts::save` keeps any value serde can write and read saved under a key, as
-  JSON, and loads a default into it from a project saved without the key. A
+  `Parts::saved_value` makes a value of any type serde can write and read,
+  starting at a default, and keeps it saved under a key, as JSON; a project
+  saved without the key loads the same default. A
   change is captured at the next tick, or at once by `Parts::sync`, and a load
   is captured once, by its apply.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own

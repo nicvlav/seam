@@ -314,7 +314,7 @@ target the plugin registers, written on the UI thread in [bursts](#burst)
 The main thread's turn, about 60 times a second for the instance's life,
 editor open or not. "Once per UI tick" means from that turn: Seam first runs
 `Learn::poll`, `SessionUi::tick`, `History::tick` and the capture of the values
-`Parts::save` keeps saved, through
+`Parts::saved_value` made, through
 [`Driver::tick`](../crates/host/src/parts.rs), and then calls
 [`Plugin::idle`](../crates/host/src/plugin.rs).
 

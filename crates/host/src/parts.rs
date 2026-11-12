@@ -10,7 +10,7 @@ use std::sync::Arc;
 use seam_learn::{Config, Learn, LearnAudio};
 use seam_params::{DeclError, ParamSet, UiParams, Value};
 use seam_session::{Session, SessionError, SessionUi};
-use seam_undo::{Bound, History, HistoryError};
+use seam_undo::{Bound, History};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -87,7 +87,7 @@ use saved::{SavedValue, Synced};
 /// #   type Processor = Silent;
 ///
 ///     fn new(params: Level, mut parts: Parts) -> Self {
-///         let history = parts.undo(Bound::default()).expect("no other history");
+///         let history = parts.undo(Bound::default());
 ///         Gain { parts, params, history }
 ///     }
 /// #
@@ -133,7 +133,7 @@ struct Ticked {
     session: SessionUi,
     history: OnceCell<History>,
     learn: OnceCell<Rc<RefCell<Learn>>>,
-    /// The values [`Parts::save`] keeps saved, in the order it was called.
+    /// The values [`Parts::saved_value`] made, in the order they were made.
     values: RefCell<Vec<Box<dyn Synced>>>,
 }
 
@@ -226,19 +226,25 @@ impl Parts {
     ///
     /// The history is pruned to `bound`; a later call's is ignored.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns [`HistoryError::HistoryExists`] when the plugin made a history
-    /// of its own over [`params`](Self::params), which is still alive.
-    pub fn undo(&mut self, bound: Bound) -> Result<History, HistoryError> {
+    /// When the plugin made a history of its own over
+    /// [`params`](Self::params) that is still alive: it uses the one this call
+    /// returns instead. In an exporter, the instance is then not built.
+    pub fn undo(&mut self, bound: Bound) -> History {
         if let Some(history) = self.ticked.history.get() {
-            return Ok(history.clone());
+            return history.clone();
         }
-        let history = History::new(&self.params, bound)?;
+        let history = History::new(&self.params, bound).unwrap_or_else(|error| {
+            panic!(
+                "undo is on through a history the plugin made over Parts::params ({error}): \
+                 use the one Parts::undo returns, and make no other"
+            )
+        });
         history.enroll_params();
         // Empty, as just checked: nothing between the two runs plugin code.
         let _ = self.ticked.history.set(history.clone());
-        Ok(history)
+        history
     }
 
     /// Turns MIDI learn on, its mappings saved with the session.
@@ -247,24 +253,20 @@ impl Parts {
     /// [`learn_audio`](Self::learn_audio), and the plugin's main thread reaches
     /// learn through [`learn`](Self::learn).
     ///
-    /// # Errors
-    ///
-    /// Returns [`SessionError`] when learn's section key,
-    /// [`SESSION_KEY`](seam_learn::SESSION_KEY), is taken: learn is on
-    /// already, or a participant registered under it.
-    ///
     /// # Panics
     ///
     /// When the plugin declares no MIDI input
     /// ([`PluginInfo::midi_input`](crate::PluginInfo::midi_input)): no
-    /// controller would ever reach learn. In an exporter, the instance is
-    /// then not built.
+    /// controller would ever reach learn. And when learn's section key,
+    /// [`SESSION_KEY`](seam_learn::SESSION_KEY), is taken: learn is on
+    /// already, or a participant the plugin registered holds it. In an
+    /// exporter, the instance is then not built.
     ///
     /// # Examples
     ///
     /// The [`idle`](Plugin::idle) example turns learn on and learns a
     /// controller.
-    pub fn midi_learn(&mut self, config: Config) -> Result<(), SessionError> {
+    pub fn midi_learn(&mut self, config: Config) {
         assert!(
             self.midi_input,
             "MIDI learn needs MIDI input: set the plugin's PluginInfo::midi_input"
@@ -272,11 +274,15 @@ impl Parts {
         // Each activation takes an audio side of its own.
         let (learn, _audio) = Learn::new(&self.set, config);
         let learn = Rc::new(RefCell::new(learn));
-        Learn::attach(&learn, &self.ticked.session)?;
+        if let Err(error) = Learn::attach(&learn, &self.ticked.session) {
+            panic!(
+                "MIDI learn's session key is taken ({error}): turn learn on once, \
+                 and register no participant under seam_learn::SESSION_KEY"
+            );
+        }
         // Empty: learn holds its key while it lives, so the attach above
         // would have failed had learn been on.
         let _ = self.ticked.learn.set(learn);
-        Ok(())
     }
 
     /// Returns learn's main-thread side, to arm, map or clear.
@@ -303,8 +309,13 @@ impl Parts {
         self.learn().replace_audio()
     }
 
-    /// Saves `value` with the session under `key` from now on, and loads
-    /// `default` into it from a project saved without the key.
+    /// Returns a plain value that starts at `default` and is saved with the
+    /// session under `key`. A project saved without the key loads `default`
+    /// into it too, so a new instance and an older project cannot differ.
+    ///
+    /// The value is shared: clone it to whoever else reads or writes it.
+    /// Undo records it once it is [enrolled](History::enroll), a separate
+    /// call, since a value such as a view setting is saved and not undone.
     ///
     /// A change is captured at the next [tick](Driver::tick), not when it is
     /// written. So a save the host makes between the two, about one tick or
@@ -323,7 +334,9 @@ impl Parts {
     ///
     /// Returns [`SessionError::KeyTaken`] when another saved value, learn or
     /// a participant the plugin registered holds `key`, and
-    /// [`SessionError::EmptyKey`] for an empty key. Nothing is saved then.
+    /// [`SessionError::EmptyKey`] for an empty key. Nothing is saved then. A
+    /// key may be built at run time, from a name say, so this is an error to
+    /// handle and not a panic.
     ///
     /// # Panics
     ///
@@ -335,12 +348,10 @@ impl Parts {
     /// ```
     #[doc = include_str!("../doc/gain.rs")]
     /// use seam_host::Driver;
-    /// use seam_params::Value;
     ///
     /// let (_params, mut parts) = Parts::for_plugin::<Gain>()?;
     /// let driver = Driver::of(&parts);
-    /// let label = Value::new(String::from("Untitled"), parts.set());
-    /// parts.save("label", &label, String::from("Untitled"))?;
+    /// let label = parts.saved_value("label", String::from("Untitled"))?;
     ///
     /// // What the host's next save holds.
     /// let saved = |parts: &Parts| -> serde_json::Result<serde_json::Value> {
@@ -355,17 +366,18 @@ impl Parts {
     /// assert_eq!(saved(&parts)?["extra"]["label"], "Drums");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn save<T>(&mut self, key: &str, value: &Value<T>, default: T) -> Result<(), SessionError>
+    pub fn saved_value<T>(&mut self, key: &str, default: T) -> Result<Value<T>, SessionError>
     where
         T: Clone + Serialize + DeserializeOwned + 'static,
     {
-        let saved = SavedValue::register(&self.ticked.session, key, value, default)?;
+        let value = Value::new(default.clone(), &self.set);
+        let saved = SavedValue::register(&self.ticked.session, key, &value, default)?;
         self.ticked.values.borrow_mut().push(Box::new(saved));
-        Ok(())
+        Ok(value)
     }
 
-    /// Captures each value [`save`](Self::save) keeps saved that moved since
-    /// the last tick, as the tick does, for a caller whose next save must
+    /// Captures each value [`saved_value`](Self::saved_value) made that moved
+    /// since the last tick, as the tick does, for a caller whose next save must
     /// already hold a change.
     ///
     /// Thread: main.
@@ -392,11 +404,9 @@ impl Parts {
 /// ```
 #[doc = include_str!("../doc/gain.rs")]
 /// use seam_host::Driver;
-/// use seam_params::Value;
 ///
 /// let (params, mut parts) = Parts::for_plugin::<Gain>()?;
-/// let label = Value::new(String::from("Untitled"), parts.set());
-/// parts.save("label", &label, String::from("Untitled"))?;
+/// let label = parts.saved_value("label", String::from("Untitled"))?;
 /// let driver = Driver::of(&parts);
 /// let saved = std::sync::Arc::clone(parts.saved());
 /// let saved_label = || -> serde_json::Result<serde_json::Value> {
@@ -446,15 +456,15 @@ impl Driver {
     /// 3. The history's tick, when undo is on: it records what changed since
     ///    the last tick. Its place does not matter: it clears the history
     ///    whenever a restore was stored or applied since it last looked.
-    /// 4. [`Parts::sync`]: it captures each value [`Parts::save`] keeps saved
-    ///    that moved since the last tick, a write undo replayed included. It
-    ///    skips one whose last write was its own apply's, which the session's
-    ///    tick captured already, but not one another participant's apply
-    ///    wrote after it. Until this step a save holds the value from before
-    ///    the change.
+    /// 4. [`Parts::sync`]: it captures each value [`Parts::saved_value`]
+    ///    made that moved since the last tick, a write undo replayed
+    ///    included. It skips one whose last write was its own apply's, which
+    ///    the session's tick captured already, but not one another
+    ///    participant's apply wrote after it. Until this step a save holds
+    ///    the value from before the change.
     ///
     /// Nothing of the parts is held while the session's tick runs, so a
-    /// participant the plugin registered may call [`Parts::save`] or
+    /// participant the plugin registered may call [`Parts::saved_value`] or
     /// [`Parts::sync`] from its apply. Learn is held while it polls, so a
     /// learn target's code may not reach learn through [`Parts::learn`].
     ///

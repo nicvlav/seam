@@ -966,16 +966,16 @@ move its line here; when a decision gains code, add one.
 - test `crates/host/src/vst3/tests.rs`: `Unbuilt`, `a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter`
 - test `crates/host/tests/alloc_gate.rs`: `an_idle_tick_of_a_plugin_s_parts_does_not_allocate`, `an_idle_tick_through_the_engine_does_not_allocate`
 - test `crates/host/tests/plugin.rs`: `one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture`, `learn_is_refused_to_a_plugin_that_takes_no_midi`
-- test `crates/host/tests/saved_values.rs`: `a_participant_may_save_and_sync_from_an_apply_the_tick_runs`
+- test `crates/host/tests/saved_values.rs`: `a_participant_may_make_a_saved_value_and_sync_from_an_apply_the_tick_runs`
 
 ### D92. When a saved plain value is captured
 
 [Record section](decisions.md#d92-when-a-saved-plain-value-is-captured)
 
-- `crates/host/src/parts.rs`: `Parts::save`, `Parts::sync`, `Driver::tick`
+- `crates/host/src/parts.rs`: `Parts::saved_value`, `Parts::sync`, `Driver::tick`
 - `crates/host/src/parts/saved.rs`: module, `Synced`, `ValueSection`, `SavedValue`, `SavedValue::register`, `SavedValue::sync`
 - `examples/gain/src/lib.rs`: `Gain`
-- test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_value_another_apply_writes_after_its_own_is_captured_at_the_tick`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`
+- test `crates/host/tests/saved_values.rs`: module, `a_saved_value_loads_into_a_second_instance`, `a_block_saved_without_the_key_loads_the_default`, `a_new_instance_starts_with_what_a_block_saved_without_the_key_loads`, `a_section_of_the_wrong_shape_fails_its_apply_and_stays_saved`, `a_save_holds_the_value_from_before_a_change_until_a_tick_or_a_sync`, `a_value_written_from_another_thread_is_captured_at_the_next_tick`, `a_load_is_captured_once_by_its_apply_and_a_later_change_again`, `a_value_another_apply_writes_after_its_own_is_captured_at_the_tick`, `a_second_save_under_one_key_is_refused`, `a_value_serde_cannot_write_as_json_is_a_contract_panic`
 - test `examples/gain/tests/gain.rs`: `the_label_saves_and_loads_back`, `undo_and_redo_restore_the_label_and_its_saved_state`
 
 ### D93. A derive that writes `declare`
@@ -1002,6 +1002,14 @@ move its line here; when a decision gains code, add one.
 - `examples/gain/src/lib.rs`: `Mode`
 - test `crates/params/tests/derive.rs`: `a_derived_enum_maps_as_its_twin_written_by_hand`, `a_mark_gives_a_variant_s_label_and_a_variant_without_one_shows_its_name`, `written_discriminants_that_are_the_positions_compile_and_map`
 - test `crates/params/src/declare/derive_refusals.rs`: `ChoicesOnStruct`, `ChoicesOnUnion`, `VariantWithFields`, `GenericEnum`, `OneVariant`, `DiscriminantNotPosition`, `PaddedLabel`, `EmptyLabel`, `LabelsDifferInCase`, `MarkNotAString`, `TwoMarks`, `MarkOnEnum`
+
+### D95. Mistakes panic, failures return a `Result`
+
+[Record section](decisions.md#d95-mistakes-panic-failures-return-a-result)
+
+- `crates/host/src/parts.rs`: `Parts::undo`, `Parts::midi_learn`, `Parts::saved_value`
+- `examples/gain/src/lib.rs`: `Gain`
+- test `crates/host/tests/plugin.rs`: `learn_is_refused_to_a_plugin_that_takes_no_midi`, `learn_turned_on_twice_panics`, `undo_panics_while_the_plugin_s_own_history_is_alive`
 
 ## Parameters
 

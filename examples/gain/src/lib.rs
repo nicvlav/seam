@@ -122,16 +122,13 @@ impl Plugin for Gain {
     type Processor = GainProcessor;
 
     fn new(params: GainParams, mut parts: Parts) -> Self {
-        let history = parts.undo(Bound::default()).expect("no other history");
-        parts
-            .midi_learn(Config::default())
-            .expect("learn's key is free");
+        let history = parts.undo(Bound::default());
+        parts.midi_learn(Config::default());
 
-        let label = Value::new(DEFAULT_LABEL.to_owned(), parts.set());
-        history.enroll(&label, "Rename").expect("a new value");
-        parts
-            .save(LABEL_KEY, &label, DEFAULT_LABEL.to_owned())
+        let label = parts
+            .saved_value(LABEL_KEY, DEFAULT_LABEL.to_owned())
             .expect("a free key");
+        history.enroll(&label, "Rename").expect("a new value");
 
         Gain {
             parts,
