@@ -492,7 +492,7 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d48-a-plain-value-as-a-learn-target)
 
-- `crates/learn/src/target.rs`: `Target::held`
+- `crates/learn/src/target.rs`: `Target`, `Target::held`
 
 ### D49. A participant writing a parameter during apply
 
