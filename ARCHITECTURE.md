@@ -236,8 +236,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   the SysEx manufacturer ID its identity needs.
 - Learn in VST3: hidden proxy parameters in a reserved id range carry
   controllers. They form a grid of 16 channels by 130 (the 128 control changes,
-  channel pressure, pitch bend), mapped through `IMidiMapping`. A pool of them
-  for MIDI 2.0 assignable controllers is bound through `IMidiMapping2`. The
+  channel pressure, pitch bend), listed through both `IMidiMapping` and
+  `IMidiMapping2`, since Cubase asks only the second when a plugin has it. A
+  pool of them for MIDI 2.0 assignable controllers is bound through
+  `IMidiMapping2`. The
   `vst3` crate's `Midi2Controller` is four bytes where the SDK's is two, so the
   exporter must define its own.
 - Learn into a plain value: its target writes with `Origin::Learn` and opens

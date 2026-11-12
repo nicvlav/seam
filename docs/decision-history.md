@@ -96,7 +96,11 @@ Storing the applying thread's id in the clock was ST-5's suggestion.
 
 [The decision](decisions.md#d22-controllers-reaching-learn-in-vst3)
 
-Decided by the owner, the MIDI 2.0 pool included.
+Decided by the owner, the MIDI 2.0 pool included. The check in Cubase, first
+planned for the exporter's MIDI work, ran early as a probe plugin on
+2026-11-06 and passed. It found that Cubase asks only `IMidiMapping2` when a
+plugin has it, so the grid, first listed through `IMidiMapping` alone, is
+listed through both. Recorded 2026-11-12.
 
 ### D30. An NRPN data entry with only its high byte
 

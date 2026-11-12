@@ -58,7 +58,7 @@ comments never cite an id: they state the reason in words, and
 | D19 | [Where do the restore counter and the applying-a-restore mark live? (U16, S6, S12)](#d19-the-restore-counter-and-the-applying-mark) | In a `RestoreClock` in `seam-params`: a count of restores stored and a count completed. The applying mark is the applying thread's own, so only that thread's writes record nothing. | decided |
 | D20 | [What closes the window D13 opens between a restore's store and its apply? (U16, S5)](#d20-the-window-between-a-restores-store-and-its-apply) | Undo clears its history when either count has moved: at its first operation after a restore is stored, and again when that restore's apply completes. | decided |
 | D21 | [What does a learn binding record of where its MIDI came from? (L2, L9)](#d21-what-a-learn-binding-records-of-its-midi-source) | The UMP group and the channel, each with −1 meaning any, in the source and in every saved `midiLearn` entry from schema 1. | decided |
-| D22 | [How do controllers reach learn in VST3, which delivers them only as parameter changes? (L2, L3)](#d22-controllers-reaching-learn-in-vst3) | The VST3 exporter owns hidden proxy parameters in a reserved id range: a 16 × 130 grid through `IMidiMapping`, and a fixed pool for MIDI 2.0 assignable controllers. Still to build. | decided |
+| D22 | [How do controllers reach learn in VST3, which delivers them only as parameter changes? (L2, L3)](#d22-controllers-reaching-learn-in-vst3) | The VST3 exporter owns hidden proxy parameters in a reserved id range: a 16 × 130 grid listed through both `IMidiMapping` and `IMidiMapping2`, and a fixed pool for MIDI 2.0 assignable controllers. Checked in Cubase; still to build. | decided |
 | D23 | [How does the processor send MIDI?](#d23-how-the-processor-sends-midi) | `Processor::process` takes one `Block`: the channels in place, the frame count, the events in, and an events-out list whose capacity `ProcessSetup::max_out_events` fixes at activation. | decided |
 | D24 | [Who answers MIDI-CI when a plugin must answer for itself?](#d24-answering-midi-ci) | A VST3 host speaks MIDI-CI for the plugin, so the VST3 exporter projects declarations onto VST3's interfaces. Everywhere else a core-tier crate, `seam-ci`, answers, later. | decided |
 | D25 | [Who owns the SysEx manufacturer ID that a MIDI-CI identity needs? (D24)](#d25-the-sysex-manufacturer-id) | None: a business answer. The working group's helper uses `0x7D`, which is reserved for non-commercial use. | held |
@@ -450,8 +450,10 @@ pressure, pitch bend) whenever the plugin took MIDI input
 assignable controllers.
 
 **Rust.** The VST3 exporter owns hidden proxy parameters in a reserved id range
-that no key's hash may land in (D31): the same 16 × 130 grid, mapped through
-`IMidiMapping`, and a fixed pool for MIDI 2.0 assignable controllers. While a
+that no key's hash may land in (D31): the same 16 × 130 grid, and a fixed pool
+for MIDI 2.0 assignable controllers. The grid is listed twice, through
+`IMidiMapping` and through `IMidiMapping2`'s list of MIDI 1.0 controllers,
+since a host that finds the second may never ask the first. While a
 target is armed, `IMidiLearn2` binds the controller it reports to a free proxy,
 published through `IMidiMapping2` and
 `restartComponent(kMidiCCAssignmentChanged)`; capture still happens on the audio
@@ -461,9 +463,18 @@ The exporter turns each proxy change into a UMP at its offset, so learn has one
 input path, and a proxy is never a target, so a learned write never reaches the
 host as an edit. A product's own controller block (a fixed NRPN range, say) is
 pre-mapped by that plugin, not built into Seam. Still to build: it comes with
-the VST3 exporter's MIDI input, after the exporter's first pass, whose first
-task checks in Cubase that the host re-reads `IMidiMapping2` after that restart;
-the grid does not depend on it.
+the VST3 exporter's MIDI input.
+
+A probe plugin checked the route in Cubase 16 on 2026-11-06. Cubase read both
+of `IMidiMapping2`'s lists at load and again inside every
+`restartComponent(kMidiCCAssignmentChanged)`, 12 times of 12, on the main
+thread. A controller moved to another proxy reached the new one 4 times of 4,
+with no stale routing. A controller heard through `IMidiLearn2` reached the
+proxy just bound to it 14 to 21 ms after the restart, 4 times of 4, and hidden
+proxies received their controllers as visible parameters do. Cubase never
+called `IMidiMapping` or `IMidiLearn` while the plugin had the second versions,
+which is why the grid is listed through both. Not seen: a MIDI 2.0
+controller, since no MIDI 2.0 source was connected.
 
 **Alternatives.** The alternatives were the grid alone, as JUCE built it, with
 the pool after the Cubase check, or no learn in VST3 until a later stage.
