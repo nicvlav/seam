@@ -202,8 +202,9 @@ struct Listed {
 ///   key the plugin does not list, are dropped unanswered and counted in
 ///   [`refusals`](Self::refusals). Nothing the page sends makes it panic.
 ///
-/// Dropping it ends the page session, closing the gestures still open, as
-/// an editor does when it closes.
+/// [`end_session`](Self::end_session), or dropping it, ends the page
+/// session, closing the gestures still open, as an editor does when it
+/// closes.
 ///
 /// # Examples
 ///
@@ -379,6 +380,42 @@ impl<O: Outbox> Dispatcher<O> {
                 payload,
             });
         }
+    }
+
+    /// Ends the page session: the gestures the page left open close, once,
+    /// and nothing is posted until the page's next `ready`.
+    ///
+    /// A shell calls it when its page goes away and the dispatcher stays, as
+    /// an editor's does when its window closes and may open again: the
+    /// commands stay with the dispatcher. Dropping the dispatcher does the
+    /// same.
+    ///
+    /// Thread: UI.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use seam_params::{Kind, ParamDecl, ParamSet};
+    /// use seam_bridge::{Commands, Dispatcher};
+    ///
+    /// # let set = ParamSet::from_decls([ParamDecl::new("gain", "Gain", Kind::Bool, 0.0)])?;
+    /// # let gain = set.id("gain").expect("declared");
+    /// # let ui = set.take_ui().expect("the first UI handle");
+    /// let mut native = Dispatcher::new(ui.clone(), Commands::new(), Vec::<String>::new());
+    /// native.receive(r#"{"type":"ready","protocol":2}"#);
+    /// native.receive(r#"{"type":"gestureBegin","param":"gain"}"#);
+    /// assert!(ui.is_open(gain));
+    ///
+    /// // The editor closes mid-drag: the drag ends for the host.
+    /// native.end_session();
+    /// assert!(!ui.is_open(gain));
+    /// # Ok::<(), seam_params::DeclError>(())
+    /// ```
+    pub fn end_session(&mut self) {
+        for listed in &mut self.params {
+            listed.gestures.clear();
+        }
+        self.live = false;
     }
 
     /// Returns what it refused since it was made. [`Refusals`] shows them.

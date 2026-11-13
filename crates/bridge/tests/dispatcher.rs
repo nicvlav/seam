@@ -396,6 +396,31 @@ fn dropping_it_closes_the_gestures_the_page_left_open() {
     assert_eq!(plugin.history.len(), 1);
 }
 
+#[test]
+fn an_ended_session_closes_its_gestures_and_posts_nothing_until_a_ready() {
+    let mut plugin = Plugin::listening();
+    plugin.page_sends(begin("gain"));
+    plugin.page_sends(set("gain", 0.75));
+    plugin.page_got();
+    // The editor closes, and may open again with the same dispatcher.
+    plugin.native.end_session();
+    assert!(!plugin.ui.is_open(plugin.gain()));
+    let (begins, ends) = begins_and_ends(&plugin.host_heard());
+    assert_eq!((begins, ends), (1, 1));
+    plugin.set.audio().host_write(plugin.gain(), 1.0);
+    plugin.native.tick();
+    assert!(plugin.page_got().is_empty(), "no page is listening");
+    // The page of the next open starts a session of its own.
+    plugin.page_sends(ready(PROTOCOL_VERSION));
+    let got = plugin.page_got();
+    let [NativeMessage::Snapshot { params, .. }] = &got[..] else {
+        panic!("a snapshot, got {got:?}");
+    };
+    assert_eq!(params[0].text, "12 dB");
+    plugin.native.tick();
+    assert!(plugin.page_got().is_empty(), "the snapshot showed it");
+}
+
 /// The commands the fixture's calls name, and two more.
 fn commands() -> Commands {
     Commands::new()

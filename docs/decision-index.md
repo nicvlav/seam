@@ -1775,8 +1775,8 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#b5-a-ready-starts-a-new-page-session)
 
-- `crates/bridge/src/dispatcher.rs`: `Dispatcher::ready`, `Listed`
-- test `crates/bridge/tests/dispatcher.rs`: `a_repeated_ready_mid_drag_closes_the_drag_once_and_answers_again`, `a_reject_ends_the_session_before_it_too`, `dropping_it_closes_the_gestures_the_page_left_open`
+- `crates/bridge/src/dispatcher.rs`: `Dispatcher::ready`, `Dispatcher::end_session`, `Listed`
+- test `crates/bridge/tests/dispatcher.rs`: `a_repeated_ready_mid_drag_closes_the_drag_once_and_answers_again`, `a_reject_ends_the_session_before_it_too`, `dropping_it_closes_the_gestures_the_page_left_open`, `an_ended_session_closes_its_gestures_and_posts_nothing_until_a_ready`
 
 ### M1. Menus: A menu is flat, renderer-neutral data: items with namespaced string ids and parent-id nesting, in contribution order, invoked by id, never by position.
 

@@ -148,7 +148,8 @@ page in a plugin window, and MIDI delivered to a plugin through an exporter.
   every `ready`, `set` and `gestureEnd`, writes the page's drags through
   `UiParams` as a user's, runs the commands a plugin adds to `Commands`, tells
   the page of every change at the tick, and drops and counts what it cannot
-  read (`Refusals`).
+  read (`Refusals`). `end_session` ends a page session when the page goes away
+  and the dispatcher stays.
 - `page`: React hooks (`useParam`, `useEvent`, `useCommand`) over a pluggable
   transport. A held queue keeps the writes made before the native side answers
   and sends them in the order the page made them. A native message of the wrong
