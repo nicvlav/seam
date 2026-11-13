@@ -118,6 +118,19 @@ impl Entry {
     }
 }
 
+/// What a save writes, as [`RunTimeSaved::to_write`] copies it.
+struct ToWrite {
+    held: Option<Held>,
+    live: Vec<Live>,
+}
+
+/// A parameter a save writes live.
+struct Live {
+    path: Arc<str>,
+    param: ParamRef,
+    learned: Option<Json>,
+}
+
 /// What naming a declare's parameters asks of learn.
 #[derive(Debug, Default)]
 pub(crate) struct Naming {
@@ -361,34 +374,25 @@ impl RunTimeSaved {
     /// state from before the load. Entries are taken in path order; one
     /// with no room is left out, and the room fault is flagged.
     pub(crate) fn write(&self, block: &mut String, room: usize) {
-        let inner = self.lock();
+        let ToWrite { held, live } = self.to_write();
+        // Formatted outside the lock, so a declare on the main thread waits
+        // only while the parameters are copied.
         let mut entries: BTreeMap<&str, (Option<Json>, Option<Json>)> = BTreeMap::new();
-        let since = match &inner.held {
-            Some(held) => {
-                for (path, entry) in held.entries.iter() {
-                    let learned = entry
-                        .learned
-                        .as_ref()
-                        .map(|mapping| encode_mapping(path, mapping));
-                    entries.insert(path, (entry.value.clone(), learned));
-                }
-                Some(held.at)
-            }
-            None => None,
-        };
-        for (path, serial) in &inner.paths {
-            let Some(named) = inner.named.get(serial) else {
-                continue;
-            };
-            if since.is_some_and(|at| named.declared_at <= at) {
-                continue;
-            }
-            let Some(param) = named.held() else {
-                continue;
-            };
+        for (path, entry) in held.iter().flat_map(|held| held.entries.iter()) {
+            let learned = entry
+                .learned
+                .as_ref()
+                .map(|mapping| encode_mapping(path, mapping));
+            entries.insert(path, (entry.value.clone(), learned));
+        }
+        for Live {
+            path,
+            param,
+            learned,
+        } in &live
+        {
             let value = value_json(param.decl(), param.value());
-            let learned = inner.learned.get(path).cloned();
-            entries.insert(path, (Some(value), learned));
+            entries.insert(path, (Some(value), learned.clone()));
         }
         let mut used = FRAME_BYTES;
         let mut written = Vec::with_capacity(entries.len());
@@ -408,7 +412,6 @@ impl RunTimeSaved {
             }
             written.push(format!("{}:{}", Json::from(path), Json::Object(entry)));
         }
-        drop(inner);
         if written.is_empty() {
             return;
         }
@@ -417,6 +420,33 @@ impl RunTimeSaved {
         block.push_str("\":{");
         block.push_str(&written.join(","));
         block.push('}');
+    }
+
+    /// What a save writes, copied under the lock: the load's entries while
+    /// they are held, and each path's parameter that the plugin holds and no
+    /// held entry stands for, with its learned mapping.
+    fn to_write(&self) -> ToWrite {
+        let inner = self.lock();
+        let since = inner.held.as_ref().map(|held| held.at);
+        let live = inner
+            .paths
+            .iter()
+            .filter_map(|(path, serial)| {
+                let named = inner.named.get(serial)?;
+                if since.is_some_and(|at| named.declared_at <= at) {
+                    return None;
+                }
+                Some(Live {
+                    path: Arc::clone(path),
+                    param: named.held()?,
+                    learned: inner.learned.get(path).cloned(),
+                })
+            })
+            .collect();
+        ToWrite {
+            held: inner.held.clone(),
+            live,
+        }
     }
 
     /// Takes the faults flagged since the last call: two parameters the

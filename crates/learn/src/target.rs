@@ -81,14 +81,6 @@ pub enum TargetId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RunTimeId(u64);
 
-impl RunTimeId {
-    /// Returns the serial of the store it names.
-    #[doc(hidden)]
-    pub fn serial(self) -> u64 {
-        self.0
-    }
-}
-
 /// What learn's calls take: a [`TargetId`], a [`ParamId`], a [`CustomId`],
 /// or a typed parameter by reference, one the host lists or one made at
 /// run time.
