@@ -101,7 +101,7 @@ use saved::{SavedValue, Synced};
 /// let gain = Gain::new(params, parts);
 ///
 /// // An editor's drag, recorded as one undo step at the next tick.
-/// gain.parts.params().write(gain.params.gain.id(), -6.0);
+/// gain.parts.ui().write(gain.params.gain.id(), -6.0);
 /// driver.tick();
 /// assert_eq!(gain.history.len(), 1);
 ///
@@ -206,7 +206,7 @@ impl Parts {
 
     /// Returns the handle an editor writes parameters through, which undo
     /// records.
-    pub fn params(&self) -> &UiParams {
+    pub fn ui(&self) -> &UiParams {
         &self.params
     }
 
@@ -229,7 +229,7 @@ impl Parts {
     /// # Panics
     ///
     /// When the plugin made a history of its own over
-    /// [`params`](Self::params) that is still alive: it uses the one this call
+    /// [`ui`](Self::ui) that is still alive: it uses the one this call
     /// returns instead. In an exporter, the instance is then not built.
     pub fn undo(&mut self, bound: Bound) -> History {
         if let Some(history) = self.ticked.history.get() {
@@ -237,7 +237,7 @@ impl Parts {
         }
         let history = History::new(&self.params, bound).unwrap_or_else(|error| {
             panic!(
-                "undo is on through a history the plugin made over Parts::params ({error}): \
+                "undo is on through a history the plugin made over Parts::ui ({error}): \
                  use the one Parts::undo returns, and make no other"
             )
         });

@@ -2387,7 +2387,7 @@ refuses the instance and writes its line, as a refused declaration does (D60,
 D75).
 
 Applied where the plugin's parts are set up: `Parts::undo` returns the
-`History`, and panics while a history the plugin made over `Parts::params` is
+`History`, and panics while a history the plugin made over `Parts::ui` is
 alive; a second call still returns the same history. `Parts::midi_learn`
 returns nothing, and panics when learn's section key is taken, by learn turned
 on twice or a participant the plugin registered, and for a plugin that

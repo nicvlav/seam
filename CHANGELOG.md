@@ -89,7 +89,8 @@ delivered to a plugin through an exporter.
 - `seam-host`: Seam builds each instance's parts. `Plugin::Params` names the
   struct that declares the parameters a host is shown; an exporter declares it,
   builds the set, the session and the saved state over it, and hands
-  `Plugin::new` the parameters and the `Parts`. A declaration refused fails the
+  `Plugin::new` the parameters and the `Parts`, whose `ui` lends the handle an
+  editor writes parameters through. A declaration refused fails the
   instance, with the reason in the fault report. `Parts::undo` and
   `Parts::midi_learn` turn undo and learn on, and return no `Result`: a
   mistake in the plugin's source, such as either turned on twice, panics with
