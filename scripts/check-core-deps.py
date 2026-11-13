@@ -32,8 +32,9 @@ import sys
 from pathlib import Path
 
 # A crate may depend only on crates of a lower layer. Learn is above session
-# because it reads the session's saved block; the shells, which depend on
-# everything, are on top; xtask drives the example.
+# because it reads the session's saved block; the WebView shell joins the
+# bridge to the host; the plugins, which depend on everything, are on top;
+# xtask drives the examples.
 LAYERS = {
     "seam-testkit": 0,
     "seam-macros": 0,
@@ -44,12 +45,13 @@ LAYERS = {
     "seam-learn": 3,
     "seam-bridge": 3,
     "seam-host": 4,
-    "xtask": 6,
+    "seam-webview": 5,
+    "xtask": 7,
 }
 
 # Every crate under examples/ is a plugin: it depends on the host and below,
 # and nothing depends on it but xtask.
-PLUGIN_LAYER = 5
+PLUGIN_LAYER = 6
 
 # The core and the projection that must build with no window, WebView or host:
 # every crate of layers 1 to 3, which is everything but the test tools (layer 0)

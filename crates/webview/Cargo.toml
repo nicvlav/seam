@@ -1,0 +1,35 @@
+[package]
+name = "seam-webview"
+description = "A plugin's page in the host's window: a WebView through wry, joined to the page protocol's native side"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["audio", "plugin", "webview", "wry"]
+categories = ["multimedia::audio", "gui"]
+publish.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+seam-bridge.workspace = true
+seam-host.workspace = true
+seam-params.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The WebView exists on Windows only here, so Linux and macOS build this crate
+# with no WebView library: a page there offers no editor.
+[target.'cfg(windows)'.dependencies]
+wry.workspace = true
+
+[dev-dependencies]
+seam-host = { workspace = true, features = ["vst3", "test-host"] }
+
+[lints]
+workspace = true

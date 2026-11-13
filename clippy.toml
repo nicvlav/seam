@@ -1,2 +1,2 @@
 # Words doc comments may use without backticks, on top of clippy's own list ("..").
-doc-valid-idents = ["WebView", "CMake", "AArch64", "SysEx7", "AUv3", ".."]
+doc-valid-idents = ["WebView", "WebView2", "CMake", "AArch64", "SysEx7", "AUv3", ".."]

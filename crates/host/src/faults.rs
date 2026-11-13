@@ -336,6 +336,14 @@ impl Faults {
     }
 }
 
+/// Writes one line where the fault lines go, for Seam's shell crates, which
+/// report what happens outside any call of an instance's: a page's start-up
+/// time, say. Not for the audio thread.
+#[doc(hidden)]
+pub fn report_line(line: &str) {
+    write_line(line);
+}
+
 /// Writes one diagnostic line where a developer looks: an attached
 /// debugger on Windows, stderr elsewhere. In this crate's tests, a list the
 /// test reads.

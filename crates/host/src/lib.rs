@@ -162,6 +162,8 @@ pub use boundary::ParentWindow;
 pub use editor::{Editor, Size};
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
+#[doc(hidden)]
+pub use faults::report_line;
 pub use info::{AuCodes, Category, Feature, Layout, PluginInfo};
 pub use parts::{Driver, Maker, Parts};
 pub use plugin::{Plugin, Processor, Tail};
