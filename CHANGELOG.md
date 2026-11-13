@@ -121,9 +121,10 @@ delivered to a plugin through an exporter.
   learned as listed ones are, and read by the audio thread in the block after
   a write. The saved block keeps them under `runTime`, by path, each with its
   learned mapping. A load writes none of them on the host's thread: one
-  declared under a path it holds is born holding the saved value, and one
-  made before it takes its value once the load's pass has finished. Two under
-  one path, and a save with no room for them, are faults.
+  declared under a path it holds is born holding the saved value. Once the
+  load's pass has finished, each one still held takes the load's mapping for
+  its path, and one made before the load its value too. Two under one path,
+  and a save with no room for them, are faults.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
   main-thread timer.
 - The C interface (`export_cabi!`) and its generated header, `include/seam.h`,

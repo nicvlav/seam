@@ -111,9 +111,9 @@ impl Maker {
     ///
     /// As [`Parts::declare`](super::Parts::declare) says.
     pub fn declare<P: Params>(&self, scope: &str) -> P {
-        let held = self.saved.run_time().held_values(scope);
+        let (held, loads) = self.saved.run_time().held_values(scope);
         let (params, made) = Declarer::run_time::<P>(self.saved.set(), held);
-        self.name(scope, &made);
+        self.name(scope, &made, loads);
         params
     }
 
@@ -126,99 +126,73 @@ impl Maker {
     ///
     /// As [`Parts::declare`](super::Parts::declare) says.
     pub fn add<D: Declaration>(&self, scope: &str, decl: D) -> D::Param {
-        let held = self.saved.run_time().held_values(scope);
+        let (held, loads) = self.saved.run_time().held_values(scope);
         let (param, made) = Declarer::run_time_one(self.saved.set(), held, decl);
-        self.name(scope, &made);
+        self.name(scope, &made, loads);
         param
     }
 
-    /// Names each parameter made under its path, and learns it to the
-    /// controller a load holds for that path. Learn drops the mapping of
-    /// each parameter whose path a new one took.
-    fn name(&self, scope: &str, made: &[ParamRef]) {
+    /// Names each parameter made under its path, its declare having seen
+    /// `loads` loads. Learn drops the mapping of each parameter whose path a
+    /// new one took. A load's mapping for a new one waits for the load's
+    /// pass to finish, as its other mappings do.
+    fn name(&self, scope: &str, made: &[ParamRef], loads: u64) {
+        // Borrowed first, so a declare while the plugin holds learn panics
+        // whether or not a path is taken.
         let ticked = self.ticked.upgrade();
         let mut learn = ticked
             .as_ref()
             .and_then(|ticked| ticked.learn.get())
             .map(|learn| learn.borrow_mut());
-        let clock = self.saved.set().clock();
-        let now = clock.writer().stored_count();
-        let applying = clock.reader().applying();
-        let run_time = self.saved.run_time();
-        let naming = run_time.name(scope, made, now, applying);
-        let Some(learn) = learn.as_deref_mut() else {
-            return;
-        };
-        for param in &naming.replaced {
-            learn.unmap(param);
-        }
-        for (param, mapping) in &naming.learned {
-            // Refused only when learn is full: the mapping is lost, as one
-            // in learn's own section would be.
-            if learn.map(param, *mapping).is_ok() {
-                run_time.set_learned(param, mapping);
+        let clock = self.saved.set().clock().reader();
+        let applied = clock.applying().then(|| clock.stamp().completed());
+        let replaced = self.saved.run_time().name(scope, made, loads, applied);
+        if let Some(learn) = learn.as_deref_mut() {
+            for param in &replaced {
+                learn.unmap(param);
             }
         }
     }
 }
 
 impl Ticked {
-    /// At the first tick that sees a new load, before the session's: learn
-    /// drops the mapping of every parameter made at run time declared before
-    /// that load, so no mapping the load's pass makes is refused as full
-    /// for one of the tree it replaces.
-    pub(super) fn forget_replaced(&self) {
-        let run_time = self.saved.run_time();
-        let Some(at) = run_time.take_loaded() else {
-            return;
-        };
-        let Some(learn) = self.learn.get() else {
-            return;
-        };
-        let mut learn = learn.borrow_mut();
-        let old: Vec<ParamRef> = learn
-            .run_time_mappings()
-            .map(|(param, _)| param)
-            .filter(|param| run_time.declared_by(param, at))
-            .cloned()
-            .collect();
-        for param in &old {
-            learn.unmap(param);
-        }
-    }
-
     /// Once a pass that began after a load stored its sections has finished,
-    /// between the session's tick and the history's: each parameter made at
-    /// run time that was declared before the load and is still held takes
-    /// the load's value for its path, or its default, as a restore, and the
-    /// load's mapping for it, or none. Then the load's entries go.
+    /// between the session's tick and the history's, assigns the load in one
+    /// step. Each parameter made at run time that was declared before the
+    /// load and is still held takes the load's value for its path, or its
+    /// default, as a restore. Every one still held takes the load's mapping
+    /// for its path; one declared before it with none held is unmapped. Then
+    /// the load's entries go.
     ///
     /// The load itself wrote none of them: on the host's thread, they are the
-    /// tree the load replaces, still playing.
+    /// tree the load replaces, still playing. Learn's restore in that pass
+    /// cleared their mappings, whichever of the plugin's tree and learn
+    /// applied first, so no mapping here is refused as full for one of the
+    /// tree the load replaced.
     pub(super) fn assign_held(&self) {
         let Some(assigned) = self.saved.run_time().settle(self.session.covered()) else {
             return;
         };
-        if assigned.is_empty() {
-            return;
-        }
-        let load = self.saved.set().program().load();
+        // Made at the first value, since making it marks a restore stored.
+        let mut load = None;
         let mut learn = self.learn.get().map(|learn| learn.borrow_mut());
         for Assigned {
             param,
             value,
             learned,
+            ..
         } in assigned
         {
-            load.restore_run_time(
-                &param,
-                value.unwrap_or_else(|| param.decl().default_value()),
-            );
+            if let Some(value) = value {
+                load.get_or_insert_with(|| self.saved.set().program().load())
+                    .restore_run_time(&param, value);
+            }
             let Some(learn) = learn.as_deref_mut() else {
                 continue;
             };
             match learned {
-                // Refused only when learn is full, as in a declare.
+                // Refused only when learn is full: the mapping is lost, as
+                // one in learn's own section would be.
                 Some(mapping) => {
                     let _ = learn.map(&param, mapping);
                 }

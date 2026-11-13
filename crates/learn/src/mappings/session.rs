@@ -62,11 +62,14 @@ impl Learn {
     /// Replaces every mapping and every held entry from a saved section, in one
     /// publish, and ends any arm.
     ///
-    /// `None` clears them: a restore is a complete assignment. A restore
-    /// routes and never writes a value. An entry this build cannot read drops
-    /// on its own, and so does one the checks of [`map`](Self::map) refuse,
-    /// the ceiling included. An entry for a target not registered yet is
-    /// held, saved back unchanged and applied when that target registers.
+    /// `None` clears them: a restore is a complete assignment. A parameter
+    /// made at run time is saved beside its value, not in this section, and
+    /// its mapping clears with the rest: whatever saved it maps it again. A
+    /// restore routes and never writes a value. An entry this build cannot
+    /// read drops on its own, and so does one the checks of
+    /// [`map`](Self::map) refuse, the ceiling included. An entry for a target
+    /// not registered yet is held, saved back unchanged and applied when that
+    /// target registers.
     ///
     /// A section of another schema, a newer build's say, cannot be read. The
     /// mappings still clear, so the previous project's stop routing, and
@@ -102,11 +105,7 @@ impl Learn {
         let readable =
             section.is_none_or(|s| s.get("schema").and_then(Json::as_u64) == Some(SCHEMA));
         self.arm.disarm();
-        // A parameter made at run time keeps its mapping: it is saved and
-        // brought back with its value, whichever of the plugin's tree and
-        // this section a pass applies first.
-        self.mappings
-            .retain(|target, _| matches!(target, TargetId::RunTime(_)));
+        self.mappings.clear();
         self.held.clear();
         for custom in self.customs.values_mut() {
             custom.staging = None;

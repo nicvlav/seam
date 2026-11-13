@@ -577,7 +577,7 @@ fn typed_parameters_listed_and_made_at_run_time_are_targets() {
 }
 
 #[test]
-fn a_run_time_mapping_is_left_out_of_learns_section_and_kept_across_its_restore() {
+fn a_run_time_mapping_is_left_out_of_learns_section_and_cleared_by_its_restore() {
     let set = set();
     let volume = made(&set, "volume");
     let (mut learn, _audio) = Learn::new(&set, Config::default());
@@ -596,11 +596,12 @@ fn a_run_time_mapping_is_left_out_of_learns_section_and_kept_across_its_restore(
         .collect();
     assert_eq!(targets, ["gain"], "its key alone names no one parameter");
 
-    learn.restore(None).expect("readable");
-    assert_eq!(learn.mapping(&volume), Some(&mapping), "kept");
-    assert_eq!(learn.len(), 1, "the listed mapping cleared");
+    // Whatever saved it maps it again: a restore clears it with the rest.
     learn.restore(Some(&saved)).expect("readable");
-    assert_eq!(learn.len(), 2);
+    assert_eq!(learn.mapping(&volume), None, "cleared");
+    assert_eq!(learn.len(), 1, "the listed mapping restored");
+    learn.restore(None).expect("readable");
+    assert!(learn.is_empty());
 }
 
 #[test]

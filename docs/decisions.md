@@ -2460,24 +2460,32 @@ writes one, its mapping in learn's saved form as the last tick captured it
 in a participant whose apply declares each owner again through a `Maker`. The
 parameter declared last under a path is the one saved. A path taken from a
 parameter the plugin still holds is a fault, unless a restore's apply takes it
-from one declared before that restore, as a tree coming back does. A save never
+from one not declared in an apply of the same pass, as a tree coming back does,
+while the plugin still holds the tree it replaces. A save never
 writes a block a load would refuse: the entries take the room the rest of the
 block leaves, in path order, and one with no room is left out and a fault.
 
 A load writes none of them on the host's thread, where the live ones are the
 tree the load replaces, still playing. It holds the entries, counted against
 the room it leaves `extra` with each value at its longest, and a declare under
-a held path is born holding the value, learned to the mapping. The first tick
-that sees the load has learn drop the mapping of each one declared before it,
-so none the load's pass makes is refused as full. Once a pass of the session
-that began after the load stored its sections has finished, each one declared
-before the load and still held takes the value held for its path, or its
-default, as a restore, and the mapping held, or none: a parameter made once in
-`new`, or an owner a participant kept. Then the entries go; a save meanwhile
-writes them as loaded. The restore clock's stored count orders the two
-threads: the entries record it after the load's parameter writes, the
-session's store moves it under the session's lock, where a pass reads it, and
-each name records it at its declare.
+a held path is born holding the value. Learn's restore clears every mapping,
+those of parameters made at run time included. Once a pass of the session that
+began after the load stored its sections has finished, the tick assigns the
+load in one step. Each one declared before the load and still held takes the
+value held for its path, or its default, as a restore: a parameter made once
+in `new`, or an owner a participant kept. Every one still held takes the
+mapping held for its path, and one declared before the load with none held is
+left unmapped. So the result does not depend on whether the plugin's tree or
+learn applied first, or on where in a tick the load landed, and no mapping is
+refused as full for one of the tree the load replaced. Then the entries go; a
+save meanwhile writes them as loaded, and a parameter declared since the load
+with the mapping held for its path. The restore clock's stored count orders
+the pass against the load: the entries record it after the load's parameter
+writes, and the session's store moves it under the session's lock, where a
+pass reads it. Which parameters were declared before the load is decided by a
+count of loads the saved state keeps under its own lock, which each declare
+reads before the plugin's code runs, so a declare a load lands inside counts
+as declared before it.
 
 Handing an owner's audio half to the processor and back, and a page naming one
 by its path, are not built.
@@ -2491,9 +2499,11 @@ claimed and go after the pass, and a save writes them while they wait; the
 room; the two fault kinds; the instance's number in the cell; values written
 as `parameters` writes them; no test bound by wall time. Made while building
 it: `begin` on another instance's parameter hands back, in a release build, a
-gesture that writes nothing; every call that names another instance's
-parameter asserts in a debug build, not the write alone; and a parameter
-declared at the very count a load recorded counts as declared before it.
+gesture that writes nothing; and every call that names another instance's
+parameter asserts in a debug build, not the write alone. Made when the load's
+rule was fixed after review: "the same pass" in the fault's exception is the
+same count of finished passes and the same count of loads, so a pass a busy
+participant held open, followed by a second load, is two passes.
 
 **Alternatives.** Saving each owner's parameters in its own section was built
 first and failed: a section is captured only when its participant says it
@@ -2509,7 +2519,15 @@ saved block are data: a panic would refuse a project, and no caller could act
 on a `Result`. A load that writes the live ones on the host's thread was left
 since it writes the tree that still plays: an old owner the block lacks would
 go to its defaults, and one whose path the block names would take another
-owner's values, both heard.
+owner's values, both heard. A load's mappings were first made in three steps:
+learn dropped the old tree's at the first tick that saw the load, each declare
+mapped its parameter, and the pass's end mapped the rest. Against learn's
+ceiling the result depended on whether the tree or learn registered first, and
+a load stored in the tick after the first step kept the old tree's, so the new
+ones, a listed one included, were refused as full. Whether a parameter was
+declared before a load was read off the restore clock's stored count, which
+the tick's own assignments move, so a declare a load landed inside counted as
+declared after it.
 
 [History](decision-history.md#d96-parameters-made-at-run-time)
 

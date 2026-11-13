@@ -483,9 +483,10 @@ impl SavedState {
     /// written as `parameters` writes one, and its learned mapping as the
     /// last tick captured it. While a load's entries wait for the pass that
     /// applies it, it holds them as loaded, and the live value only of a
-    /// parameter made since that load. It takes the room the rest of the
-    /// block leaves: an entry with no room is left out, and the instance
-    /// records a fault. With no entry, the key is left out.
+    /// parameter made since that load, with the load's mapping for its path.
+    /// It takes the room the rest of the block leaves: an entry with no room
+    /// is left out, and the instance records a fault. With no entry, the key
+    /// is left out.
     ///
     /// The session's `extra` is left out when there is nothing in it. Last
     /// come the top-level keys the last load held that this build does not
@@ -576,12 +577,13 @@ impl SavedState {
     /// The load writes no parameter made at run time: on this thread those
     /// are the tree the load replaces, still playing. It holds `runTime`'s
     /// entries instead, replacing what an earlier load held. A parameter made
-    /// under a held path is born holding its value, learned to its mapping.
-    /// Once a pass of the session's tick that began after this load has
-    /// finished, each one made before the load and still held takes the
-    /// value for its path, or its default, and the entries go. The entries
-    /// count against the room the block leaves for `extra`, each value at
-    /// its longest, so a block never saves back longer than it loaded.
+    /// under a held path is born holding its value. Once a pass of the
+    /// session's tick that began after this load has finished, in one step,
+    /// each one made before the load and still held takes the value for its
+    /// path, or its default, every one still held takes the mapping held for
+    /// its path, and the entries go. The entries count against the room the
+    /// block leaves for `extra`, each value at its longest, so a block never
+    /// saves back longer than it loaded.
     ///
     /// # Errors
     ///
@@ -667,9 +669,9 @@ impl SavedState {
         }
         *last = LastLoad { versions, unknown };
         // After the parameters' writes and before the session's store, so
-        // the count tells a parameter declared before this load from one its
-        // pass declares, and a pass that began after the store from one
-        // that began before it.
+        // the count tells a pass that began after the store from one that
+        // began before it. Which parameters were declared before this load
+        // the registry decides by its own count of loads.
         let at = self.set.clock().writer().stored_count();
         self.run_time.hold(run_time, at);
         // The sections and their budget under one lock, so no capture is

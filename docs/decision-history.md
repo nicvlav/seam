@@ -875,6 +875,10 @@ thread, and that `Gesture::id` returns an `Option`. A typed write for a
 gesture and a `TargetId` made from a typed parameter were approved and left
 until something calls them, and so were `watch` and `sync` taking one. Built
 on 2026-11-12; the choices the record lists as to confirm wait for the owner.
+The same day, from a review of the build, the owner decided that a load's
+mappings for them are made in one step when its pass finishes, learn's restore
+clearing them with the rest, and that a count of loads the saved state keeps,
+not the restore clock, decides which were declared before a load.
 
 ## Rules
 

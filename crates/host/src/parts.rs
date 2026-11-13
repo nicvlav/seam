@@ -151,7 +151,6 @@ impl Ticked {
             // for.
             let _learned = learn.borrow_mut().poll();
         }
-        self.forget_replaced();
         self.session.tick();
         self.assign_held();
         if let Some(history) = self.history.get() {
@@ -424,18 +423,18 @@ impl Parts {
     /// value read at the save, and its learned mapping beside it. A scope is
     /// any string; `/` separates its levels by convention, and the empty
     /// scope puts the key at the top. After a load, a declare under a path
-    /// the load holds makes the parameter holding the saved value, learned to
-    /// the saved controller, before anything else can see it.
+    /// the load holds makes the parameter holding the saved value, before
+    /// anything else can see it.
     ///
     /// The owner saves its structure only, the ids its scopes are made from,
     /// in a session participant whose apply declares each owner again through
     /// a [`Maker`]. Register that participant in [`Plugin::new`]: a load's
     /// values are held for the declares the pass that applies it makes, so a
     /// participant that registers after that pass, or whose apply fails,
-    /// declares its owners at their defaults. A parameter declared before a
-    /// load and still held when that pass finishes, one made once in `new`
-    /// say, takes the load's value for its path, or its default, at that
-    /// tick.
+    /// declares its owners at their defaults. When that pass finishes, every
+    /// parameter made here and still held takes the load's mapping for its
+    /// path, and one declared before the load, made once in `new` say, takes
+    /// the load's value for its path too, or its default.
     ///
     /// Two parameters the plugin holds under one path are a fault, and a save
     /// writes only the later; declaring the paths of a tree a load replaces,
@@ -589,26 +588,28 @@ impl Driver {
     ///    commits, so the session can capture the mapping only at its next
     ///    tick. Polled after the session, a new mapping would miss the save
     ///    until the tick after.
-    /// 2. At the first tick that sees a new load, when learn is on: learn
-    ///    drops the mapping of every parameter made at run time
-    ///    ([`Parts::declare`]) before that load, so none the load's pass makes
-    ///    is refused as full for one of the tree it replaces.
-    /// 3. The session's tick: it captures what changed for the next save, and
-    ///    applies a session the host's load restored.
-    /// 4. Once a pass that began after a load has finished: each parameter
-    ///    made at run time before that load, and still held, takes the
-    ///    load's value for its path, or its default, and its mapping, or
-    ///    none. Then the load's entries for them go.
-    /// 5. The history's tick, when undo is on: it records what changed since
+    /// 2. The session's tick: it captures what changed for the next save, and
+    ///    applies a session the host's load restored. Learn's restore clears
+    ///    every mapping, those of parameters made at run time
+    ///    ([`Parts::declare`]) included.
+    /// 3. Once a pass that began after a load has finished, the load's
+    ///    parameters made at run time, in one step: each one made before
+    ///    the load, and still held, takes the load's value for its path, or
+    ///    its default; every one still held takes the load's mapping for its
+    ///    path. Then the load's entries for them go. One step, so the result
+    ///    does not depend on whether the plugin's tree or learn applied
+    ///    first, and no mapping is refused as full for one of the tree the
+    ///    load replaced.
+    /// 4. The history's tick, when undo is on: it records what changed since
     ///    the last tick. Its place does not matter: it clears the history
     ///    whenever a restore was stored or applied since it last looked.
-    /// 6. [`Parts::sync`]: it captures each value [`Parts::saved_value`]
+    /// 5. [`Parts::sync`]: it captures each value [`Parts::saved_value`]
     ///    made that moved since the last tick, a write undo replayed
     ///    included. It skips one whose last write was its own apply's, which
     ///    the session's tick captured already, but not one another
     ///    participant's apply wrote after it. Until this step a save holds
     ///    the value from before the change.
-    /// 7. When learn's mappings moved since the last tick: it hands the next
+    /// 6. When learn's mappings moved since the last tick: it hands the next
     ///    save the mappings of the parameters made at run time, so they too
     ///    are captured at the tick.
     ///

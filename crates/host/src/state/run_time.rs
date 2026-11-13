@@ -10,9 +10,13 @@
 //! that began after the load stored its sections has finished. The restore
 //! clock's stored count orders the two: the entries record it after the
 //! load's parameter writes, the session's store moves it, and the session
-//! says which count its last finished pass covered. Each name records the
-//! count at its declare, so a parameter declared before the load is told
-//! from one its pass declared.
+//! says which count its last finished pass covered. When that pass has
+//! finished, the tick assigns the load in one step: each parameter declared
+//! before it takes its value, and every live one its mapping.
+//!
+//! The registry counts loads under its own lock, and each name records the
+//! count its declare saw, so a parameter declared before a load is told
+//! from one declared since, a declare the load landed inside included.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -48,10 +52,9 @@ pub(crate) fn path(scope: &str, key: &str) -> String {
 #[derive(Debug)]
 pub(crate) struct RunTimeSaved {
     inner: Mutex<Inner>,
-    /// A load held entries that no tick has seen yet.
-    loaded: AtomicBool,
-    /// The count the held entries recorded, or [`NONE_HELD`], so a tick
-    /// knows without the lock whether a finished pass leaves it work.
+    /// The stored count the held entries recorded, or [`NONE_HELD`], so a
+    /// tick knows without the lock whether a finished pass leaves it work.
+    /// A hint: written under the lock, and confirmed under it.
     held_at: AtomicU64,
     /// Two parameters the plugin still holds were declared under one path.
     shared_path: AtomicBool,
@@ -72,20 +75,35 @@ struct Inner {
     learned: HashMap<Arc<str>, Json>,
     /// What the last load held, until the pass that applies it finishes.
     held: Option<Held>,
+    /// How many loads have held entries.
+    loads: u64,
 }
 
 #[derive(Debug)]
 struct Named {
     path: Arc<str>,
     param: WeakParamRef,
-    /// The restore clock's stored count at its declare.
-    declared_at: u64,
+    /// How many loads its declare saw: below the held entries' count, it
+    /// was declared before their load.
+    loads: u64,
+    /// The restore clock's count of finished passes, when it was declared
+    /// inside a restore's apply.
+    applied: Option<u64>,
 }
 
 impl Named {
     /// The parameter, while the plugin holds it.
     fn held(&self) -> Option<ParamRef> {
         self.param.upgrade().filter(ParamRef::held)
+    }
+
+    /// Whether a declare that saw `loads` loads, in an apply at `applied`,
+    /// takes this one's path in a way that is no fault: in a restore's
+    /// apply, from a parameter not declared in an apply of the same pass.
+    /// A tree coming back declares the paths of the tree it replaces, while
+    /// the plugin still holds that tree.
+    fn replaced_by_a_restore(&self, loads: u64, applied: Option<u64>) -> bool {
+        applied.is_some() && (self.applied, self.loads) != (applied, loads)
     }
 }
 
@@ -99,7 +117,16 @@ pub(crate) struct Loaded {
 struct Held {
     /// The restore clock's stored count after the load's parameter writes.
     at: u64,
+    /// The registry's count of loads, this one included.
+    loads: u64,
     entries: Arc<BTreeMap<String, Entry>>,
+}
+
+impl Held {
+    /// The mapping held for `path`.
+    fn learned(&self, path: &str) -> Option<Mapping> {
+        self.entries.get(path)?.learned
+    }
 }
 
 /// One path's entry as a load read it.
@@ -128,16 +155,10 @@ struct ToWrite {
 struct Live {
     path: Arc<str>,
     param: ParamRef,
+    /// The mapping the held entries give it when their pass finishes.
+    held: Option<Mapping>,
+    /// Its mapping as the last tick captured it.
     learned: Option<Json>,
-}
-
-/// What naming a declare's parameters asks of learn.
-#[derive(Debug, Default)]
-pub(crate) struct Naming {
-    /// The parameters whose paths the declare took: learn unmaps them.
-    pub(crate) replaced: Vec<ParamRef>,
-    /// The mapping the last load holds for each new parameter's path.
-    pub(crate) learned: Vec<(ParamRef, Mapping)>,
 }
 
 /// The bytes the section's frame takes: `,"runTime":{` and its `}`.
@@ -201,7 +222,6 @@ impl Default for RunTimeSaved {
     fn default() -> Self {
         RunTimeSaved {
             inner: Mutex::default(),
-            loaded: AtomicBool::new(false),
             held_at: AtomicU64::new(NONE_HELD),
             shared_path: AtomicBool::new(false),
             no_room: AtomicBool::new(false),
@@ -215,54 +235,61 @@ impl RunTimeSaved {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The values the last load holds under `scope`, for a declare there.
-    /// The lookup owns what it reads, since the plugin's code runs while the
-    /// declarer holds it.
-    pub(crate) fn held_values(&self, scope: &str) -> HeldValues {
-        let Some(held) = self.lock().held.clone() else {
-            return Box::new(|_| None);
+    /// The values the last load holds under `scope`, for a declare there,
+    /// and the count of loads they come from, which the declare's
+    /// [`name`](Self::name) records. The lookup owns what it reads, since
+    /// the plugin's code runs while the declarer holds it.
+    pub(crate) fn held_values(&self, scope: &str) -> (HeldValues, u64) {
+        let inner = self.lock();
+        let loads = inner.loads;
+        let Some(held) = inner.held.clone() else {
+            return (Box::new(|_| None), loads);
         };
+        drop(inner);
         let scope = scope.to_owned();
-        Box::new(move |key| held.entries.get(&path(&scope, key))?.number())
+        let lookup = move |key: &str| held.entries.get(&path(&scope, key))?.number();
+        (Box::new(lookup), loads)
     }
 
-    /// Names each of `made` under `scope`, declared at the stored count
-    /// `now`, taking each path from the parameter declared there before.
+    /// Names each of `made` under `scope`, its declare having seen `loads`
+    /// loads, inside a restore's apply when `applied` holds the clock's
+    /// count of finished passes. Each takes its path from the parameter
+    /// declared there before, which it hands back for learn to unmap.
     ///
     /// A path taken from a parameter the plugin still holds is the shared
-    /// path fault, unless the declare runs in a restore's apply on this
-    /// thread (`applying`) and that parameter was declared before the
-    /// restore: a tree coming back declares the paths of the tree it
-    /// replaces.
-    pub(crate) fn name(&self, scope: &str, made: &[ParamRef], now: u64, applying: bool) -> Naming {
-        let mut naming = Naming::default();
+    /// path fault, unless a restore's apply takes it from one not declared
+    /// in an apply of the same pass: a tree coming back declares the paths
+    /// of the tree it replaces.
+    pub(crate) fn name(
+        &self,
+        scope: &str,
+        made: &[ParamRef],
+        loads: u64,
+        applied: Option<u64>,
+    ) -> Vec<ParamRef> {
+        let mut replaced = Vec::new();
         let mut inner = self.lock();
-        let held = inner.held.clone();
         for param in made {
             let path: Arc<str> = path(scope, param.decl().key).into();
             if let Some(old) = inner.paths.get(&path).and_then(|old| inner.named.get(old))
                 && let Some(old_param) = old.held()
             {
-                let old_tree = applying && old.declared_at < now;
-                if !old_tree {
+                if !old.replaced_by_a_restore(loads, applied) {
                     self.shared_path.store(true, Ordering::Relaxed);
                 }
-                naming.replaced.push(old_param);
+                replaced.push(old_param);
             }
+            // Mapped when a load's pass finishes, or by the plugin: never
+            // at its declare.
             inner.learned.remove(&path);
-            if let Some(mapping) = held
-                .as_ref()
-                .and_then(|held| held.entries.get(&*path)?.learned)
-            {
-                naming.learned.push((param.clone(), mapping));
-            }
             inner.paths.insert(Arc::clone(&path), param.serial());
             inner.named.insert(
                 param.serial(),
                 Named {
                     path,
                     param: param.downgrade(),
-                    declared_at: now,
+                    loads,
+                    applied,
                 },
             );
         }
@@ -270,18 +297,7 @@ impl RunTimeSaved {
             inner.sweep();
         }
         drop(inner);
-        naming
-    }
-
-    /// Sets the learned mapping a save writes for `param`'s path, while
-    /// `param` is the one declared there.
-    pub(crate) fn set_learned(&self, param: &ParamRef, mapping: &Mapping) {
-        let mut inner = self.lock();
-        let Some(path) = inner.path_of(param) else {
-            return;
-        };
-        let entry = encode_mapping(&path, mapping);
-        inner.learned.insert(path, entry);
+        replaced
     }
 
     /// Replaces every learned mapping a save writes with `mappings`, those
@@ -302,39 +318,28 @@ impl RunTimeSaved {
     }
 
     /// Holds `loaded`, replacing what an earlier load held, recorded at the
-    /// stored count `at`.
+    /// stored count `at` and as one more load.
     pub(crate) fn hold(&self, loaded: Loaded, at: u64) {
-        self.lock().held = Some(Held {
+        let mut inner = self.lock();
+        inner.loads += 1;
+        inner.held = Some(Held {
             at,
+            loads: inner.loads,
             entries: Arc::new(loaded.entries),
         });
         self.held_at.store(at, Ordering::Release);
-        self.loaded.store(true, Ordering::Release);
-    }
-
-    /// The count a load recorded, when a load held entries since the last
-    /// call: a tick asks once, before the session's.
-    pub(crate) fn take_loaded(&self) -> Option<u64> {
-        if !self.loaded.swap(false, Ordering::AcqRel) {
-            return None;
-        }
-        self.lock().held.as_ref().map(|held| held.at)
-    }
-
-    /// Returns whether `param` was declared at or before the stored count
-    /// `at`. One no longer named counts as declared before.
-    pub(crate) fn declared_by(&self, param: &ParamRef, at: u64) -> bool {
-        self.lock()
-            .named
-            .get(&param.serial())
-            .is_none_or(|named| named.declared_at <= at)
     }
 
     /// Lets the held entries go once a pass that covers a count past theirs
-    /// has finished, and hands back what to assign: each parameter declared
-    /// at or before their count that the plugin still holds, with the value
-    /// held for its path, or `None` for its default, and the mapping held,
-    /// or `None` for none.
+    /// has finished, and hands back the load to assign, path by path, for
+    /// every parameter the plugin still holds:
+    ///
+    /// - one declared before the load takes the value held for its path, or
+    ///   its default, and the mapping held, or none;
+    /// - one declared since was born holding its value, and takes the
+    ///   mapping held for its path, when there is one.
+    ///
+    /// A save from here on writes each path's mapping as handed back.
     pub(crate) fn settle(&self, covered: u64) -> Option<Vec<Assigned>> {
         let at = self.held_at.load(Ordering::Acquire);
         if at == NONE_HELD || covered <= at {
@@ -343,23 +348,40 @@ impl RunTimeSaved {
         let mut inner = self.lock();
         let held = inner.held.take_if(|held| covered > held.at)?;
         self.held_at.store(NONE_HELD, Ordering::Release);
-        let assigned = inner
+        let assigned: Vec<Assigned> = inner
             .paths
             .iter()
             .filter_map(|(path, serial)| {
                 let named = inner.named.get(serial)?;
-                if named.declared_at > held.at {
-                    return None;
-                }
                 let param = named.held()?;
-                let entry = held.entries.get(&**path);
+                let learned = held.learned(path);
+                let value = if named.loads < held.loads {
+                    let value = held.entries.get(&**path).and_then(Entry::number);
+                    Some(value.unwrap_or_else(|| param.decl().default_value()))
+                } else if learned.is_some() {
+                    None
+                } else {
+                    return None;
+                };
                 Some(Assigned {
-                    value: entry.and_then(Entry::number),
-                    learned: entry.and_then(|entry| entry.learned),
+                    path: Arc::clone(path),
                     param,
+                    value,
+                    learned,
                 })
             })
             .collect();
+        for Assigned { path, learned, .. } in &assigned {
+            match learned {
+                Some(mapping) => {
+                    let entry = encode_mapping(path, mapping);
+                    inner.learned.insert(Arc::clone(path), entry);
+                }
+                None => {
+                    inner.learned.remove(path);
+                }
+            }
+        }
         drop(inner);
         Some(assigned)
     }
@@ -370,9 +392,11 @@ impl RunTimeSaved {
     /// With no load's entries held, it writes each path whose parameter the
     /// plugin holds, its value read now. While a load's are held, it writes
     /// each of them as loaded, and the live value only for a path declared
-    /// since that load: a parameter declared before it still holds the
-    /// state from before the load. Entries are taken in path order; one
-    /// with no room is left out, and the room fault is flagged.
+    /// since that load, with the mapping the load holds for it: a parameter
+    /// declared before it still holds the state from before the load, and
+    /// the load's pass maps each one when it finishes. Entries are taken in
+    /// path order; one with no room is left out, and the room fault is
+    /// flagged.
     pub(crate) fn write(&self, block: &mut String, room: usize) {
         let ToWrite { held, live } = self.to_write();
         // Formatted outside the lock, so a declare on the main thread waits
@@ -388,11 +412,15 @@ impl RunTimeSaved {
         for Live {
             path,
             param,
+            held,
             learned,
         } in &live
         {
             let value = value_json(param.decl(), param.value());
-            entries.insert(path, (Some(value), learned.clone()));
+            let learned = held
+                .map(|mapping| encode_mapping(path, &mapping))
+                .or_else(|| learned.clone());
+            entries.insert(path, (Some(value), learned));
         }
         let mut used = FRAME_BYTES;
         let mut written = Vec::with_capacity(entries.len());
@@ -427,18 +455,19 @@ impl RunTimeSaved {
     /// held entry stands for, with its learned mapping.
     fn to_write(&self) -> ToWrite {
         let inner = self.lock();
-        let since = inner.held.as_ref().map(|held| held.at);
+        let held = inner.held.as_ref();
         let live = inner
             .paths
             .iter()
             .filter_map(|(path, serial)| {
                 let named = inner.named.get(serial)?;
-                if since.is_some_and(|at| named.declared_at <= at) {
+                if held.is_some_and(|held| named.loads < held.loads) {
                     return None;
                 }
                 Some(Live {
                     path: Arc::clone(path),
                     param: named.held()?,
+                    held: held.and_then(|held| held.learned(path)),
                     learned: inner.learned.get(path).cloned(),
                 })
             })
@@ -459,11 +488,13 @@ impl RunTimeSaved {
     }
 }
 
-/// A parameter declared before a load, and what the load assigns it.
+/// What a load assigns a parameter when its pass finishes.
 #[derive(Debug)]
 pub(crate) struct Assigned {
+    path: Arc<str>,
     pub(crate) param: ParamRef,
-    /// The value held for its path, or `None` for its default.
+    /// The value it takes as a restore: the one held for its path, or its
+    /// default. `None` for one declared since the load, born holding it.
     pub(crate) value: Option<f32>,
     /// The mapping held for its path, or `None` for none.
     pub(crate) learned: Option<Mapping>,

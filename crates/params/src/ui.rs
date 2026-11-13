@@ -228,7 +228,16 @@ impl UiState {
     fn write(&self, which: &Which, value: f32, writer: Writer) {
         debug_assert!(
             writer == Writer::Replay || !self.clock.applying(),
-            "a user or edit write while a restore applies; use ProgramParams::sync"
+            "{}",
+            match which {
+                Which::Listed(_) => {
+                    "a user or edit write while a restore applies; use ProgramParams::sync"
+                }
+                Which::RunTime(_) => {
+                    "a user or edit write to a parameter made at run time while a \
+                     restore applies; declare it in the apply instead: the load restores it"
+                }
+            }
         );
         let Some(gesture) = self.state_of(which) else {
             // Every caller opened a gesture first.

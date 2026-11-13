@@ -245,6 +245,9 @@ struct Setup {
     keep: bool,
     /// Learn's mapping ceiling.
     max_mappings: usize,
+    /// The plugin lends its maker to [`MAKER`], for a test that declares
+    /// from outside it through a test host, which gives no other way in.
+    lend_maker: bool,
 }
 
 impl Default for Setup {
@@ -253,6 +256,7 @@ impl Default for Setup {
             tree_first: false,
             keep: false,
             max_mappings: DEFAULT_MAX_MAPPINGS,
+            lend_maker: false,
         }
     }
 }
@@ -262,6 +266,12 @@ thread_local! {
     /// Set to make the plugin's next idle declare group 1's scope again
     /// while group 1 lives, as a plugin that reuses an id does.
     static REUSE: Cell<bool> = const { Cell::new(false) };
+    /// The maker a plugin built with [`Setup::lend_maker`] lent.
+    static MAKER: RefCell<Option<Maker>> = const { RefCell::new(None) };
+    /// A block the next [`Racing`] declare loads, and the saved state it
+    /// loads into.
+    static LOAD_INSIDE: RefCell<Option<(Arc<SavedState>, Vec<u8>)>> =
+        const { RefCell::new(None) };
 }
 
 /// The tree as the session saves it: its structure only, each group's id
@@ -428,6 +438,9 @@ impl Plugin for Mixer {
             register(&parts)
         };
         let drive = parts.add("", DRIVE);
+        if setup.lend_maker {
+            MAKER.set(Some(parts.maker()));
+        }
         let (bank, audio) = bank();
         let mut mixer = Mixer {
             parts,
@@ -1084,21 +1097,47 @@ fn a_held_up_load_still_reaches_its_owners_and_then_lets_its_entries_go() {
     );
 }
 
-/// A participant whose first apply loads `block` into `saved`: a load the
-/// host stores while the main thread's pass runs, pinned at one point.
+/// A participant that loads `block` into `saved` once: a load the host
+/// stores while the main thread's tick runs, pinned at one point. From its
+/// apply, inside the session's pass; or, `in_capture`, from the capture the
+/// session's tick makes of a held-up participant before it takes the pass.
 struct Racer {
     saved: Arc<SavedState>,
-    block: Option<Vec<u8>>,
+    block: RefCell<Option<Vec<u8>>>,
+    in_capture: bool,
+}
+
+impl Racer {
+    fn new(
+        saved: &Arc<SavedState>,
+        block: Option<Vec<u8>>,
+        in_capture: bool,
+    ) -> Rc<RefCell<Racer>> {
+        Rc::new(RefCell::new(Racer {
+            saved: Arc::clone(saved),
+            block: RefCell::new(block),
+            in_capture,
+        }))
+    }
+
+    fn load(&self) {
+        if let Some(block) = self.block.take() {
+            self.saved.load(&block).expect("a saved block");
+        }
+    }
 }
 
 impl Participant for Racer {
     fn capture(&self) -> Section {
+        if self.in_capture {
+            self.load();
+        }
         Section::Null
     }
 
     fn apply(&mut self, _section: Option<&Section>) -> Result<(), ApplyError> {
-        if let Some(block) = self.block.take() {
-            self.saved.load(&block).expect("a saved block");
+        if !self.in_capture {
+            self.load();
         }
         Ok(())
     }
@@ -1109,10 +1148,7 @@ fn a_load_stored_while_a_pass_runs_waits_for_a_pass_that_began_after_it() {
     let first = saved_block(&[1]);
     let second = saved_block(&[1, 4]);
     let (mut plugin, driver, saved) = built();
-    let racer = Rc::new(RefCell::new(Racer {
-        saved: Arc::clone(&saved),
-        block: Some(second),
-    }));
+    let racer = Racer::new(&saved, Some(second), false);
     let _racer = plugin
         .parts
         .session()
@@ -1122,7 +1158,7 @@ fn a_load_stored_while_a_pass_runs_waits_for_a_pass_that_began_after_it() {
     // The tree applies the first block, then the racer stores the second.
     saved.load(&first).expect("a saved block");
     tick(&mut plugin, &driver);
-    assert!(racer.borrow().block.is_none(), "the racer loaded");
+    assert!(racer.borrow().block.borrow().is_none(), "the racer loaded");
     assert_eq!(plugin.ids(), [1]);
     assert_eq!(plugin.group(1).expect("loaded").volume.get(), -1.0);
 
@@ -1231,16 +1267,25 @@ fn a_load_into_a_learned_instance_at_its_ceiling_brings_back_every_mapping() {
 }
 
 #[test]
-fn the_tree_registered_before_or_after_learn_gives_the_same_load() {
+fn the_tree_registered_before_or_after_learn_gives_the_same_load_at_the_ceiling() {
+    // The block maps one group and no listed parameter. The instance it
+    // replaces has its listed gain mapped, at a ceiling of one mapping.
     let bytes = saved_block(&[2, 3]);
     let loaded = [false, true].map(|tree_first| {
         let (mut plugin, driver, saved) = built_with(Setup {
             tree_first,
+            max_mappings: 1,
             ..Setup::default()
         });
+        plugin
+            .parts
+            .learn()
+            .map(&plugin.params.gain, on(7))
+            .expect("legal");
+        tick(&mut plugin, &driver);
         saved.load(&bytes).expect("a saved block");
         tick(&mut plugin, &driver);
-        let state: Vec<_> = plugin
+        let groups: Vec<_> = plugin
             .ids()
             .into_iter()
             .map(|id| {
@@ -1248,10 +1293,156 @@ fn the_tree_registered_before_or_after_learn_gives_the_same_load() {
                 (id, group.volume.get(), plugin.learned(&group.volume))
             })
             .collect();
-        state
+        (groups, plugin.learned(&plugin.params.gain))
     });
     assert_eq!(loaded[0], loaded[1]);
-    assert_eq!(loaded[0][0], (2, -2.0, Some(Control::Cc(22))));
+    let (groups, gain) = &loaded[0];
+    assert_eq!(groups[0], (2, -2.0, Some(Control::Cc(22))));
+    assert_eq!(*gain, None, "the block maps no listed parameter");
+}
+
+/// A struct whose declare a load lands inside, after its parameter is made
+/// and before it is named: a host's load on another thread, pinned there.
+struct Racing {
+    volume: Float,
+}
+
+impl Params for Racing {
+    fn declare(p: &mut Declarer) -> Self {
+        let volume = p.add(VOLUME);
+        if let Some((saved, block)) = LOAD_INSIDE.take() {
+            saved.load(&block).expect("a saved block");
+        }
+        Racing { volume }
+    }
+}
+
+#[test]
+fn a_declare_a_load_lands_inside_counts_as_declared_before_the_load() {
+    let bytes = {
+        let (source, _driver, saved) = built();
+        let lone: Float = source.parts.add("lone", VOLUME);
+        assert!(source.parts.ui().write(&lone, -5.0));
+        saved.save()
+    };
+    let (mut plugin, driver, saved) = built();
+    LOAD_INSIDE.set(Some((Arc::clone(&saved), bytes.clone())));
+    let racing: Racing = plugin.parts.declare("lone");
+    assert_eq!(racing.volume.get(), 0.0, "born before the load");
+
+    // The load's entry is what a save writes until its pass, and then what
+    // the parameter takes.
+    assert_eq!(run_time(&saved.save()), run_time(&bytes));
+    tick(&mut plugin, &driver);
+    let reading = racing.volume.erased().read();
+    assert_eq!((reading.value, reading.origin), (-5.0, Origin::Restore));
+}
+
+#[test]
+fn a_load_stored_in_the_tick_before_its_pass_brings_back_every_mapping() {
+    let setup = Setup {
+        max_mappings: 2,
+        ..Setup::default()
+    };
+    // The block maps the listed gain and group 2.
+    let bytes = {
+        let (mut source, driver, saved) = built_with(setup);
+        source.add_group();
+        assert!(source.remove_group(1));
+        let two = source.group(2).expect("added");
+        let mut learn = source.parts.learn();
+        learn.map(&source.params.gain, on(7)).expect("legal");
+        learn.map(&two.volume, on(22)).expect("legal");
+        drop(learn);
+        tick(&mut source, &driver);
+        saved.save()
+    };
+    let loaded = [false, true].map(|race| {
+        // The instance has groups 1 and 3 mapped, at the ceiling.
+        let (mut plugin, driver, saved) = built_with(setup);
+        plugin.add_group();
+        plugin.add_group();
+        assert!(plugin.remove_group(2));
+        for id in [1, 3] {
+            let group = plugin.group(id).expect("added");
+            let number = 20 + id as u8;
+            plugin
+                .parts
+                .learn()
+                .map(&group.volume, on(number))
+                .expect("legal");
+        }
+        tick(&mut plugin, &driver);
+        let racer = Racer::new(&saved, None, true);
+        let registration = plugin
+            .parts
+            .session()
+            .register("racer", &racer)
+            .expect("a free key");
+        if race {
+            // Held up, so the next tick's session captures it, and it
+            // loads, before the session takes its pass.
+            let busy = racer.borrow_mut();
+            registration.changed();
+            drop(busy);
+            racer.borrow().block.replace(Some(bytes.clone()));
+        } else {
+            saved.load(&bytes).expect("a saved block");
+        }
+        tick(&mut plugin, &driver);
+        let two = plugin.group(2).expect("loaded");
+        (
+            plugin.ids(),
+            plugin.learned(&plugin.params.gain),
+            plugin.learned(&two.volume),
+            plugin.parts.learn().len(),
+        )
+    });
+    assert_eq!(
+        loaded[0],
+        (vec![2], Some(Control::Cc(7)), Some(Control::Cc(22)), 2)
+    );
+    assert_eq!(loaded[1], loaded[0], "a load stored in the tick");
+}
+
+/// A participant that saves the block from its apply: registered after the
+/// tree, so a pass applies it after the tree.
+struct Saver {
+    saved: Arc<SavedState>,
+    block: Option<Vec<u8>>,
+}
+
+impl Participant for Saver {
+    fn capture(&self) -> Section {
+        Section::Null
+    }
+
+    fn apply(&mut self, _section: Option<&Section>) -> Result<(), ApplyError> {
+        self.block = Some(self.saved.save());
+        Ok(())
+    }
+}
+
+#[test]
+fn a_save_inside_the_pass_holds_the_mapping_of_a_group_the_pass_declared() {
+    let bytes = saved_block(&[2]);
+    let (mut plugin, driver, saved) = built();
+    let saver = Rc::new(RefCell::new(Saver {
+        saved: Arc::clone(&saved),
+        block: None,
+    }));
+    let _saver = plugin
+        .parts
+        .session()
+        .register("saver", &saver)
+        .expect("a free key");
+    saved.load(&bytes).expect("a saved block");
+    tick(&mut plugin, &driver);
+    let inside = saver.borrow_mut().block.take().expect("the saver applied");
+    let loaded = &run_time(&bytes)["group/2/volume"];
+    assert!(loaded["learned"].is_object(), "the block maps group 2");
+    assert_eq!(&run_time(&inside)["group/2/volume"], loaded);
+    assert_eq!(&run_time(&saved.save())["group/2/volume"], loaded);
 }
 
 #[test]
@@ -1273,6 +1464,42 @@ fn a_shared_path_is_one_fault_and_saves_the_later_and_a_load_declaring_again_is_
     host.load(&bytes).expect("loaded");
     host.tick();
     host.tick();
+}
+
+#[test]
+fn a_declare_between_a_load_and_its_tick_is_no_shared_path_fault() {
+    let bytes = saved_block(&[1, 5]);
+    SETUP.set(Setup {
+        lend_maker: true,
+        ..Setup::default()
+    });
+    let host = seam_host::vst3::TestHost::<Mixer>::new();
+    SETUP.set(Setup::default());
+    let maker = MAKER.take().expect("the plugin lent its maker");
+    host.load(&bytes).expect("loaded");
+
+    // Declared outside the plugin's apply, under a path its pass declares
+    // again, and kept: the pass replaces it as it replaces the old tree.
+    let stray: GroupParams = maker.declare(&scope(5));
+    assert_eq!(stray.volume.get(), -5.0, "born holding the load's value");
+    host.tick();
+    host.tick(); // a fault would be reported by now
+    assert_eq!(host.faults(), 0);
+    drop((stray, maker));
+}
+
+#[test]
+fn a_block_that_repeats_an_owner_is_one_shared_path_fault() {
+    let mut block: Json = serde_json::from_slice(&saved_block(&[2])).expect("JSON");
+    block["extra"]["tree"]["groups"] = json!([2, 2]);
+    let bytes = serde_json::to_vec(&block).expect("JSON");
+    let host = seam_host::vst3::TestHost::<Mixer>::new();
+    host.expect_faults(1);
+    host.load(&bytes).expect("loaded");
+    host.tick();
+    host.tick(); // reports it
+    let saved = host.save().expect("saved");
+    assert_eq!(run_time(&saved)["group/2/volume"]["value"], -2.0);
 }
 
 #[test]

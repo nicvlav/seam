@@ -187,6 +187,21 @@ fn the_id_of_a_parameter_made_at_run_time_is_a_contract_panic_naming_the_fix() {
 
 #[cfg(debug_assertions)]
 #[test]
+fn a_user_write_while_a_restore_applies_names_the_fix_for_a_parameter_made_at_run_time() {
+    // A participant applying a restore declares its parameters again; the
+    // load restores their values.
+    let set = ParamSet::from_decls([]).expect("empty");
+    let gain = one(&set, FloatDecl::new("gain", "Gain", -60.0..=12.0, 0.0));
+    let ui = set.take_ui().expect("the first UI handle");
+    let writer = set.clock().writer();
+    let _applying = writer.applying();
+    seam_testkit::contract::expect_contract_panic("declare it in the apply instead", || {
+        ui.write(&gain, -6.0);
+    });
+}
+
+#[cfg(debug_assertions)]
+#[test]
 fn another_instances_parameter_is_a_contract_panic_and_changes_nothing() {
     use seam_params::AnyParam;
     use seam_testkit::contract::expect_contract_panic;
