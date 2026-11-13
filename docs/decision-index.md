@@ -163,7 +163,8 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d16-where-the-webview-pieces-live)
 
-- no code site
+- `crates/webview/Cargo.toml`: module
+- `scripts/check-core-deps.py`: `LAYERS`
 
 ### D17. Learning notes
 
@@ -1086,6 +1087,37 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/faults.rs`: `NoEditor`, `Faults::record_with_reason`
 - `crates/host/src/vst3/test_host/view.rs`: `TestView`, `Frame`, `HiddenWindow`
 - test `crates/host/src/vst3/view/tests.rs`: module, `the_instance_released_before_its_view_lives_until_the_view_goes`, `a_view_released_while_attached_closes_its_editor`, `a_view_call_from_another_thread_is_refused_and_counted`, `an_editor_that_fails_to_open_is_a_fault_with_its_reason`, `an_editor_that_panics_in_open_is_a_fault_and_stays_closed`, `a_resize_and_a_tick_from_inside_open_wait_until_it_returns`, `a_removal_from_inside_open_closes_the_editor_once_it_returns`, `a_view_the_host_releases_from_inside_open_is_freed_after_it`, `a_new_scale_while_open_asks_the_frame_for_the_editors_size_there`, `a_resize_reaches_the_editor_in_logical_pixels`
+
+### D101. A page's files and a build without them
+
+[Record section](decisions.md#d101-a-pages-files-and-a-build-without-them)
+
+- `crates/webview/src/assets.rs`: `Asset`, `serve`, `content_type`, `page_url`, `dev_url`, `SCHEME`
+- `crates/webview/src/lib.rs`: module, `Page`, `Page::into_editor`
+- `examples/gain/build.rs`: `BUILT`, `main`
+- `examples/gain/src/page.rs`: module, `PAGE`, `editor`
+- `.github/workflows/ci.yml`: `page:`
+- test `crates/webview/src/assets.rs`: `the_root_and_each_file_are_served_with_their_content_type`, `anything_else_is_not_found`, `the_embedded_page_unless_a_dev_server_is_given`
+- test `examples/gain/tests/page.rs`: `the_built_page_renders_and_calls_the_plugin_once_answered`
+- test `examples/gain/tests/page_params.rs`: `the_pages_parameter_map_matches_the_gains_declarations`
+
+### D102. The WebView's data folder
+
+[Record section](decisions.md#d102-the-webviews-data-folder)
+
+- `crates/webview/src/assets.rs`: `data_folder`
+- `crates/webview/src/windows.rs`: `PageEditor::new`, `PageEditor::open`
+- test `crates/webview/src/assets.rs`: `the_data_folder_is_the_plugins_own_below_the_base`
+- test `crates/webview/tests/hidden_window.rs`: `sixteen_editors_open_in_one_process`
+
+### D103. The WebView's messages and what it takes
+
+[Record section](decisions.md#d103-the-webviews-messages-and-what-it-takes)
+
+- `crates/webview/src/windows.rs`: module, `ToPage`, `script`, `deliver`, `respond`, `PageEditor::open`, `PageEditor::close`, `PageEditor::tick`
+- `page/src/transport.ts`: `webviewTransport`, `WebViewGlobals`
+- test `crates/webview/tests/hidden_window.rs`: module, `a_page_in_a_hidden_window_is_answered_and_its_set_reaches_the_parameter`
+- test `page/test/webviewTransport.test.ts`: `sends each message as JSON text through ipc`, `delivers what the native side posts to every listener, in order`, `carries a client's handshake both ways`
 
 ### D104. The module stays loaded once an editor has opened
 

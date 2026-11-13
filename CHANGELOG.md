@@ -7,8 +7,9 @@ may break the API.
 
 ## [Unreleased]
 
-Nothing is released yet. Not built: the CLAP exporter, the glue that opens the
-page in a plugin window, and MIDI delivered to a plugin through an exporter.
+Nothing is released yet. Not built: the CLAP exporter, a page in a plugin
+window anywhere but Windows, and MIDI delivered to a plugin through an
+exporter.
 
 ### Added
 
@@ -154,6 +155,14 @@ page in a plugin window, and MIDI delivered to a plugin through an exporter.
   the page of every change at the tick, and drops and counts what it cannot
   read (`Refusals`). `end_session` ends a page session when the page goes away
   and the dispatcher stays.
+- `seam-webview`: a plugin's page in the host's window, on Windows. `Page`
+  makes the editor from the page's files built into the plugin, a size and the
+  commands the page may call: a WebView2 child window, through wry 0.57.2,
+  which serves the files over a scheme of its own, keeps its data in the
+  plugin's own folder below the user's local application data, and joins the
+  page to a `Dispatcher`. A debug build loads `SEAM_PAGE_DEV_URL` when it is
+  set. Elsewhere `into_editor` gives `None`.
+- `page`: `webviewTransport`, the transport of a page in a plugin's window.
 - `page`: React hooks (`useParam`, `useEvent`, `useCommand`) over a pluggable
   transport. A held queue keeps the writes made before the native side answers
   and sends them in the order the page made them. A native message of the wrong
@@ -163,7 +172,9 @@ page in a plugin window, and MIDI delivered to a plugin through an exporter.
   builds. Checked as VST3 on Windows; CI builds VST3 and AU on macOS.
 - `examples/gain`: a gain in dB with a bypass, a mode of three names, an
   undoable label saved with the plugin, and a gain MIDI learn can drive, as a
-  VST3 module. [docs/first-plugin.md](docs/first-plugin.md) walks through it.
+  VST3 module. Its page, a Vite and React app, shows a slider on the gain and
+  a field for the label in the host's window on Windows, when it was built
+  in. [docs/first-plugin.md](docs/first-plugin.md) walks through it.
 - `examples/eq`: an EQ of six biquad bands and an output gain, as a VST3 module
   or a static library for the adapter.
 - `xtask`: `cargo xtask gen` writes every generated file, and CI fails when one

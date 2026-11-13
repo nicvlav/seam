@@ -232,3 +232,68 @@ impl std::fmt::Debug for Page {
             .finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use seam_host::{AuCodes, Category, Layout};
+    use seam_params::{Kind, ParamDecl, ParamSet};
+
+    use super::*;
+
+    const INFO: PluginInfo = PluginInfo {
+        name: "Panel",
+        vendor: "Example",
+        url: "",
+        email: "",
+        description: "",
+        version: "0.1.0",
+        id: "dev.example.panel",
+        vst3_class_id: [0; 16],
+        au_codes: AuCodes {
+            subtype: *b"panl",
+            manufacturer: *b"Exmp",
+        },
+        category: Category::Effect,
+        features: &[],
+        layouts: &[Layout::STEREO],
+        midi_input: false,
+        midi_output: false,
+    };
+
+    const PAGE: &[Asset] = &[Asset {
+        path: "index.html",
+        bytes: b"<!doctype html>",
+    }];
+
+    #[test]
+    fn a_page_is_an_editor_on_windows_alone_at_its_size() {
+        let set = ParamSet::from_decls([ParamDecl::new("gain", "Gain", Kind::Bool, 0.0)])
+            .expect("valid declarations");
+        let ui = set.take_ui().expect("the first UI handle");
+        let page = Page::new(&INFO, ui, PAGE);
+        assert_eq!(page.size, Page::SIZE);
+        let size = Size {
+            width: 300,
+            height: 200,
+        };
+        let editor = page
+            .with_size(size)
+            .command("ping", |()| Ok(()))
+            .into_editor();
+        assert_eq!(editor.is_some(), cfg!(windows));
+        if let Some(editor) = editor {
+            assert_eq!(editor.size(), size, "nothing opens until the host attaches");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "is added twice")]
+    fn a_command_added_twice_panics() {
+        let set = ParamSet::from_decls([ParamDecl::new("gain", "Gain", Kind::Bool, 0.0)])
+            .expect("valid declarations");
+        let ui = set.take_ui().expect("the first UI handle");
+        let _ = Page::new(&INFO, ui, PAGE)
+            .command("ping", |()| Ok(()))
+            .command("ping", |()| Ok(()));
+    }
+}

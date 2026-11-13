@@ -17,6 +17,10 @@ allow = [
     "MPL-2.0",
     "Unicode-3.0",
     "Unlicense",
+    # foldhash, which wry's Android backend reaches through dom_query: no
+    # Seam plugin builds it. Its notice clause binds source distributions,
+    # not binaries.
+    "Zlib",
 ]
 confidence-threshold = 0.93
 # Seam's own crates are not published (they name MIT, but are not checked

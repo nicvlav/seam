@@ -1,0 +1,54 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  background: #1d1f22;
+  color: #e6e6e6;
+}
+
+body {
+  margin: 0;
+  background: #1d1f22;
+}
+
+main {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 56px 1fr 88px;
+  align-items: center;
+  gap: 12px;
+}
+
+.name {
+  color: #a8a8a8;
+}
+
+output {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+input[type="text"] {
+  background: #2a2d31;
+  border: 1px solid #3c4046;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  padding: 4px 6px;
+}
+
+.failure {
+  padding: 20px 24px;
+  color: #ff8a80;
+}

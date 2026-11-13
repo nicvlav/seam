@@ -30,11 +30,15 @@ seam-host.workspace = true
 seam-learn.workspace = true
 seam-params = { workspace = true, features = ["derive"] }
 seam-undo.workspace = true
+seam-webview.workspace = true
 
 [dev-dependencies]
 seam-host = { workspace = true, features = ["vst3", "test-host"] }
 seam-ump.workspace = true
 seam-testkit.workspace = true
+# The page's parameter map, generated from the gain's declarations, and its
+# drift gate (`tests/page_params.rs`).
+seam-bridge = { workspace = true, features = ["typescript"] }
 
 [lints]
 workspace = true

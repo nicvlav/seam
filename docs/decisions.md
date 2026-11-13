@@ -52,7 +52,7 @@ comments never cite an id: they state the reason in words, and
 | D13 | [When does a session restore apply to participants? (S5)](#d13-when-a-session-restore-applies) | Always on a later UI tick, whatever thread the restore came from. A change from C++. | decided |
 | D14 | [What does a participant whose apply fails keep? (S7)](#d14-a-participant-whose-apply-fails) | Any failed apply keeps the participant's state and saves its raw section back unchanged. A change from C++. | decided |
 | D15 | [Does the page get a parameter's state back after its own write? (B2)](#d15-the-pages-state-after-its-own-write) | Yes. The native side answers every `set` and `gestureEnd` with a `Param`, changed or not, so the page always ends on the store. | decided |
-| D16 | [Where do wry's IPC handler, the custom-scheme asset server and "open the page in this window" live?](#d16-where-the-webview-pieces-live) | In `seam-webview`, a shell-tier crate not built yet. `seam-bridge` has no window or WebView dependency under any features. | decided |
+| D16 | [Where do wry's IPC handler, the custom-scheme asset server and "open the page in this window" live?](#d16-where-the-webview-pieces-live) | In `seam-webview`, a shell-tier crate. `seam-bridge` has no window or WebView dependency under any features. | decided |
 | D17 | [Does learn take notes? (L2)](#d17-learning-notes) | Keep `Source::Note` for instruments that learn keys to parameters. A note-on writes its velocity, scaled as D10 scales a controller; a note-off writes nothing. | decided |
 | D18 | [May earlier in-house code come into this repository, and in what form?](#d18-earlier-in-house-code) | An EQ and a VST3 shell from earlier in-house Rust work may seed the example plugin and the VST3 exporter, as generic Seam code under Seam's own names. Nothing else comes over. | decided |
 | D19 | [Where do the restore counter and the applying-a-restore mark live? (U16, S6, S12)](#d19-the-restore-counter-and-the-applying-mark) | In a `RestoreClock` in `seam-params`: a count of restores stored and a count completed. The applying mark is the applying thread's own, so only that thread's writes record nothing. | decided |
@@ -104,7 +104,7 @@ comments never cite an id: they state the reason in words, and
 | D65 | [What does a host see of a plugin through JUCE? (D31, D53, D58, C4)](#d65-what-a-host-sees-through-juce) | What JUCE 9 makes of it, as of the JUCE EQ; checked with VST3 on Windows. Parameter ids are JUCE's hash of the key, not D31's, and the one program has the plugin's name. | decided |
 | D66 | [What does a load do with bytes after the block, and is the host told that a load failed? (H2)](#d66-bytes-after-the-block-and-a-failed-load) | Trailing NUL bytes are trimmed and the block loads, and JSON whitespace around the object loads too; any other byte after the object makes the block unrecognised. A load that fails is answered as failed, except through JUCE, whose `setStateInformation` answers nothing, so the adapter cannot tell its host. | decided |
 | D67 | [How are the rules checked that keep locking types off the audio thread? (P6, D39)](#d67-checking-the-audio-thread-locking-rule) | By a debug-build mark, `seam_params::audio_thread`: a per-thread depth an exporter raises around everything its `process` call runs, and every call that locks asserts the mark is absent. | decided |
-| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, automation smoothing and splitting, and semver checks. | decided |
+| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, automation smoothing and splitting, and semver checks. | decided |
 | D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. A typed declaration's range is checked by `Range::new` too: by `FloatDecl::checked` while compiling, and when it is added. | decided |
 | D70 | [How does learn read MIDI 1.0's paired controllers and parameter numbers where MIDI 1.0 leaves room? (L2, L3, D30)](#d70-learns-reading-of-midi-10-pairs) | Per group and channel, the two NRPN address bytes pair in either order, 127 with 127 selects nothing, and data increment and decrement are never learned. A controller 32 to 63 right after the controller 32 below it learns that one as a 7-bit controller. A learned pair plays at 7 bits: 14-bit controller playback is open, to be built when an exporter delivers MIDI. | decided |
 | D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn ends the arm, clears every mapping and held entry and publishes the empty table, then closes open bursts (D82) and fails the apply, so the session keeps the section. | decided |
@@ -137,6 +137,9 @@ comments never cite an id: they state the reason in words, and
 | D98 | [What becomes of a page's call still running when a new page session starts? (B5)](#d98-a-call-across-page-sessions) | None can be: a command runs to its end inside the call, so its reply always goes to the session that asked. | to confirm |
 | D99 | [How does a plugin hand out an editor, and what ticks it? (D53)](#d99-a-plugins-editor-and-its-tick) | `Plugin::editor` returns an `Editor`, `None` by default; the trait knows no toolkit. The exporter drives it, and the plugin's one main-thread timer ticks an open editor after `Plugin::idle`. | to confirm |
 | D100 | [What does the VST3 exporter's view of the editor keep to? (D59, D60)](#d100-the-vst3-editor-view) | A view holds its component; it attaches to `HWND` only; its sizes are the screen's pixels at the scale the host gave; it puts off what a host asks while the editor is in a call; a failed open is a fault with its reason. | to confirm |
+| D101 | [Where do a page's files come from, and what does a build without them do? (D26)](#d101-a-pages-files-and-a-build-without-them) | From bytes the plugin is built with, served over the editor's own scheme; a debug build may load a dev server instead. A plugin built without its page offers no editor and its build warns; it never shows a placeholder, and Cargo never runs Node. | to confirm |
+| D102 | [Where does the WebView keep its data? (D16)](#d102-the-webviews-data-folder) | In a folder of the plugin's own below the user's local application data, named by its id, shared by every instance of it. | to confirm |
+| D103 | [How do the page's messages cross the WebView, and what does the WebView take from the host? (D16, B1)](#d103-the-webviews-messages-and-what-it-takes) | The page posts through the WebView's IPC and the native side answers with a script, in order; a panic in a WebView callback is caught. The WebView takes no focus as it opens, and a release build shows no browser menu or shortcut. | to confirm |
 | D104 | [What keeps valid what an editor leaves with the host, when the host unloads the module? (D59, D100)](#d104-the-module-stays-loaded-once-an-editor-has-opened) | Once any editor has opened, the module stays loaded until the process ends: one call at every open, before the editor's code runs, for every editor of every plugin. The plugin's file then stays in use until the host exits. | to confirm |
 
 **Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
@@ -370,8 +373,9 @@ own write.
 **Question and C++ Seam.** Where do wry's IPC handler, the custom-scheme asset
 server and "open the page in this window" live? Not applicable.
 
-**Rust.** In `seam-webview`, a shell-tier crate not built yet. `seam-bridge` has
-no window or WebView dependency under any features.
+**Rust.** In `seam-webview`, a shell-tier crate on `seam-bridge`, `seam-host`
+and wry, built for Windows. `seam-bridge` has no window or WebView dependency
+under any features.
 
 [History](decision-history.md#d16-where-the-webview-pieces-live)
 
@@ -1499,9 +1503,10 @@ rules compile-time.
 **Question and C++ Seam.** Which of the 2026-11-05 audits' items wait until
 their code exists? Not applicable.
 
-**Rust.** Those whose code has not started: the CLAP exporter, `seam-webview`
-(D16), automation smoothing and splitting, and semver checks. The native side
-of the page protocol was on this list until it was built (B1). Findings that
+**Rust.** Those whose code has not started: the CLAP exporter, automation
+smoothing and splitting, and semver checks. `seam-webview` (D16) and the
+native side of the page protocol (B1) were on this list until they were
+built. Findings that
 rest on them stay open until then. The core already keeps each automation
 point's sample position (D59), so smoothing or splitting can build on it. The
 derive that declares each parameter once was on this list until it was built
@@ -2644,6 +2649,71 @@ second view refused while one lives, which a host that releases late would
 meet as an editor that will not open.
 
 [History](decision-history.md#d100-the-vst3-editor-view)
+
+### D101. A page's files and a build without them
+
+**Question and C++ Seam.** Where do a page's files come from in a plugin, and
+what does a build without them do? (D26) The C++ Seam embedded the built page
+through CMake (`SEAM_WEB_EMBED_PAGES`).
+
+**Rust.** A plugin builds its page's files in, as `Asset`s, its path and its
+`include_bytes!` each, and `seam-webview` serves them over a scheme of the
+editor's own (`seam://localhost/`, which WebView2 reaches as
+`http://seam.localhost/`) with their content types, and 404 for any other
+path. A debug build loads `SEAM_PAGE_DEV_URL` instead when it is set (D26). The
+example gain's page builds with Vite to fixed names, and the gain's `build.rs`
+sets a cfg when the three files are there. Without them the plugin offers no
+editor, so a host shows its own controls, and the build warns; it never shows
+a placeholder page. Cargo never runs Node, and CI builds the page in the page
+lane so it cannot rot.
+
+**Alternatives.** The alternatives were a placeholder page when the build
+lacks one, which a user could ship by mistake, and a build script that runs
+Node, which every Rust build would then need.
+
+[History](decision-history.md#d101-a-pages-files-and-a-build-without-them)
+
+### D102. The WebView's data folder
+
+**Question and C++ Seam.** Where does the WebView keep its data? (D16) Not
+applicable: the C++ Seam's WebView was JUCE's, which chose for it.
+
+**Rust.** In `%LOCALAPPDATA%\<id>\WebView2`, where `<id>` is the plugin's
+`PluginInfo::id`, a character a folder's name may not hold becoming `_`; the
+temporary folder stands in when `LOCALAPPDATA` is unset. WebView2's default is
+beside the host's executable, which a host below `Program Files` cannot write.
+Every instance of the plugin shares the folder, and so one browser process;
+WebView2 needs instances that share a folder to share its options, and the
+editor gives each the same.
+
+**Alternatives.** The alternatives were a folder per instance, which starts a
+browser per instance, and one folder for every Seam plugin, which ties their
+browser options together.
+
+[History](decision-history.md#d102-the-webviews-data-folder)
+
+### D103. The WebView's messages and what it takes
+
+**Question and C++ Seam.** How do the page's messages cross the WebView, and
+what does the WebView take from the host? (D16, B1) The C++ Seam used JUCE's
+WebView bridge.
+
+**Rust.** The page posts each message as JSON text through
+`window.ipc.postMessage`, which wry provides, and the editor hands it to the
+dispatcher as it arrives; one that arrives while the dispatcher is in a call
+waits for the next tick. The dispatcher's messages reach the page, in order,
+as a script that calls `window.__seam.receive`, which the page's
+`webviewTransport` installs. A panic inside a WebView callback, the IPC
+handler's or the scheme's, is caught, since it would unwind into WebView2.
+The WebView takes no keyboard focus as it opens, so the host keeps it until
+the page is clicked. A release build turns off the browser's context menu
+and its shortcuts, such as a reload; a debug build keeps both, and its
+developer tools.
+
+**Alternatives.** The alternative for the way back was WebView2's own message
+channel, which needs a call `seam-webview` could make only with `unsafe`.
+
+[History](decision-history.md#d103-the-webviews-messages-and-what-it-takes)
 
 ### D104. The module stays loaded once an editor has opened
 

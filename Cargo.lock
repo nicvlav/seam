@@ -1203,12 +1203,14 @@ dependencies = [
 name = "seam-example-gain"
 version = "0.1.0"
 dependencies = [
+ "seam-bridge",
  "seam-host",
  "seam-learn",
  "seam-params",
  "seam-testkit",
  "seam-ump",
  "seam-undo",
+ "seam-webview",
 ]
 
 [[package]]

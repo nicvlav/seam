@@ -35,11 +35,9 @@ versioning](https://semver.org/): before 1.0, a minor version may break the API.
   JUCE adapter, the page's React hooks and protocol
   and the native side that answers the page, the example gain, the example EQ,
   and the comparison against plain JUCE.
-- **Not built:** the CLAP exporter; the WebView glue that opens the page in a
-  plugin window (wry's IPC handler, the custom-scheme asset server), which is
-  to be a shell crate so `seam-bridge` stays free of any WebView; and MIDI
-  delivered to a plugin through an exporter. [ROADMAP.md](ROADMAP.md) says what
-  comes next.
+- **Not built:** the CLAP exporter; a page in a plugin window anywhere but
+  Windows, where `seam-webview` shows it; and MIDI delivered to a plugin
+  through an exporter. [ROADMAP.md](ROADMAP.md) says what comes next.
 
 ## Start here
 
@@ -51,13 +49,13 @@ export together. Read it first, then the crate overviews it links.
 
 The Rust crates are in `crates/`: the core (`params`, `undo`, `session`,
 `learn`, `ump`), the parameters' derives (`macros`), the
-[exporters](docs/glossary.md#exporter) (`host`), the page protocol (`bridge`)
-and test tools (`testkit`). Beside them are the example
-gain (`examples/gain`), the example EQ (`examples/eq`), the page's React hooks
-(`page`), the generic JUCE adapter (`adapters/juce`), the repository's tasks
-(`xtask`), the fuzz targets (`fuzz`) and the comparison against plain JUCE
-(`bench`). The codemap in [ARCHITECTURE.md](ARCHITECTURE.md#codemap) says what
-each one is.
+[exporters](docs/glossary.md#exporter) (`host`), the page protocol (`bridge`),
+the page in a plugin's window (`webview`) and test tools (`testkit`). Beside
+them are the example gain (`examples/gain`), the example EQ (`examples/eq`),
+the page's React hooks (`page`), the generic JUCE adapter (`adapters/juce`),
+the repository's tasks (`xtask`), the fuzz targets (`fuzz`) and the comparison
+against plain JUCE (`bench`). The codemap in
+[ARCHITECTURE.md](ARCHITECTURE.md#codemap) says what each one is.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) has the codemap, the invariants and the
 thread model, and [docs/testing.md](docs/testing.md) the test rules and what
@@ -81,6 +79,7 @@ python3 scripts/check-core-deps.py
 python3 scripts/check-comment-tags.py
 python3 scripts/check-decision-index.py
 cd page && npm ci && npm run typecheck && npm test
+cd examples/gain/page && npm ci && npm run typecheck && npm run build
 ```
 
 These are the checks a change most often trips. Run the scripts with `python3`

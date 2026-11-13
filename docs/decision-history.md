@@ -911,6 +911,27 @@ Built on 2026-11-13 with D99. A resize the editor asks for itself was planned
 and not built, since nothing asks for one; the view asks the frame only for a
 new scale. To confirm.
 
+### D101. A page's files and a build without them
+
+[The decision](decisions.md#d101-a-pages-files-and-a-build-without-them)
+
+Built on 2026-11-13 with the first page in a plugin window, the example
+gain's. To confirm.
+
+### D102. The WebView's data folder
+
+[The decision](decisions.md#d102-the-webviews-data-folder)
+
+Built on 2026-11-13. Sixteen editors of one plugin were opened in one process
+that day, in windows never shown. To confirm.
+
+### D103. The WebView's messages and what it takes
+
+[The decision](decisions.md#d103-the-webviews-messages-and-what-it-takes)
+
+Built on 2026-11-13. Whether the host keeps its shortcuts while the page has
+the keyboard waits for a run in a host. To confirm.
+
 ### D104. The module stays loaded once an editor has opened
 
 [The decision](decisions.md#d104-the-module-stays-loaded-once-an-editor-has-opened)

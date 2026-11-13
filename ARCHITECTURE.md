@@ -53,16 +53,23 @@ reading how Seam works inside, start with
 - `crates/bridge`: the page protocol, its native side (`Dispatcher`, which
   answers a page and tells it of every change), and the TypeScript generated
   from it.
+- `crates/webview`: the shell that shows a plugin's page in the host's
+  window, on Windows: `Page` makes the `Editor`, a WebView2 child window
+  through wry, which serves the page from bytes built into the plugin and
+  joins it to a `Dispatcher` (`windows.rs`).
 - `crates/testkit`: test tools: allocation gate, latches, expected assertions,
   drift check.
 - `examples/gain`: the example gain, which wires parameters, undo, a saved
-  value, MIDI learn and the VST3 export in one plugin;
-  [docs/first-plugin.md](docs/first-plugin.md) walks through it.
+  value, MIDI learn, a page in the host's window (`page/`, `src/page.rs`) and
+  the VST3 export in one plugin; [docs/first-plugin.md](docs/first-plugin.md)
+  walks through it.
 - `examples/eq`: the example EQ, the reference for performance and parity, as a
   VST3 module or a static library for the adapter.
-- `page`: React hooks for the page, over a pluggable transport. Its client
-  holds writes made before the native side answers in `src/held.ts`, and limits
-  a position to 0 to 1, which the bridge's decoding refuses outside.
+- `page`: React hooks for the page, over a pluggable transport: a memory
+  one for tests, and `webviewTransport` for a page in a plugin's window. Its
+  client holds writes made before the native side answers in `src/held.ts`,
+  and limits a position to 0 to 1, which the bridge's decoding refuses
+  outside.
 - `adapters/juce`: the generic JUCE adapter: any Seam plugin, through `seam.h`,
   as a JUCE plugin.
 - `xtask`: `cargo xtask gen` writes every generated file; each has a drift gate.
@@ -203,10 +210,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 - Generated files (the page's protocol types, its test parameter map, `seam.h`,
   the example EQ's JUCE settings) are committed and compared byte for byte in
   CI ([what runs the generator][generator], [keeping the header true][header]).
-- Absent: no WebView glue exists yet, so no plugin in the repository has an
-  editor, though the VST3 exporter opens one a plugin hands out; and no
-  exporter delivers MIDI events yet ([where the WebView pieces live][webview],
-  [the VST3 exporter's shape][vst3]).
+- A page in a plugin's window exists on Windows only: elsewhere
+  `seam-webview` offers no editor, and a host shows its own controls ([where
+  the WebView pieces live][webview]). Absent: no exporter delivers MIDI events
+  yet ([the VST3 exporter's shape][vst3]).
 
 ## Threads
 
@@ -215,8 +222,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   takes both back at deactivation. A tick, about 60 times a second, ticks the
   parts the plugin keeps, then calls `Plugin::idle`, then tells the host of
   the plugin's [edits](docs/glossary.md#edit), then ticks each open editor
-  ([a plugin's editor][editor]); no editor runs a timer of its own. A
-  session
+  ([a plugin's editor][editor]); no editor runs a timer of its own. A page's
+  messages arrive on this thread too, from its message loop, outside any
+  tick. A session
   restore applies to its participants in the parts' tick; `Driver::tick`
   (`parts.rs`) says what it ticks, and in what order. The engine reaches the
   parts through a `Driver`, which does not keep them alive, so a plugin that
@@ -248,13 +256,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 
 ## Decided, not built
 
-- Dependency edges: a shell crate, `seam-webview`, on `bridge` and wry.
-- The page path: wry inside a plugin window, Tauri for the standalone.
-  `seam-webview` holds the wry glue (the IPC handler, the custom-scheme asset
-  server, opening the page in a window). A release build serves the page from
-  bytes in the binary over that scheme; a debug build loads a dev server when
-  `SEAM_PAGE_DEV_URL` is set, which release builds never read. Open: that macOS
-  WebKit inside a host process loads plain `http://127.0.0.1` is not verified.
+- The page path beyond Windows: wry inside a plugin window on macOS, and
+  Tauri for the standalone. Open: that macOS WebKit inside a host process
+  loads plain `http://127.0.0.1` is not verified.
 - MIDI-CI: a VST3 host speaks it for the plugin, which states what it supports
   through VST3's interfaces. Everywhere else a core crate, `seam-ci`, answers
   with UMP in and out, SysEx7 included, through the C interface and CLAP. Open:

@@ -3,8 +3,8 @@
 This guide walks through [`examples/gain`](../examples/gain/src/lib.rs), a
 stereo gain that uses the parts of Seam most plugins need: parameters, saved
 state, undo, a value that is not a parameter, MIDI learn, and the VST3 export.
-It leaves two things out: it has no editor or page, so a host shows its
-generic controls, and nothing smooths its gain. Read it beside the source,
+It leaves one thing out: nothing smooths its gain. Its editor, a page in the
+host's window, comes last. Read it beside the source,
 which fits one sitting. The guide follows the order in which you would write
 the plugin, and links the item that owns each rule rather than repeating it.
 Every block of Rust and TOML below is quoted from the example or its tests,
@@ -41,6 +41,7 @@ seam-host.workspace = true
 seam-learn.workspace = true
 seam-params = { workspace = true, features = ["derive"] }
 seam-undo.workspace = true
+seam-webview.workspace = true
 
 [dev-dependencies]
 seam-host = { workspace = true, features = ["vst3", "test-host"] }
@@ -49,7 +50,8 @@ seam-ump.workspace = true
 
 `seam-host` builds no exporter by default, so the crate's own `vst3` feature
 turns the VST3 one on, and the tests add the test host. `seam-params`'s
-`derive` feature gives `#[derive(Params)]` and `#[derive(Choices)]`. Each
+`derive` feature gives `#[derive(Params)]` and `#[derive(Choices)]`.
+`seam-webview` shows the plugin's page in the host's window (section 9). Each
 `workspace = true` takes its value from the repository's root manifest;
 [your own crate](#your-own-crate) says what replaces it outside this
 repository.
@@ -347,12 +349,62 @@ cargo test -p seam-example-gain
 
 [docs/testing.md](testing.md) says what each CI lane proves.
 
-## 9. Build and bundle the module
+## 9. A page in the host's window
+
+The gain's editor is a page: a slider on the gain and a field for the label,
+a small Vite and React app in
+[`examples/gain/page`](../examples/gain/page/src/main.tsx) on the `seam-page`
+hooks, typed by the gain's parameter map, which a test of the gain keeps in
+step with its declarations. `npm run build` there writes three files under
+fixed names, which
+[`src/page.rs`](../examples/gain/src/page.rs) builds into the plugin when they
+are there. When they are not, `build.rs` warns and the plugin offers no
+editor: Cargo never runs Node. The plugin hands the editor out:
+
+```rust
+fn editor(&mut self) -> Option<Box<dyn Editor>> {
+    page::editor(self)
+}
+```
+
+[`Page`](../crates/webview/src/lib.rs), from `seam-webview`, makes it from the
+built files, a size and two commands. The label's commands go through the
+same value the plugin saves, so a rename from the page is one undo step,
+saved with the plugin:
+
+```rust
+pub(crate) fn editor(gain: &Gain) -> Option<Box<dyn Editor>> {
+    let (read, write) = (gain.label.clone(), gain.label.clone());
+    Page::new(&Gain::INFO, gain.ui().clone(), PAGE?)
+        .with_size(Size {
+            width: 420,
+            height: 220,
+        })
+        .command("getLabel", move |()| Ok(read.get()))
+        .command("setLabel", move |label: String| {
+            write.set(label);
+            Ok(())
+        })
+        .into_editor()
+}
+```
+
+The page writes the gain through a clone of the parts' handle, as a user
+would: one host gesture and one undo step per drag. The VST3 exporter opens
+the editor in the host's window on Windows, follows its size and scale, and
+ticks it after each idle; elsewhere `into_editor` gives `None`, and the host
+shows its own controls. A debug build loads the page from Vite's dev server,
+with hot reload, when `SEAM_PAGE_DEV_URL` holds the address `npm run dev`
+prints.
+
+## 10. Build and bundle the module
 
 `export_vst3!(Gain)` at the top of the crate's `lib.rs` turns the `cdylib` into
 a VST3 module, under the crate's own `vst3` feature from the manifest above.
+Build the page first, so the module has an editor:
 
 ```sh
+cd examples/gain/page && npm ci && npm run build && cd ../../..
 cargo build -p seam-example-gain --release
 ```
 
@@ -367,10 +419,13 @@ cp target/release/seam_example_gain.dll \
 ```
 
 Copy the bundle to `C:\Program Files\Common Files\VST3` and rescan in the host.
-The plugin has no editor, so the host shows its own generic controls for the
-three parameters. [pluginval](https://github.com/Tracktion/pluginval) checks a
-bundle without a host. CI runs version 1.0.4 on the EQ's bundle with these
-options; for the gain's:
+The host opens the page as the plugin's editor. It needs the WebView2 runtime,
+which Windows 11 ships; where it is missing, the editor does not open, the
+fault report says why, and the audio goes on. The page keeps its browser data
+in `%LOCALAPPDATA%\dev.seam.example-gain\WebView2`.
+[pluginval](https://github.com/Tracktion/pluginval) checks a bundle without a
+host. CI runs version 1.0.4 on the EQ's bundle with these options; for the
+gain's:
 
 ```sh
 pluginval --strictness-level 5 --validate-in-process --skip-gui-tests \

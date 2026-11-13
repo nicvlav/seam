@@ -1,7 +1,7 @@
 //! The guide `docs/first-plugin.md` quotes this crate: each of its Rust and
-//! TOML blocks is a run of lines of `src/lib.rs`, `tests/gain.rs` or
-//! `Cargo.toml`, indentation and blank lines aside, so a change to quoted
-//! code fails here until the guide follows it.
+//! TOML blocks is a run of lines of `src/lib.rs`, `src/page.rs`,
+//! `tests/gain.rs` or `Cargo.toml`, indentation and blank lines aside, so a
+//! change to quoted code fails here until the guide follows it.
 
 use std::path::Path;
 
@@ -41,7 +41,7 @@ impl Language {
     /// The files a block may quote, from the crate's root.
     fn sources(self) -> &'static [&'static str] {
         match self {
-            Language::Rust => &["src/lib.rs", "tests/gain.rs"],
+            Language::Rust => &["src/lib.rs", "src/page.rs", "tests/gain.rs"],
             Language::Toml => &["Cargo.toml"],
         }
     }

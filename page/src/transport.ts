@@ -1,10 +1,10 @@
 // How messages travel between the page and the native side.
 //
 // The page never knows what carries them: whatever does is a Transport, and
-// nothing in this package imports one. Only the in-memory transport exists
-// today, for tests; a mock native side in a browser could use it too, but none
-// is built. The transports for a plugin window and for a standalone app are
-// planned.
+// nothing else in this package imports one. Two exist: the in-memory
+// transport, for tests (a mock native side in a browser could use it too, but
+// none is built), and the WebView transport, for a page in a plugin's window
+// (`seam-webview`). The transport for a standalone app is planned.
 
 import type { NativeMessage, PageMessage } from "./generated/protocol";
 
@@ -59,6 +59,47 @@ export function memoryTransport(): MemoryTransport {
         nativeListeners.add(handler);
         return () => nativeListeners.delete(handler);
       },
+    },
+  };
+}
+
+/** What a page in a plugin's window finds on `window`: `ipc`, which the
+    WebView provides to post to the native side, and `__seam`, which
+    `webviewTransport` installs for the native side to deliver through. */
+export interface WebViewGlobals {
+  ipc?: { postMessage(text: string): void };
+  __seam?: { receive(text: string): void };
+}
+
+/** The transport of a page in a plugin's window, whose native side is
+    `seam-webview`: each message goes out as JSON text through
+    `window.ipc.postMessage`, and the native side delivers its own, in
+    order, as JSON text to `window.__seam.receive`, which this installs.
+
+    `scope` is where the two live, `globalThis` in a page; a test passes a
+    fake. Outside a plugin's window, with no `ipc`, sends are dropped. A
+    native message that is not JSON is dropped too: the client checks the
+    shape of every message that is. */
+export function webviewTransport(scope: WebViewGlobals = globalThis as WebViewGlobals): Transport {
+  const listeners = new Set<(message: NativeMessage) => void>();
+  scope.__seam = {
+    receive(text) {
+      let message: NativeMessage;
+      try {
+        message = JSON.parse(text) as NativeMessage;
+      } catch {
+        return;
+      }
+      for (const listener of [...listeners]) listener(message);
+    },
+  };
+  return {
+    send(message) {
+      scope.ipc?.postMessage(JSON.stringify(message));
+    },
+    listen(handler) {
+      listeners.add(handler);
+      return () => listeners.delete(handler);
     },
   };
 }

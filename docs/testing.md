@@ -30,6 +30,9 @@ SEAM_SOAK_SECONDS=60 cargo test -p seam-example-eq --release --test matrix -- --
 cargo +nightly fuzz run saved_block  # nightly workflow, ten minutes per target; in fuzz/, needs a nightly compiler
 scripts/run-benches.sh               # pull request, against the base; Linux, with valgrind and iai-callgrind-runner
 cd page && npm ci && npm run typecheck && npm test                   # pull request
+cd examples/gain/page && npm ci && npm run typecheck && npm run build   # pull request: the gain's page
+cargo test -p seam-webview --test hidden_window -- --ignored          # by hand, Windows: the page in a real WebView2, in windows never shown
+cargo test -p seam-example-gain --test page -- --ignored              # by hand, Windows, with the gain's page built: the same, for its page
 ```
 
 ## CI lanes
@@ -84,10 +87,11 @@ real-time sanitizer, which needs Linux.
 | `core builds alone`: No decision ids in comments or docs | No comment or doc in a tracked file cites a decision id, an audit finding id or a stage, and no code comment points at the record (see [Repository checks](#repository-checks)). |
 | `core builds alone`: The decision index matches the record and the code | Every file and item `docs/decision-index.md` lists exists, and it has a heading for every id in the decision record. |
 | `core builds alone`: The check scripts' own tests | Each check script refuses the bad input it exists for (see [Repository checks](#repository-checks)). |
-| `core builds alone`: Build the core alone | Every workspace crate but the host, the two example plugins, the test tools and xtask builds on a runner with no WebView or GTK libraries; a new crate is built there until it is excluded. |
+| `core builds alone`: Build the core alone | Every workspace crate but the host, the WebView shell, the two example plugins, the test tools and xtask builds on a runner with no WebView or GTK libraries; a new crate is built there until it is excluded. |
 | `protocol shape history` (pull requests) | `crates/bridge/protocol-shape.txt` only gains lines against the base revision (see [Repository checks](#repository-checks)). |
 | `loom models` | The lock-free hand-offs are correct under every interleaving their atomics allow, and `scripts/run-loom.py` fails unless every model ran (section 3). |
 | `page`: Typecheck, Test | The page compiles against the committed generated types, and its tests pass. |
+| `page`: the gain's page | The example gain's page installs, type-checks against the package and the gain's generated parameter map, and builds the files the gain embeds. |
 | `JUCE adapter` (macOS, started by hand) | The example EQ builds through the adapter as VST3 and AU, at the JUCE commit `bench/` pins, and both the Rust library and the plugin binaries hold arm64 and x86_64. It does not load the plugin. |
 | `JUCE adapter` (Windows, started by hand) | The example EQ's VST3 build through the adapter passes the Steinberg validator, built from the VST3 SDK at the pinned commit, as the native `plugin validators (windows)` lane passes Seam's own. |
 | Nightly: `miri` | `seam-host`'s tests, the core crates' unit tests and some integration tests find no undefined behaviour under Stacked Borrows and Tree Borrows (see [Miri](#miri)). |
@@ -473,6 +477,10 @@ The generated files are:
 - the protocol module;
 - a parameter map for the page's own tests (`page/test/generated/params.ts`,
   from the declarations in `xtask/src/generate.rs`);
+- the example gain's parameter map, which its page is typed by
+  (`examples/gain/page/src/generated/params.ts`). The gain's own
+  `tests/page_params.rs` is its drift gate, not xtask's: xtask linking a
+  second plugin would bring two sets of VST3 entry points into one binary;
 - the C header the `cabi` feature generates for the JUCE adapter
   (`crates/host/include/seam.h`);
 - the example EQ's JUCE settings (`examples/eq/seam-juce.cmake`).

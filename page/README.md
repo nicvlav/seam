@@ -9,10 +9,12 @@ mirrors and edits them.
 
 The package talks to the native side through `Transport` (`send` a
 `PageMessage`, `listen` for `NativeMessage`s), which keeps the order of messages
-both ways, and imports nothing else. Only `memoryTransport()` exists today, for
-tests; no browser mock of the native side is built. A transport for a plugin
-window and one for a standalone app are planned. The native side is
-`Dispatcher`, in the `seam-bridge` crate. The message types in
+both ways, and imports nothing else. `memoryTransport()` is for tests; no
+browser mock of the native side is built. `webviewTransport()` is for a page in
+a plugin's window, whose native side is the `seam-webview` crate: it posts
+through `window.ipc` and installs `window.__seam` for the native side to
+deliver through. A transport for a standalone app is planned. The native side
+is `Dispatcher`, in the `seam-bridge` crate. The message types in
 `src/generated/protocol.ts` are generated from Rust; do not edit them.
 
 ## Recipe
