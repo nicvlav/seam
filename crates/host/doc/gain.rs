@@ -91,7 +91,7 @@
 #         assert!(!BREAK.load(Ordering::Relaxed), "the plugin broke");
 #         TICKS.fetch_add(1, Ordering::Relaxed);
 #         if EDIT.swap(false, Ordering::Relaxed) {
-#             self.parts.params().write(self.params.gain.id(), 6.0);
+#             self.parts.ui().write(self.params.gain.id(), 6.0);
 #         }
 #     }
 # }

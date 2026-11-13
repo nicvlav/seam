@@ -378,7 +378,7 @@ pub trait Plugin: 'static {
     /// let cutoff = synth.params.cutoff.id();
     ///
     /// // The user drags the cutoff on the page: one undo step at the next tick.
-    /// synth.parts.params().write(cutoff, 500.0);
+    /// synth.parts.ui().write(cutoff, 500.0);
     /// tick(&mut synth);
     /// assert_eq!(synth.history.len(), 1);
     ///

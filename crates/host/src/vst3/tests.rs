@@ -212,13 +212,13 @@ impl Plugin for Probe {
         probe(|state| state.idles += 1);
         assert!(!probe(|state| state.panic_in_idle), "an idle call's bug");
         if let Some((key, value)) = probe(|state| state.edit.take()) {
-            assert!(self.parts.params().write(self.id(key), value));
+            assert!(self.parts.ui().write(self.id(key), value));
         }
         if let Some((key, value)) = probe(|state| state.sync.take()) {
             self.program.sync(self.id(key), value);
         }
         if probe(|state| state.hold) && self.held.is_none() {
-            let gesture = self.parts.params().begin(self.id("gain"));
+            let gesture = self.parts.ui().begin(self.id("gain"));
             gesture.write(3.0);
             self.held = Some(gesture);
         }

@@ -233,7 +233,7 @@ fn one_tick_applies_a_restore_saves_a_learned_mapping_and_records_a_gesture() {
 
     // A drag, and a controller learned in the same tick.
     let on = params.on.id();
-    parts.params().write(on, 0.0);
+    parts.ui().write(on, 0.0);
     let mut audio = driver.learn_audio().expect("learn is on");
     parts.learn().arm(on, Takes::CONTROLLER).expect("a target");
     let voice = Voice::Midi1ControlChange {
@@ -321,7 +321,7 @@ fn undo_panics_while_the_plugin_s_own_history_is_alive() {
     use seam_undo::{Bound, History};
 
     let (params, mut parts) = Parts::for_plugin::<Minimal>().expect("valid declarations");
-    let own = History::new(parts.params(), Bound::default()).expect("the first history");
+    let own = History::new(parts.ui(), Bound::default()).expect("the first history");
     expect_contract_panic("use the one Parts::undo returns", || {
         let _ = parts.undo(Bound::default());
     });
@@ -330,7 +330,7 @@ fn undo_panics_while_the_plugin_s_own_history_is_alive() {
     let history = parts.undo(Bound::default());
     let again = parts.undo(Bound::default());
     let driver = Driver::of(&parts);
-    parts.params().write(params.on.id(), 0.0);
+    parts.ui().write(params.on.id(), 0.0);
     driver.tick();
     assert_eq!(history.len(), 1);
     assert_eq!(again.len(), 1, "a second call hands back the same history");

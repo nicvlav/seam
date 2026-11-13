@@ -71,7 +71,7 @@ impl Gain {
 
     /// The parameter handle for an editor's writes, which undo records.
     pub fn ui(&self) -> &UiParams {
-        self.parts.params()
+        self.parts.ui()
     }
 
     /// The undo history of the parameters and the label.
