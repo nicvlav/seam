@@ -466,18 +466,30 @@ impl SavedState {
 
     /// Returns the block as UTF-8 JSON with no byte-order mark:
     /// `{"seamStateVersion": 1, "pluginStateVersion": 0, "parameters": {...},
-    /// "extra": {...}}`.
+    /// "runTime": {...}, "extra": {...}}`.
     ///
     /// Both versions are always written, the plugin's at 0 too, so every
     /// block says what it holds. Each is the higher of this build's and the
     /// last loaded block's, on its own, so a newer build that loads the block
     /// does not migrate it as an older one, and finds what it wrote. The
     /// parameters come in declaration order, then the unknown keys the last
-    /// load kept. The session's `extra` is left out when there is nothing in
-    /// it. Last come the top-level keys the last load held that this build
-    /// does not read, in key order. A bool writes `true` or `false`, a choice
-    /// its index as an integer, and everything else a double that holds the
-    /// stored `f32` exactly.
+    /// load kept. A bool writes `true` or `false`, a choice its index as an
+    /// integer, and everything else a double that holds the stored `f32`
+    /// exactly.
+    ///
+    /// `runTime` holds the parameters the plugin made at run time and still
+    /// holds ([`Parts::declare`](crate::Parts::declare)), sorted by path:
+    /// each `{"value": ..., "learned": {...}}`, its value read now and
+    /// written as `parameters` writes one, and its learned mapping as the
+    /// last tick captured it. While a load's entries wait for the pass that
+    /// applies it, it holds them as loaded, and the live value only of a
+    /// parameter made since that load. It takes the room the rest of the
+    /// block leaves: an entry with no room is left out, and the instance
+    /// records a fault. With no entry, the key is left out.
+    ///
+    /// The session's `extra` is left out when there is nothing in it. Last
+    /// come the top-level keys the last load held that this build does not
+    /// read, in key order.
     ///
     /// Thread: any but audio.
     ///
@@ -560,6 +572,16 @@ impl SavedState {
     /// load marks the restore as stored before its first write, so no undo
     /// history replays anything from before it. Then the session stores
     /// `extra`, which it applies at a later tick.
+    ///
+    /// The load writes no parameter made at run time: on this thread those
+    /// are the tree the load replaces, still playing. It holds `runTime`'s
+    /// entries instead, replacing what an earlier load held. A parameter made
+    /// under a held path is born holding its value, learned to its mapping.
+    /// Once a pass of the session's tick that began after this load has
+    /// finished, each one made before the load and still held takes the
+    /// value for its path, or its default, and the entries go. The entries
+    /// count against the room the block leaves for `extra`, each value at
+    /// its longest, so a block never saves back longer than it loaded.
     ///
     /// # Errors
     ///

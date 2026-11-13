@@ -24,7 +24,9 @@ reading how Seam works inside, start with
 - `crates/params`: parameter declarations, [typed
   parameters](docs/glossary.md#typed-parameter), the value
   [store](docs/glossary.md#store), write [origins](docs/glossary.md#origin),
-  [gestures](docs/glossary.md#gesture), change counters.
+  [gestures](docs/glossary.md#gesture), change counters, and the declarer that
+  makes [parameters at run time](docs/glossary.md#parameter-made-at-run-time),
+  in no set.
 - `crates/macros`: `#[derive(Params)]` and `#[derive(Choices)]`, which
   `params` re-exports under its `derive` feature: a proc-macro crate below the
   core, on `syn`.
@@ -38,7 +40,10 @@ reading how Seam works inside, start with
   `mappings/session.rs`.
 - `crates/ump`: Universal MIDI Packets, the event list MIDI travels in.
 - `crates/host`: the `Plugin` trait, the [parts](docs/glossary.md#parts) Seam
-  builds for each instance (`parts.rs`), the saved block (`SavedState`), and
+  builds for each instance (`parts.rs`, with the parameters a plugin makes at
+  run time in `parts/run_time.rs`), the saved block (`SavedState`), which
+  keeps those parameters by [path](docs/glossary.md#path)
+  (`state/run_time.rs`), and
   the exporters behind features: `vst3`, and `cabi` (the C interface and
   generated `include/seam.h`). The exporters are thin shells over one core,
   `engine`, which holds the plugin's life and builds with no feature. CLAP is
@@ -80,7 +85,9 @@ Read these in order to change what happens to a block.
    denormals. Then `run_held` takes the processor out of its `AudioSlot`.
    When the plugin's parts have learn on, learn's audio side, which the
    activation took through the parts' `Driver`, runs once over the block's
-   MIDI, so learned writes land before the processor reads. Then `pieces`
+   MIDI, so learned writes land before the processor reads. A learned write to
+   a parameter made at run time goes through the store learn's table holds
+   for it. Then `pieces`
    calls `Processor::process` with a `Block` (`crates/host/src/audio.rs`) in
    [pieces](docs/glossary.md#piece) of at most the activation's `max_frames`.
    `Channels::run` (`boundary/channels.rs`) builds each piece's channels in
@@ -107,7 +114,8 @@ Read these in order to change what happens to a block.
    `ParamSet::value` and compares `ParamSet::changes` at the top of its block,
    and recomputes only what moved (`retune` in the example EQ). A reader that
    needs a value, its count and its origin together asks `ParamSet::read`,
-   which returns a `Reading`.
+   which returns a `Reading`. A parameter made at run time has a cell of its
+   own, in no set, and its typed parameter reads it the same way.
 6. A write from the page or an editor goes the other way: `UiParams` stores into
    the same cell, and at the next tick the `HostEventDrain` (a
    [drain](docs/glossary.md#drain)) tells the host.
@@ -178,6 +186,15 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   it does not read, so a block a newer build wrote reaches it again whole
   ([the saved block's two versions][versions], [upgrading an older
   block][migration]).
+- A parameter made at run time is in no set: no host lists it or hears of
+  it, and a save writes it under its path ([parameters made at
+  run time][run-time]).
+- A tick's cost is what changed, never how many parameters made at run time
+  exist: learn walks the armed and mapped ones, undo the gestures that
+  closed, and the save's list of them is swept as new names double it.
+- The audio thread never lets a store go. A typed parameter's drop asserts it
+  is off the audio thread in a debug build, and a learn table that routes to
+  a store drops on the UI thread.
 - Generated files (the page's protocol types, its test parameter map, `seam.h`,
   the example EQ's JUCE settings) are committed and compared byte for byte in
   CI ([what runs the generator][generator], [keeping the header true][header]).
@@ -245,6 +262,14 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 - Learn into a plain value: its target writes with `Origin::Learn` and opens
   no gesture, so a learned value is never an undo step and the target's
   `held` is `Value::gesture_open`. Seam has no ready-made target for one.
+- Handing the audio half of an owner of parameters made at run time to the
+  processor and back. It keys an owner by its stores, not the plugin's id, and
+  follows the plugin's list, so undo, redo and a load reach the audio side. A
+  load's change to the tree reaches the processor as one message, the old
+  halves out and the new in at the top of a block, and a load never assigns a
+  parameter of an owner on its way out.
+- A page names a parameter made at run time by its path; the generated
+  parameter map stays the listed parameters'.
 - CLAP: an exporter over the same engine, ticked through the host's
   timer-support extension. Open: a CLAP host may lack timer support.
 - Learn's snapshot fallback: should a later `triple_buffer` break what the
@@ -262,6 +287,7 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 [mark]: docs/decisions.md#d67-checking-the-audio-thread-locking-rule
 [migration]: docs/decisions.md#d80-upgrading-an-older-saved-block
 [panic]: docs/decisions.md#d60-a-panic-inside-a-hosts-call
+[run-time]: docs/decisions.md#d96-parameters-made-at-run-time
 [send]: docs/decisions.md#d51-whether-a-plugin-must-be-send
 [tick]: docs/decisions.md#d53-what-ticks-a-plugin-with-no-editor-open
 [versions]: docs/decisions.md#d84-the-saved-blocks-two-versions

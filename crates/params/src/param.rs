@@ -573,9 +573,9 @@ impl<E> AnyParam for Choice<E> {
     }
 }
 
-/// What [`UiParams::write`](crate::UiParams::write) and the other calls that name one parameter
-/// take: a typed parameter, by reference, with a value of its type, or a
-/// [`ParamId`] with the stored `f32`.
+/// What [`UiParams::write`](crate::UiParams::write) and the other calls
+/// that name one parameter take: a typed parameter, by reference, with a
+/// value of its type, or a [`ParamId`] with the stored `f32`.
 ///
 /// A typed parameter reaches one the host lists and one made at run time
 /// alike; a [`ParamId`] reaches only a listed one. It is sealed: only this
@@ -616,8 +616,8 @@ pub trait Writable: sealed::Sealed {
     fn decode(stored: f32, token: sealed::Token) -> Self::Value;
 }
 
-/// A parameter as a [`Writable`] names it, for [`UiParams`](crate::UiParams) to find among
-/// its own.
+/// A parameter as a [`Writable`] names it, for
+/// [`UiParams`](crate::UiParams) to find among its own.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy)]
 pub struct Named<'a>(pub(crate) Naming<'a>);

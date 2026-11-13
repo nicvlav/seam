@@ -69,6 +69,7 @@ pub enum TargetId {
 /// use seam_learn::{Config, Learn, TargetId, Takes};
 #[doc = include_str!("../doc/setup.rs")]
 #[doc = include_str!("../doc/run_time.rs")]
+/// // `volume` is a parameter made at run time, as `Parts::declare` makes one.
 /// let (mut learn, _audio) = Learn::new(&set, Config::default());
 /// learn.arm(&volume, Takes::CONTROLLER)?;
 /// let Some((TargetId::RunTime(_), _)) = learn.armed() else {
@@ -112,7 +113,8 @@ impl RunTimeId {
 /// let listed: Float = set.bind("gain")?;
 /// assert!(on_seven(&mut learn, &listed)); // the same target as `gain`
 /// assert!(learn.mapping(gain).is_some());
-/// assert!(on_seven(&mut learn, &volume)); // one made at run time
+/// // `volume` is a parameter made at run time, as `Parts::declare` makes one.
+/// assert!(on_seven(&mut learn, &volume));
 /// assert_eq!(learn.len(), 2);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

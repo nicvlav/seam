@@ -234,7 +234,9 @@ impl Parts {
     }
 
     /// Turns undo on, with every parameter enrolled, and returns the
-    /// history. A second call returns the same history: clones share it.
+    /// history. A second call returns the same history: clones share it. A
+    /// parameter made at run time ([`declare`](Self::declare)) needs no
+    /// enrolment: its gestures are steps whenever undo is on.
     ///
     /// The history is pruned to `bound`; a later call's is ignored.
     ///
@@ -324,6 +326,9 @@ impl Parts {
     /// Returns a plain value that starts at `default` and is saved with the
     /// session under `key`. A project saved without the key loads `default`
     /// into it too, so a new instance and an older project cannot differ.
+    ///
+    /// It is for text, a path or structure. A number the DSP reads is a
+    /// parameter instead: [`declare`](Self::declare) says which to use.
     ///
     /// The value is shared: clone it to whoever else reads or writes it.
     /// Undo records it once it is [enrolled](History::enroll), a separate
@@ -471,7 +476,8 @@ impl Parts {
     ///
     /// // The host lists only the gain; a save writes the group's volume too.
     /// assert_eq!(parts.set().len(), 1);
-    /// let block: serde_json::Value = serde_json::from_slice(&parts.saved().save())?;
+    /// let saved = parts.saved().save();
+    /// let block: serde_json::Value = serde_json::from_slice(&saved)?;
     /// assert_eq!(block["runTime"]["group/17/volume"]["value"], -6.0);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -494,10 +500,12 @@ impl Parts {
     /// ```
     #[doc = include_str!("../doc/gain.rs")]
     /// let (_params, parts) = Parts::for_plugin::<Gain>()?;
-    /// let drive: Float = parts.add("", FloatDecl::new("drive", "Drive", 0.0..=1.0, 0.0));
+    /// let drive = FloatDecl::new("drive", "Drive", 0.0..=1.0, 0.0);
+    /// let drive: Float = parts.add("", drive);
     /// assert!(parts.ui().write(&drive, 0.5));
     ///
-    /// let block: serde_json::Value = serde_json::from_slice(&parts.saved().save())?;
+    /// let saved = parts.saved().save();
+    /// let block: serde_json::Value = serde_json::from_slice(&saved)?;
     /// assert_eq!(block["runTime"]["drive"]["value"], 0.5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -581,17 +589,28 @@ impl Driver {
     ///    commits, so the session can capture the mapping only at its next
     ///    tick. Polled after the session, a new mapping would miss the save
     ///    until the tick after.
-    /// 2. The session's tick: it captures what changed for the next save, and
+    /// 2. At the first tick that sees a new load, when learn is on: learn
+    ///    drops the mapping of every parameter made at run time
+    ///    ([`Parts::declare`]) before that load, so none the load's pass makes
+    ///    is refused as full for one of the tree it replaces.
+    /// 3. The session's tick: it captures what changed for the next save, and
     ///    applies a session the host's load restored.
-    /// 3. The history's tick, when undo is on: it records what changed since
+    /// 4. Once a pass that began after a load has finished: each parameter
+    ///    made at run time before that load, and still held, takes the
+    ///    load's value for its path, or its default, and its mapping, or
+    ///    none. Then the load's entries for them go.
+    /// 5. The history's tick, when undo is on: it records what changed since
     ///    the last tick. Its place does not matter: it clears the history
     ///    whenever a restore was stored or applied since it last looked.
-    /// 4. [`Parts::sync`]: it captures each value [`Parts::saved_value`]
+    /// 6. [`Parts::sync`]: it captures each value [`Parts::saved_value`]
     ///    made that moved since the last tick, a write undo replayed
     ///    included. It skips one whose last write was its own apply's, which
     ///    the session's tick captured already, but not one another
     ///    participant's apply wrote after it. Until this step a save holds
     ///    the value from before the change.
+    /// 7. When learn's mappings moved since the last tick: it hands the next
+    ///    save the mappings of the parameters made at run time, so they too
+    ///    are captured at the tick.
     ///
     /// Nothing of the parts is held while the session's tick runs, so a
     /// participant the plugin registered may call [`Parts::saved_value`] or
@@ -599,7 +618,8 @@ impl Driver {
     /// learn target's code may not reach learn through [`Parts::learn`].
     ///
     /// When nothing changed it allocates nothing, and its cost does not grow
-    /// with the number of parameters; each saved value costs one atomic load.
+    /// with the number of parameters, those made at run time included; each
+    /// saved value costs one atomic load.
     ///
     /// Thread: main.
     ///

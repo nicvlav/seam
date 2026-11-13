@@ -132,6 +132,7 @@ comments never cite an id: they state the reason in words, and
 | D93 | [How does a plugin declare a struct of parameters without writing `declare`? (D90)](#d93-a-derive-that-writes-declare) | `#[derive(Params)]`, under `seam-params`'s `derive` feature: a `#[param(...)]` mark on each field holds the declaration's arguments, then `name = value` options and lone-word flags, and the field's type names the kind through `Declared`. Each declaration is a named constant ending in `checked`, so `cargo check` refuses a mistake on the mark, two fields with one key included. | decided |
 | D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | decided |
 | D95 | [When does a call at the plugin boundary panic, and when does it return a `Result`? (D90, D91)](#d95-mistakes-panic-failures-return-a-result) | A mistake fixed in the plugin's source, such as a call made twice or a switch turned on without what it needs, panics with what to change; a failure that can depend on data at run time returns a `Result`. So `Parts::undo` and `Parts::midi_learn` return no `Result`, and `Parts::saved_value` keeps one. | decided |
+| D96 | [How does a plugin make parameters while it runs, and how are they saved, undone and learned? (D89, D90, D91)](#d96-parameters-made-at-run-time) | `Parts::declare` and `Parts::add` make the same typed parameters from the same declarations, in no set and listed to no host. Writes, undo and learn reach them as they reach listed ones. A save writes each under its path with its learned mapping; a load writes none on the host's thread, and holds its entries for the declares its pass makes. | to confirm |
 
 **Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
 until decided, and no rule depends on it.
@@ -2409,6 +2410,108 @@ failure, a missing file say, would become the easy path, with a host then
 opening the user's project without the plugin.
 
 [History](decision-history.md#d95-mistakes-panic-failures-return-a-result)
+
+### D96. Parameters made at run time
+
+**Question and C++ Seam.** How does a plugin make parameters while it runs,
+and how are they saved, undone and learned? (D89, D90, D91) Not applicable:
+the C++ Seam's parameters were JUCE's, all made with the processor.
+
+**Rust.** From the same declarations as the listed ones:
+`Parts::declare::<P>(scope)` hands back a `Params` struct's parameters, and
+`Parts::add(scope, decl)` one. They are the same `Float`, `Bool` and
+`Choice<E>`, hosted or not (D89), owned by whatever holds them. A tree of
+instruments, articulations or groups has parameters at every node; a number
+the DSP reads that no host should see is one made once in `Plugin::new`. There
+is no private flag and no pool, and the list a host is shown stays frozen when
+the instance is built. Declaring returns no `Result` (D95): a refused
+declaration, a bypass, a key a struct declares twice and `Declarer::extend`
+panic with what to change, and a struct the derive wrote was checked while
+compiling.
+
+Each is a cell of its own, in no set, holding its declaration. It carries the
+number of the instance that made it, so another instance's `UiParams` and
+learn refuse it as another set's listed parameter is refused, and a count of
+the typed parameters that hold it, so learn, undo and the save can tell when
+the plugin has let it go. Its `id()` panics in a debug build, saying to pass
+the parameter itself: `UiParams::write`, `begin`, `is_open`, `shown`,
+`would_change` and `Edit::write`, and learn's `arm`, `map`, `unmap`, `mapping`
+and `key`, take a typed parameter, with a value of its type where they take
+one. `Gesture::id` returns an `Option`. `watch`, `sync` and the set's reads
+take only a `ParamId`, so none can be handed one.
+
+A write through `UiParams` takes the path a listed parameter's takes, and
+tells the host nothing. Its gesture state lives only while a gesture is open
+on it. A closed user gesture queues a record that carries its store, numbered
+from the clock listed ones are, so a history merges the two in order. Its
+steps need no enrolment and are recorded whenever undo is on. An edit step
+holds its parameter weakly, and replays as nothing once the plugin holds it no
+longer. Learn takes one as `TargetId::RunTime`, an opaque `RunTimeId`, keeps
+it while it is armed or mapped, and lets it go at the first poll after the
+plugin did. The audio thread writes it through the store its table's route
+holds, and a replaced table drops on the UI thread (D9). Nothing a tick does
+grows with how many exist.
+
+A save writes them under `runTime`, after `parameters`, sorted by path: the
+owner's scope and the key, `group/17/volume`. Each is `{"value": ...,
+"learned": {...}}`, its value read at the save and written as `parameters`
+writes one, its mapping in learn's saved form as the last tick captured it
+(D92). Learn's own section leaves them out. The owner saves its structure only,
+in a participant whose apply declares each owner again through a `Maker`. The
+parameter declared last under a path is the one saved. A path taken from a
+parameter the plugin still holds is a fault, unless a restore's apply takes it
+from one declared before that restore, as a tree coming back does. A save never
+writes a block a load would refuse: the entries take the room the rest of the
+block leaves, in path order, and one with no room is left out and a fault.
+
+A load writes none of them on the host's thread, where the live ones are the
+tree the load replaces, still playing. It holds the entries, counted against
+the room it leaves `extra` with each value at its longest, and a declare under
+a held path is born holding the value, learned to the mapping. The first tick
+that sees the load has learn drop the mapping of each one declared before it,
+so none the load's pass makes is refused as full. Once a pass of the session
+that began after the load stored its sections has finished, each one declared
+before the load and still held takes the value held for its path, or its
+default, as a restore, and the mapping held, or none: a parameter made once in
+`new`, or an owner a participant kept. Then the entries go; a save meanwhile
+writes them as loaded. The restore clock's stored count orders the two
+threads: the entries record it after the load's parameter writes, the
+session's store moves it under the session's lock, where a pass reads it, and
+each name records it at its declare.
+
+Handing an owner's audio half to the processor and back, and a page naming one
+by its path, are not built.
+
+To confirm, the choices made beyond the owner's: `TargetId` gains its variant
+with no `non_exhaustive`, so the change breaks; `RunTimeId` is opaque; the
+calls take a typed value; a declare is born holding through a lookup the
+declarer owns, not a lifetime on `Declarer`; the last declare under a path
+takes it over, with the fault and its exception; held entries are copied when
+claimed and go after the pass, and a save writes them while they wait; the
+room; the two fault kinds; the instance's number in the cell; values written
+as `parameters` writes them; no test bound by wall time. Made while building
+it: `begin` on another instance's parameter hands back, in a release build, a
+gesture that writes nothing; every call that names another instance's
+parameter asserts in a debug build, not the write alone; and a parameter
+declared at the very count a load recorded counts as declared before it.
+
+**Alternatives.** Saving each owner's parameters in its own section was built
+first and failed: a section is captured only when its participant says it
+changed, and an owner cannot see a learned write, an undo replay or a page's
+write. A pool the plugin grows from, and a flag that keeps a listed parameter
+from the host, were the first design; they made a set the author manages. A
+declaration shared between cells needs either a `&'static`, which a choice's
+default cannot be, or an interned `Arc` that every learned write would reach
+through. A lifetime on `Declarer` would draw `rust_2018_idioms`' warning on
+every `&mut Declarer` a `Params` impl names. A panic or a `Result` for a
+shared path was left since the plugin's ids make the path, and ids from a
+saved block are data: a panic would refuse a project, and no caller could act
+on a `Result`. A load that writes the live ones on the host's thread was left
+since it writes the tree that still plays: an old owner the block lacks would
+go to its defaults, and one whose path the block names would take another
+owner's values, both heard.
+
+[History](decision-history.md#d96-parameters-made-at-run-time)
 
 ## How to read this
 

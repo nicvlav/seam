@@ -507,7 +507,7 @@ impl Learn {
     /// # Errors
     ///
     /// Returns [`LearnError::UnknownTarget`] when `target` is not a target
-    /// here.
+    /// here: a parameter made at run time by another instance included.
     ///
     /// # Examples
     ///

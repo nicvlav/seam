@@ -928,7 +928,7 @@ move its line here; when a decision gains code, add one.
 - `crates/params/src/set/param_cell.rs`: module, `ParamCell`, `ParamCell::serial`, `SERIALS`
 - `crates/params/src/set.rs`: `ParamSet::cell`, `ParamSet::owns`
 - `crates/params/src/changes.rs`: module, `Changes`, `Changes::new`, `Changes::moved`, `stamp`, `mix`
-- `crates/params/src/ui.rs`: `UiParams::write`, `UiParams::user_write_cell`
+- `crates/params/src/ui.rs`: `UiParams::write`, `UiState::find`
 - `examples/gain/src/lib.rs`: `Mode`, `GainParams`, `GainProcessor::retune`
 - `examples/eq/src/lib.rs`: `EqProcessor::retune`
 - `examples/eq/src/params.rs`: `EqParams`, `BandParams`
@@ -1013,6 +1013,41 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/parts.rs`: `Parts::undo`, `Parts::midi_learn`, `Parts::saved_value`
 - `examples/gain/src/lib.rs`: `Gain`
 - test `crates/host/tests/plugin.rs`: `learn_is_refused_to_a_plugin_that_takes_no_midi`, `learn_turned_on_twice_panics`, `undo_panics_while_the_plugin_s_own_history_is_alive`
+
+### D96. Parameters made at run time
+
+[Record section](decisions.md#d96-parameters-made-at-run-time)
+
+- `crates/host/src/engine/mod.rs`: `Engine::save`, `Engine::record_saved_faults`, `Engine::tick`
+- `crates/host/src/faults.rs`: module, `boundary_faults`, `SharedPath`, `NoRoom`
+- `crates/host/src/parts.rs`: `Parts::declare`, `Parts::add`, `Parts::maker`, `Parts::undo`, `Parts::saved_value`, `Ticked::tick`, `Driver::tick`
+- `crates/host/src/parts/run_time.rs`: module, `Maker`, `Maker::declare`, `Maker::add`, `Maker::name`, `Ticked::forget_replaced`, `Ticked::assign_held`, `Ticked::capture_learned`
+- `crates/host/src/state.rs`: `SavedState::save`, `SavedState::load`, `value_json`, `value_number`
+- `crates/host/src/state/run_time.rs`: module, `RunTimeSaved`, `RunTimeSaved::held_values`, `RunTimeSaved::name`, `RunTimeSaved::hold`, `RunTimeSaved::take_loaded`, `RunTimeSaved::declared_by`, `RunTimeSaved::settle`, `RunTimeSaved::write`, `RunTimeSaved::take_faults`, `Loaded::read`, `Loaded::bytes`, `entry_bytes`, `path`, `Inner::sweep`
+- `crates/learn/src/lib.rs`: `encode_mapping`, `decode_mapping`
+- `crates/learn/src/mappings.rs`: `Learn::take_in`, `Learn::let_go`, `Learn::key`, `Learn::mappings`, `Learn::run_time_mappings`, `Learn::revision`, `Learn::publish`
+- `crates/learn/src/mappings/session.rs`: `Learn::save`, `Learn::restore`
+- `crates/learn/src/table.rs`: `Route`
+- `crates/learn/src/target.rs`: `TargetId`, `RunTimeId`, `Learnable`, `erased`
+- `crates/params/src/clock.rs`: `RestoreWriter::stored_count`
+- `crates/params/src/declare.rs`: `HeldValues`, `RunTime`, `RunTime::store`, `Declarer::run_time`, `Declarer::run_time_one`, `Declarer::extend`
+- `crates/params/src/events.rs`: `RunTimeRecord`
+- `crates/params/src/param.rs`: `ParamRef`, `WeakParamRef`, `ParamRef::made_by`, `ParamRef::learned_write`, `AnyParam::erased`, `Writable`, `Named`, `Naming`
+- `crates/params/src/program.rs`: `Load::restore_run_time`
+- `crates/params/src/set.rs`: `INSTANCES`, `next_instance`, `ParamSet::instance`, `ParamSet::made`
+- `crates/params/src/set/param_cell.rs`: `LISTED`, `ParamCell::run_time`, `ParamCell::hold`, `ParamCell::let_go`, `ParamCell::held`, `ParamCell::is_run_time`, `ParamCell::learned_write`, `ParamCell::id`
+- `crates/params/src/ui.rs`: module, `Which`, `GestureState`, `UiState::find`, `UiState::close`, `UiParams::begin`, `UiParams::is_open`, `UiParams::shown`, `UiParams::would_change`, `UiParams::replay_run_time`, `GestureRecords::take_run_time`, `Gesture::id`, `Edit::write`
+- `crates/params/src/value.rs`: `Value`
+- `crates/session/src/ui.rs`: module, `SessionUi::tick`, `SessionUi::covered`
+- `crates/undo/src/enroll.rs`: `Replayed`, `ParamStep::replay`, `History::tick`
+- test `crates/host/src/state/run_time/tests.rs`: module, `a_save_writes_the_entries_that_fit_in_path_order_and_flags_the_rest`, `an_entry_with_no_room_is_passed_over_and_a_later_one_that_fits_is_written`, `a_load_counts_its_entries_at_least_as_long_as_a_save_writes_them_back`, `nothing_named_or_held_writes_no_section_and_counts_nothing`
+- test `crates/host/tests/alloc_gate.rs`: `an_idle_tick_with_ten_thousand_parameters_made_at_run_time_does_not_allocate`
+- test `crates/host/tests/run_time.rs`: module, `never_a_host_parameter`, `instant_a_write_reaches_the_next_block_with_no_tick`, `undoable_add_edit_remove_in_one_history`, `a_step_never_keeps_a_parameter_alive`, `midi_learnable_in_the_block_the_controller_arrives_in`, `saved_groups_values_and_mappings_load_into_a_second_instance`, `told_to_no_host`, `nothing_to_handle_and_a_source_mistake_panics_with_the_fix`, `a_declare_after_a_load_is_born_holding_the_saved_value`, `a_private_parameter_made_once_is_restored_at_the_tick_that_applies_a_load`, `a_load_into_a_running_instance_writes_none_of_the_old_tree`, `an_owner_the_apply_kept_takes_the_blocks_values_and_mappings`, `a_held_up_load_still_reaches_its_owners_and_then_lets_its_entries_go`, `a_load_stored_while_a_pass_runs_waits_for_a_pass_that_began_after_it`, `a_save_between_a_load_and_its_tick_writes_the_loaded_section`, `a_load_into_a_learned_instance_at_its_ceiling_brings_back_every_mapping`, `the_tree_registered_before_or_after_learn_gives_the_same_load`, `a_shared_path_is_one_fault_and_saves_the_later_and_a_load_declaring_again_is_none`, `another_instances_parameter_is_refused_through_this_ones_ui`
+- test `crates/learn/tests/alloc_gate.rs`: `dispatch_to_parameters_made_at_run_time_neither_allocates_nor_frees`
+- test `crates/learn/tests/targets.rs`: `typed_parameters_listed_and_made_at_run_time_are_targets`, `a_run_time_mapping_is_left_out_of_learns_section_and_kept_across_its_restore`, `another_instances_run_time_parameter_is_an_unknown_target`, `learn_lets_a_parameter_go_at_the_poll_after_the_plugin_does`
+- test `crates/params/src/set/tests.rs`: `a_cell_and_its_arc_counts_stay_under_224_bytes`
+- test `crates/params/tests/run_time.rs`: module, `a_typed_value_reaches_both_kinds_through_each_call`, `a_gesture_on_a_parameter_made_at_run_time_has_no_id_and_tells_the_host_nothing`, `a_parameter_made_at_run_time_is_born_holding_its_held_value`, `the_plugin_holds_a_parameter_until_its_last_typed_one_drops`, `the_id_of_a_parameter_made_at_run_time_is_a_contract_panic_naming_the_fix`, `another_instances_parameter_is_a_contract_panic_and_changes_nothing`, `another_instances_parameter_is_refused_and_changes_nothing`, `a_mistake_in_a_struct_made_at_run_time_panics_with_the_fix`
+- test `crates/session/tests/session.rs`: `a_finished_pass_covers_the_stored_count_it_began_at`
 
 ## Parameters
 
