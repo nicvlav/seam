@@ -48,7 +48,9 @@ reading how Seam works inside, start with
   generated `include/seam.h`). The exporters are thin shells over one core,
   `engine`, which holds the plugin's life and builds with no feature. CLAP is
   planned, not built.
-- `crates/bridge`: the page protocol and the TypeScript generated from it.
+- `crates/bridge`: the page protocol, its native side (`Dispatcher`, which
+  answers a page and tells it of every change), and the TypeScript generated
+  from it.
 - `crates/testkit`: test tools: allocation gate, latches, expected assertions,
   drift check.
 - `examples/gain`: the example gain, which wires parameters, undo, a saved

@@ -156,6 +156,8 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#d15-the-pages-state-after-its-own-write)
 
 - `crates/bridge/src/lib.rs`: module
+- `crates/bridge/src/dispatcher.rs`: `Dispatcher::answer`
+- test `crates/bridge/tests/dispatcher.rs`: `every_set_and_gesture_end_is_answered_changed_or_not`, `a_set_is_snapped_and_answered_with_the_snapped_value`
 
 ### D16. Where the WebView pieces live
 
@@ -718,7 +720,6 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#d68-audit-items-that-wait-for-their-code)
 
-- `crates/bridge/src/lib.rs`: module
 - `crates/host/src/engine/automation.rs`: module
 
 ### D69. Where a continuous range is checked
@@ -1048,6 +1049,20 @@ move its line here; when a decision gains code, add one.
 - test `crates/params/src/set/tests.rs`: `a_cell_and_its_arc_counts_stay_under_224_bytes`
 - test `crates/params/tests/run_time.rs`: module, `a_typed_value_reaches_both_kinds_through_each_call`, `a_gesture_on_a_parameter_made_at_run_time_has_no_id_and_tells_the_host_nothing`, `a_parameter_made_at_run_time_is_born_holding_its_held_value`, `the_plugin_holds_a_parameter_until_its_last_typed_one_drops`, `the_id_of_a_parameter_made_at_run_time_is_a_contract_panic_naming_the_fix`, `a_user_write_while_a_restore_applies_names_the_fix_for_a_parameter_made_at_run_time`, `another_instances_parameter_is_a_contract_panic_and_changes_nothing`, `another_instances_parameter_is_refused_and_changes_nothing`, `a_mistake_in_a_struct_made_at_run_time_panics_with_the_fix`
 - test `crates/session/tests/session.rs`: `a_finished_pass_covers_the_stored_count_it_began_at`
+
+### D97. A page write naming an unknown key
+
+[Record section](decisions.md#d97-a-page-write-naming-an-unknown-key)
+
+- `crates/bridge/src/dispatcher.rs`: `Refusals`, `Dispatcher::receive`, `Dispatcher::listed`
+- test `crates/bridge/tests/dispatcher.rs`: `a_write_naming_a_key_the_plugin_does_not_list_is_dropped_and_counted`, `what_the_native_side_refuses_is_dropped_unanswered_and_counted`
+
+### D98. A call across page sessions
+
+[Record section](decisions.md#d98-a-call-across-page-sessions)
+
+- `crates/bridge/src/dispatcher.rs`: `Commands`, `Commands::command`, `Commands::call`, `Dispatcher::invoke`
+- test `crates/bridge/tests/dispatcher.rs`: `a_call_is_answered_with_its_commands_result_under_its_call_id`, `a_call_that_fails_is_answered_with_why`, `a_command_added_twice_panics`
 
 ## Parameters
 
@@ -1707,14 +1722,17 @@ move its line here; when a decision gains code, add one.
 [Record section](decisions.md#b1-the-page-seeds-after-subscribing)
 
 - `crates/bridge/src/protocol.rs`: `PageMessage::Ready`, `NativeMessage::Snapshot`, `NativeMessage::Reject`
+- `crates/bridge/src/dispatcher.rs`: `Dispatcher::ready`
 - `page/src/client.ts`: `createClient`
+- test `crates/bridge/tests/dispatcher.rs`: `a_ready_of_this_version_is_answered_with_every_parameter_in_order`, `a_ready_of_another_version_is_rejected_with_this_sides_version`
 - test `page/test/client.test.ts`: `sends ready only after the listener is installed`, `repeats until a snapshot arrives`
 
 ### B2. A drag owns the control
 
 [Record section](decisions.md#b2-a-drag-owns-the-control)
 
-- no code site
+- `crates/bridge/src/dispatcher.rs`: module, `Dispatcher::set`, `Dispatcher::answer`, `Dispatcher::tick`
+- test `crates/bridge/tests/dispatcher.rs`: `every_set_and_gesture_end_is_answered_changed_or_not`, `a_set_outside_a_drag_is_one_host_gesture_and_one_undo_step`, `two_gestures_on_one_parameter_reach_the_host_as_one`, `a_load_that_lands_mid_drag_reaches_the_page_at_the_drags_end`
 
 ### B3. The page is typed from the declarations
 
@@ -1734,7 +1752,8 @@ move its line here; when a decision gains code, add one.
 
 [Record section](decisions.md#b5-a-ready-starts-a-new-page-session)
 
-- no code site
+- `crates/bridge/src/dispatcher.rs`: `Dispatcher::ready`, `Listed`
+- test `crates/bridge/tests/dispatcher.rs`: `a_repeated_ready_mid_drag_closes_the_drag_once_and_answers_again`, `a_reject_ends_the_session_before_it_too`, `dropping_it_closes_the_gestures_the_page_left_open`
 
 ### M1. Menus: A menu is flat, renderer-neutral data: items with namespaced string ids and parent-id nesting, in contribution order, invoked by id, never by position.
 

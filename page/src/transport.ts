@@ -4,7 +4,7 @@
 // nothing in this package imports one. Only the in-memory transport exists
 // today, for tests; a mock native side in a browser could use it too, but none
 // is built. The transports for a plugin window and for a standalone app are
-// planned, together with the native side of the protocol.
+// planned.
 
 import type { NativeMessage, PageMessage } from "./generated/protocol";
 

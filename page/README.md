@@ -11,8 +11,8 @@ The package talks to the native side through `Transport` (`send` a
 `PageMessage`, `listen` for `NativeMessage`s), which keeps the order of messages
 both ways, and imports nothing else. Only `memoryTransport()` exists today, for
 tests; no browser mock of the native side is built. A transport for a plugin
-window and one for a standalone app are planned, along with the native side of
-the protocol, which is not built yet. The message types in
+window and one for a standalone app are planned. The native side is
+`Dispatcher`, in the `seam-bridge` crate. The message types in
 `src/generated/protocol.ts` are generated from Rust; do not edit them.
 
 ## Recipe

@@ -38,6 +38,8 @@ required-features = ["typescript"]
 
 [dev-dependencies]
 seam-testkit.workspace = true
+# The dispatcher's tests count the undo steps a page's drags record.
+seam-undo.workspace = true
 
 [lints]
 workspace = true

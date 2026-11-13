@@ -31,13 +31,14 @@ versioning](https://semver.org/): before 1.0, a minor version may break the API.
 [CHANGELOG.md](CHANGELOG.md) says what each version holds.
 
 - **Built:** the core crates, the VST3 exporter (Windows and macOS), the C
-  interface and the generic JUCE adapter, the page's React hooks and protocol,
-  the example gain, the example EQ, and the comparison against plain JUCE.
-- **Not built:** the CLAP exporter; the native side that answers the page; the
-  WebView glue that opens the page in a plugin window (wry's IPC handler, the
-  custom-scheme asset server), which is to be a shell crate so `seam-bridge`
-  stays free of any WebView; and MIDI delivered to a plugin through an
-  exporter. [ROADMAP.md](ROADMAP.md) says what comes next.
+  interface and the generic JUCE adapter, the page's React hooks and protocol
+  and the native side that answers the page, the example gain, the example EQ,
+  and the comparison against plain JUCE.
+- **Not built:** the CLAP exporter; the WebView glue that opens the page in a
+  plugin window (wry's IPC handler, the custom-scheme asset server), which is
+  to be a shell crate so `seam-bridge` stays free of any WebView; and MIDI
+  delivered to a plugin through an exporter. [ROADMAP.md](ROADMAP.md) says what
+  comes next.
 
 ## Start here
 

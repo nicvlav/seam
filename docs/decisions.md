@@ -104,7 +104,7 @@ comments never cite an id: they state the reason in words, and
 | D65 | [What does a host see of a plugin through JUCE? (D31, D53, D58, C4)](#d65-what-a-host-sees-through-juce) | What JUCE 9 makes of it, as of the JUCE EQ; checked with VST3 on Windows. Parameter ids are JUCE's hash of the key, not D31's, and the one program has the plugin's name. | decided |
 | D66 | [What does a load do with bytes after the block, and is the host told that a load failed? (H2)](#d66-bytes-after-the-block-and-a-failed-load) | Trailing NUL bytes are trimmed and the block loads, and JSON whitespace around the object loads too; any other byte after the object makes the block unrecognised. A load that fails is answered as failed, except through JUCE, whose `setStateInformation` answers nothing, so the adapter cannot tell its host. | decided |
 | D67 | [How are the rules checked that keep locking types off the audio thread? (P6, D39)](#d67-checking-the-audio-thread-locking-rule) | By a debug-build mark, `seam_params::audio_thread`: a per-thread depth an exporter raises around everything its `process` call runs, and every call that locks asserts the mark is absent. | decided |
-| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, the native side of the page protocol, automation smoothing and splitting, and semver checks. | decided |
+| D68 | [Which of the 2026-11-05 audits' items wait until their code exists?](#d68-audit-items-that-wait-for-their-code) | Those whose code has not started: the CLAP exporter, `seam-webview`, automation smoothing and splitting, and semver checks. | decided |
 | D69 | [Where is a continuous range checked, and how does a declaration that is a constant build one? (P2, P10, D57)](#d69-where-a-continuous-range-is-checked) | When it is made. `Range::new`, a `const fn`, returns a `RangeError` for an invalid range, and `Kind::continuous`, a public `const fn`, panics on what it refuses. A typed declaration's range is checked by `Range::new` too: by `FloatDecl::checked` while compiling, and when it is added. | decided |
 | D70 | [How does learn read MIDI 1.0's paired controllers and parameter numbers where MIDI 1.0 leaves room? (L2, L3, D30)](#d70-learns-reading-of-midi-10-pairs) | Per group and channel, the two NRPN address bytes pair in either order, 127 with 127 selects nothing, and data increment and decrement are never learned. A controller 32 to 63 right after the controller 32 below it learns that one as a 7-bit controller. A learned pair plays at 7 bits: 14-bit controller playback is open, to be built when an exporter delivers MIDI. | decided |
 | D71 | [What does learn route after a restore whose `midiLearn` section it cannot read? (L9, D14, H2)](#d71-learn-after-an-unreadable-midilearn-section) | Nothing from before it. Learn ends the arm, clears every mapping and held entry and publishes the empty table, then closes open bursts (D82) and fails the apply, so the session keeps the section. | decided |
@@ -114,7 +114,7 @@ comments never cite an id: they state the reason in words, and
 | D75 | [How does a fault the exporters catch become visible outside a test? (D60)](#d75-making-a-caught-fault-visible) | It is counted, and its kind reported once. Each instance counts its faults from every thread, wait-free, and the first fault of each kind in an instance is written as one line. | decided |
 | D76 | [What does a panic leave queued while the exporter tells the host of edits? (P9, P11)](#d76-a-panic-while-edits-are-told-to-the-host) | Everything not yet told: the parameter keeps the flags whose events it had not handed out and the queue is marked to be scanned again, so the host still hears a balanced bracket. | decided |
 | D77 | [How deep may a session section nest? (S1, S4, H2)](#d77-how-deep-a-session-section-may-nest) | 125 levels (`seam_session::MAX_SECTION_DEPTH`). A deeper capture is refused as it is taken, so a save never writes a block the same build cannot load. A capture that would grow the block past `MAX_STATE_BYTES` is refused too, against a budget the saved state sets whenever it is made, and a load whose block would save back past it is refused whole. | decided |
-| D78 | [How do a page and a native side of different protocol versions find out? (B1, B4)](#d78-protocol-versions) | The native side answers every `ready`: with a snapshot when it speaks the page's version, and otherwise with a `reject` carrying its own version and a reason, which fails the page. No native side exists yet; the decoding and the page's half are built. | decided |
+| D78 | [How do a page and a native side of different protocol versions find out? (B1, B4)](#d78-protocol-versions) | The native side answers every `ready`: with a snapshot when it speaks the page's version, and otherwise with a `reject` carrying its own version and a reason, which fails the page. | decided |
 | D79 | [What does the page client do while the native side has not answered, and when a hook's command changes? (B1, B5)](#d79-the-page-client-before-the-native-side-answers) | The client sends `ready` again every second until a snapshot or a reject arrives, it fails, or it is disposed. `useCommand` keys its pending count and its last result and error by the command's name. The page holds its writes until it is answered, so each `ready` may start a new page session. | decided |
 | D80 | [How does a plugin upgrade a block an older version of it saved? (H1, H2)](#d80-upgrading-an-older-saved-block) | It declares `Plugin::SCHEMA_VERSION` and `Plugin::migrate`, which Seam attaches to the saved state it builds: a block of an older plugin version (D84) is handed to `migrate` whole, as a JSON object, to rewrite in place before it loads, or to refuse with its reason (D85). A save keeps the unknown parameter and top-level keys the older build does not read. | decided |
 | D81 | [Does a late apply made while a panic unwinds leave the session owing a pass? (S6, S10, D55)](#d81-a-registration-made-while-a-panic-unwinds) | No. Only a panic that began inside a pass or a late apply leaves the pass owed, for the next tick to run again; a registration made from a destructor during another panic owes none, so it clears no undo history. | decided |
@@ -133,6 +133,8 @@ comments never cite an id: they state the reason in words, and
 | D94 | [How does a plugin name a choice's values without writing `Choices`? (D89, D93)](#d94-a-derive-that-writes-choices) | `#[derive(Choices)]`, under the same `derive` feature: the labels and both mappings in the order of the variants, a label being the variant's name unless a `#[choice("...")]` mark gives one. A written discriminant must be the variant's position, and a bad label is refused on itself: `cargo check` evaluates both checks. | decided |
 | D95 | [When does a call at the plugin boundary panic, and when does it return a `Result`? (D90, D91)](#d95-mistakes-panic-failures-return-a-result) | A mistake fixed in the plugin's source, such as a call made twice or a switch turned on without what it needs, panics with what to change; a failure that can depend on data at run time returns a `Result`. So `Parts::undo` and `Parts::midi_learn` return no `Result`, and `Parts::saved_value` keeps one. | decided |
 | D96 | [How does a plugin make parameters while it runs, and how are they saved, undone and learned? (D89, D90, D91)](#d96-parameters-made-at-run-time) | `Parts::declare` and `Parts::add` make the same typed parameters from the same declarations, in no set and listed to no host. Writes, undo and learn reach them as they reach listed ones. A save writes each under its path with its learned mapping; a load writes none on the host's thread, and holds its entries for the declares its pass makes. | to confirm |
+| D97 | [What does the native side do with a page's write that names a key the plugin does not list? (B2)](#d97-a-page-write-naming-an-unknown-key) | It drops it unanswered and counts it in `Refusals`: no parameter has a state to answer with. | to confirm |
+| D98 | [What becomes of a page's call still running when a new page session starts? (B5)](#d98-a-call-across-page-sessions) | None can be: a command runs to its end inside the call, so its reply always goes to the session that asked. | to confirm |
 
 **Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
 until decided, and no rule depends on it.
@@ -1495,8 +1497,8 @@ rules compile-time.
 their code exists? Not applicable.
 
 **Rust.** Those whose code has not started: the CLAP exporter, `seam-webview`
-(D16), the native side of the page protocol (no Rust code handles a page message
-yet, B1), automation smoothing and splitting, and semver checks. Findings that
+(D16), automation smoothing and splitting, and semver checks. The native side
+of the page protocol was on this list until it was built (B1). Findings that
 rest on them stay open until then. The core already keeps each automation
 point's sample position (D59), so smoothing or splitting can build on it. The
 derive that declares each parameter once was on this list until it was built
@@ -1806,8 +1808,7 @@ The protocol is version 2, and a test fails whenever the generated message
 declarations change and the version does not: `crates/bridge/protocol-shape.txt`
 holds one line per version, each with the hash of its declarations, and only
 grows. One fixture of messages is read by the Rust tests and the page's, so both
-ends agree on the text. No native side exists yet (D68); the decoding and the
-page's half are built.
+ends agree on the text. `Dispatcher` in `seam-bridge` is the native side.
 
 **Alternatives.** The alternatives were an empty snapshot behind a tolerant
 `ready`, or `ready`'s shape frozen for good.
@@ -1830,9 +1831,9 @@ has failed, so the repeats start only when neither came during the first
 `ready`'s send.
 
 The page holds every write and call until it is answered, so no write comes
-before a repeated `ready`. The native side, when built (D68), may therefore
-treat each `ready` as a new page session (B5) without telling a repeat from a
-reload. That reading is the implementer's, confirmed by the owner on 2026-11-07.
+before a repeated `ready`. The native side therefore treats each `ready` as a
+new page session (B5) without telling a repeat from a reload. That reading is
+the implementer's, confirmed by the owner on 2026-11-07.
 
 **Alternatives.** The alternatives were one `ready` with a timeout that fails
 the page, and a result kept across a change of name.
@@ -1923,7 +1924,7 @@ table learn no longer lists.
 both: it limits the position to 0 to 1, shows it and sends a `set`.
 `onDragStart` and `onDragEnd` put a drag's gesture around the sets made between
 them, so a `setValue` during a drag joins the drag, and one outside a drag is a
-one-shot set, whose gesture the native side is to open (B2).
+one-shot set, whose gesture the native side opens (B2).
 
 **Alternatives.** The alternative was two functions, which their names would let
 drift apart.
@@ -2532,6 +2533,43 @@ the tick's own assignments move, so a declare a load landed inside counted as
 declared after it.
 
 [History](decision-history.md#d96-parameters-made-at-run-time)
+
+### D97. A page write naming an unknown key
+
+**Question and C++ Seam.** What does the native side do with a page's
+`gestureBegin`, `set` or `gestureEnd` that names a key the plugin does not
+list? (B2) Not checked against C++.
+
+**Rust.** It drops the message unanswered and counts it in the dispatcher's
+`Refusals` (`unknown_params`). No parameter has a state to answer with, and a
+page built from the plugin's own generated parameter map never sends one, so
+the count moving is a page out of step with its plugin. A message that does
+not decode is dropped and counted the same way (`malformed`); neither panics.
+
+**Alternatives.** The alternatives were a `reject`, which fails the whole page
+for one stale control, and an answer of an empty state, which no type allows.
+
+[History](decision-history.md#d97-a-page-write-naming-an-unknown-key)
+
+### D98. A call across page sessions
+
+**Question and C++ Seam.** What becomes of a page's call still running when a
+new page session starts, since the new page counts its call ids from the start
+and may wait on the same id? (B5) Not checked against C++.
+
+**Rust.** None can be still running. A command registered in `Commands` runs
+to its end inside the `invoke` that calls it, on the UI thread, and its reply
+is posted before the dispatcher reads the next message. So every reply goes to
+the session that asked, and a later `ready` finds no call to drop. A command
+that panics answers an error and is counted in `Refusals`
+(`panicked_commands`); an unknown name and arguments that do not fit answer an
+error.
+
+**Alternatives.** The alternative was commands that answer later, with each
+session's replies dropped once a new one starts. It waits for a command that
+cannot answer at once.
+
+[History](decision-history.md#d98-a-call-across-page-sessions)
 
 ## How to read this
 
@@ -4121,8 +4159,8 @@ against another protocol version stops: it drops writes and rejects calls rather
 than misreading messages. The native side answers a `ready` of a version it
 cannot serve with a `reject` carrying its own version, which is what stops the
 page, and a `ready` decodes whatever a newer page adds to it, so the reject
-always reaches it (D78). No native side exists yet (D68); the page's half is
-built.
+always reaches it (D78). The native side is `Dispatcher` in `seam-bridge`; the
+page's half is `page/`.
 
 **Why.** P14, at the page boundary. The single seed of every parameter and the
 version stop are new in Rust. In C++ each page control subscribed to its own

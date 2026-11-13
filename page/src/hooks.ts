@@ -33,10 +33,9 @@ export interface UseParamResult {
       native side sent during the drag, then its answer to the end: the store. */
   onDragEnd: () => void;
   /** A one-shot set outside a drag, and the same function as `onDrag`, so
-      during a drag it joins the drag. The native side is to open a gesture
-      around a set outside one; no native side is built yet. Shows the given
-      position, limited to 0 to 1, until the native side's answer arrives. A
-      non-finite position is ignored. */
+      during a drag it joins the drag. The native side opens a gesture around
+      a set outside one. Shows the given position, limited to 0 to 1, until
+      the native side's answer arrives. A non-finite position is ignored. */
   setValue: (normalized: number) => void;
   /** Set once the client has failed (protocol mismatch). Writes are then dropped. */
   failure: Error | undefined;

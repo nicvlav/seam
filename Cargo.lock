@@ -395,6 +395,7 @@ version = "0.1.0"
 dependencies = [
  "seam-params",
  "seam-testkit",
+ "seam-undo",
  "serde",
  "serde_json",
  "ts-rs",

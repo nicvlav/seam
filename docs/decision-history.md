@@ -880,6 +880,22 @@ mappings for them are made in one step when its pass finishes, learn's restore
 clearing them with the rest, and that a count of loads the saved state keeps,
 not the restore clock, decides which were declared before a load.
 
+### D97. A page write naming an unknown key
+
+[The decision](decisions.md#d97-a-page-write-naming-an-unknown-key)
+
+Left open in `seam-bridge`'s crate docs until the native side was built, on
+2026-11-13, when it was settled the simplest safe way: refused and counted. To
+confirm.
+
+### D98. A call across page sessions
+
+[The decision](decisions.md#d98-a-call-across-page-sessions)
+
+Left open in `seam-bridge`'s crate docs until the native side was built, on
+2026-11-13. Commands were built to answer inside the call, which leaves no
+call to drop. To confirm.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

@@ -289,6 +289,17 @@ impl Position {
     pub fn get(self) -> f64 {
         self.0
     }
+
+    /// `value` limited to 0 to 1, and NaN as 0: for a position the native
+    /// side computed itself, which a page must never be sent outside the
+    /// range.
+    pub(crate) fn clamped(value: f64) -> Position {
+        if value.is_nan() {
+            Position(0.0)
+        } else {
+            Position(value.clamp(0.0, 1.0))
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Position {

@@ -157,7 +157,9 @@ on the main thread and never grown.
 Allocation is checked by test. Each crate with audio-thread code has a test
 target named `alloc_gate` (`tests/alloc_gate.rs`): `seam-host`, `seam-learn`,
 `seam-params`, `seam-ump`, and the example EQ and gain. `seam-testkit` has one
-too, which checks the gate itself. Each:
+too, which checks the gate itself, and so does `seam-bridge`, whose tick runs
+on every main-thread tick of an open editor and allocates nothing while
+nothing moved. Each:
 
 1. installs the counting allocator once: `seam_testkit::install_alloc_gate!();`
 2. builds and activates what it tests outside the gate, where allocating is

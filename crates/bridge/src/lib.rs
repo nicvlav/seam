@@ -1,16 +1,16 @@
-//! The page bridge: the messages a plugin and its web page exchange, and the
-//! TypeScript the page is typed with, generated from the Rust types here.
+//! The page bridge: the messages a plugin and its web page exchange, the
+//! native side that answers them, and the TypeScript the page is typed with,
+//! generated from the Rust types here.
 //!
-//! The bridge knows nothing of how text travels. Wry inside a plugin window,
-//! Tauri in the standalone and a mock in the browser-only dev mode are to be
-//! an [`Outbox`] on the native side and a `Transport` on the page side
-//! (`page/src/transport.ts`). This crate builds with no window, WebView or
-//! host dependency.
+//! The bridge knows nothing of how text travels. A shell that shows the page
+//! (a WebView in a plugin window, a standalone app, a mock in a browser) is an
+//! [`Outbox`] on the native side and a `Transport` on the page side
+//! (`page/src/transport.ts`), and hands the [`Dispatcher`] each message the
+//! page sends. This crate builds with no window, WebView or host dependency.
 //!
 //! Open: the protocol is a first draft, to be settled against the first
-//! page, the example EQ's. No native side handles page messages yet, so
-//! what follows says what a native dispatcher must do once one exists. The
-//! decoding and the page's half are built. What is already fixed:
+//! pages. The [`Dispatcher`] is the native side; the page's half is
+//! `page/`. What is fixed:
 //!
 //! - Messages are JSON objects tagged by `type`. A transport delivers them in
 //!   the order they were sent, both ways.
@@ -27,13 +27,13 @@
 //! - Each `ready` starts a page session, which holds the gestures the page
 //!   opens. The next `ready`, or the page going away, closes those it left
 //!   open, once. Every write follows the page's last `ready`, so a repeated
-//!   `ready` never closes a gesture of the page that sent it. Open: what
-//!   becomes of a call still running when a new session starts, since the
-//!   new page counts its call ids from the start and may wait on the same id.
+//!   `ready` never closes a gesture of the page that sent it. A command runs
+//!   to its end inside the call that made it, so no call is still running
+//!   when a new session starts.
 //! - Every [`PageMessage::Set`] and [`PageMessage::GestureEnd`] is answered
 //!   with a [`NativeMessage::Param`], changed or not, so the page ends on the
-//!   [store][glossary-store]'s value. Open: what the native side does with a
-//!   write naming a key it does not declare.
+//!   [store][glossary-store]'s value. A write that names a key the plugin
+//!   does not list is refused unanswered, and counted ([`Refusals`]).
 //! - Parameter values cross as normalised positions (0 to 1) and as the
 //!   display text Rust formats. Ranges, skew and snapping stay in Rust, so
 //!   the page never repeats that arithmetic.
@@ -46,28 +46,32 @@
 //!
 //! # Examples
 //!
-//! The native side decodes what the page sent and posts its answer:
+//! A shell hands the [`Dispatcher`] each message the page sends, and ticks it
+//! with the plugin; what it posts reaches the page through the shell's
+//! [`Outbox`], here a test's buffer:
 //!
 //! ```
-//! use seam_bridge::{NativeMessage, Outbox, PageMessage, ParamState};
+//! use seam_bridge::{Commands, Dispatcher, NativeMessage, ParamState, Position};
+//! use seam_params::{Kind, ParamDecl, ParamSet};
 //!
-//! // The page's drag on a control arrives as text.
-//! let message = PageMessage::decode(r#"{"type":"set","param":"mix","normalized":0.5}"#)?;
-//! let PageMessage::Set { param, normalized } = message else {
-//!     return Err("a set".into());
-//! };
+//! let set = ParamSet::from_decls([
+//!     ParamDecl::new("mix", "Mix", Kind::continuous(0.0, 100.0, 1.0, None), 100.0)
+//!         .with_unit("%"),
+//! ])?;
+//! let ui = set.take_ui().expect("the first UI handle");
+//! let mut native = Dispatcher::new(ui, Commands::new(), Vec::<String>::new());
 //!
-//! // The native side applies it, then answers with the store's value and its text.
-//! let answer = NativeMessage::Param {
-//!     state: ParamState {
-//!         param,
-//!         normalized,
-//!         text: "50 %".into(),
-//!     },
-//! };
-//! let mut page: Vec<String> = Vec::new(); // an `Outbox`: a test's buffer here
-//! page.post(&answer.encode());
-//! assert_eq!(page.len(), 1);
+//! // The page is listening, then sets the mix.
+//! native.receive(r#"{"type":"ready","protocol":2}"#);
+//! native.receive(r#"{"type":"set","param":"mix","normalized":0.5}"#);
+//!
+//! // The native side answered the ready with a snapshot, and the set with the
+//! // store's value and its text.
+//! let posted = std::mem::take(native.outbox_mut());
+//! let answer: NativeMessage = serde_json::from_str(&posted[1])?;
+//! let normalized = Position::new(0.5).ok_or("in range")?;
+//! let state = ParamState { param: "mix".into(), normalized, text: "50 %".into() };
+//! assert_eq!(answer, NativeMessage::Param { state });
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -80,11 +84,13 @@
 // them and `--cfg docsrs` (`[package.metadata.docs.rs]`).
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+mod dispatcher;
 pub mod protocol;
 #[cfg(feature = "typescript")]
 #[cfg_attr(docsrs, doc(cfg(feature = "typescript")))]
 pub mod typescript;
 
+pub use dispatcher::{Commands, Dispatcher, Refusals};
 pub use protocol::{CallResult, DecodeError, PROTOCOL_VERSION, ParamState, Position};
 #[doc(inline)]
 pub use protocol::{NativeMessage, PageMessage};

@@ -7,9 +7,8 @@ may break the API.
 
 ## [Unreleased]
 
-Nothing is released yet. Not built: the CLAP exporter, the native side that
-answers the page, the glue that opens the page in a plugin window, and MIDI
-delivered to a plugin through an exporter.
+Nothing is released yet. Not built: the CLAP exporter, the glue that opens the
+page in a plugin window, and MIDI delivered to a plugin through an exporter.
 
 ### Added
 
@@ -137,6 +136,12 @@ delivered to a plugin through an exporter.
 - `seam-bridge`: the page protocol, versioned, with its TypeScript generated
   from the Rust types and a check that the version moves when a message's shape
   does. Decoding refuses a position outside 0 to 1, from either side.
+- `seam-bridge`: the native side of the page protocol, `Dispatcher`, which a
+  shell hands each message the page sends and ticks with the plugin. It answers
+  every `ready`, `set` and `gestureEnd`, writes the page's drags through
+  `UiParams` as a user's, runs the commands a plugin adds to `Commands`, tells
+  the page of every change at the tick, and drops and counts what it cannot
+  read (`Refusals`).
 - `page`: React hooks (`useParam`, `useEvent`, `useCommand`) over a pluggable
   transport. A held queue keeps the writes made before the native side answers
   and sends them in the order the page made them. A native message of the wrong
