@@ -619,8 +619,9 @@ impl Driver {
     /// learn target's code may not reach learn through [`Parts::learn`].
     ///
     /// When nothing changed it allocates nothing, and its cost does not grow
-    /// with the number of parameters, those made at run time included; each
-    /// saved value costs one atomic load.
+    /// with the number of parameters: of those made at run time, learn's
+    /// poll looks only at each one armed or mapped. Each saved value costs
+    /// one atomic load.
     ///
     /// Thread: main.
     ///

@@ -650,3 +650,17 @@ fn learn_lets_a_parameter_go_at_the_poll_after_the_plugin_does() {
     assert!(learn.poll().is_none());
     assert!(learn.is_empty());
 }
+
+#[test]
+fn a_capture_for_a_parameter_the_plugin_let_go_of_maps_nothing() {
+    let set = set();
+    let (mut learn, mut audio) = Learn::new(&set, Config::default());
+    let volume = made(&set, "volume");
+    learn.arm(&volume, Takes::CONTROLLER).expect("known");
+    drop(volume);
+
+    audio.process(&controllers(&[(7, 127)]));
+    assert!(learn.poll().is_none(), "no mapping to report");
+    assert_eq!(learn.armed(), None);
+    assert!(learn.is_empty());
+}

@@ -551,7 +551,11 @@ impl Learn {
 
     /// Runs one UI tick of learn: call it once per tick.
     ///
-    /// First it commits the capture the audio thread staged for the current
+    /// First it lets go of each parameter made at run time that the plugin
+    /// holds no longer, unmapping it and ending its arm, so a capture for one
+    /// commits nothing.
+    ///
+    /// Next it commits the capture the audio thread staged for the current
     /// arm, once it has settled, and the arm is over; the [`Learned`] it
     /// returns says how that went.
     ///
@@ -610,9 +614,11 @@ impl Learn {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn poll(&mut self) -> Option<Learned> {
+        // Before the commit, which would map one the plugin let go of and
+        // report a mapping this poll then removes.
+        self.let_go();
         let learned = self.commit();
         self.customs.values_mut().for_each(Custom::tick);
-        self.let_go();
         learned
     }
 

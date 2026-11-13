@@ -2450,7 +2450,8 @@ longer. Learn takes one as `TargetId::RunTime`, an opaque `RunTimeId`, keeps
 it while it is armed or mapped, and lets it go at the first poll after the
 plugin did. The audio thread writes it through the store its table's route
 holds, and a replaced table drops on the UI thread (D9). Nothing a tick does
-grows with how many exist.
+grows with how many exist: learn's poll looks only at each one armed or
+mapped.
 
 A save writes them under `runTime`, after `parameters`, sorted by path: the
 owner's scope and the key, `group/17/volume`. Each is `{"value": ...,
@@ -2497,13 +2498,14 @@ declarer owns, not a lifetime on `Declarer`; the last declare under a path
 takes it over, with the fault and its exception; held entries are copied when
 claimed and go after the pass, and a save writes them while they wait; the
 room; the two fault kinds; the instance's number in the cell; values written
-as `parameters` writes them; no test bound by wall time. Made while building
-it: `begin` on another instance's parameter hands back, in a release build, a
-gesture that writes nothing; and every call that names another instance's
-parameter asserts in a debug build, not the write alone. Made when the load's
-rule was fixed after review: "the same pass" in the fault's exception is the
-same count of finished passes and the same count of loads, so a pass a busy
-participant held open, followed by a second load, is two passes.
+as `parameters` writes them; a mapping written in learn's saved form, whose
+`target` repeats the entry's path; no test bound by wall time. Made while
+building it: `begin` on another instance's parameter hands back, in a release
+build, a gesture that writes nothing; and every call that names another
+instance's parameter asserts in a debug build, not the write alone. Made when
+the load's rule was fixed after review: "the same pass" in the fault's
+exception is the same count of finished passes and the same count of loads, so
+a pass a busy participant held open, followed by a second load, is two passes.
 
 **Alternatives.** Saving each owner's parameters in its own section was built
 first and failed: a section is captured only when its participant says it
