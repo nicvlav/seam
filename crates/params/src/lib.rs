@@ -142,16 +142,19 @@ pub use clock::{
 #[doc(inline)]
 pub use decl::{Kind, ParamDecl, ParamId, Range, RangeError};
 pub use declare::{
-    BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, Params,
+    BoolDecl, ChoiceDecl, Declaration, Declared, Declarer, FloatDecl, HeldValues, Params,
     discriminant_is_position, key_is_new, label_is_valid,
 };
-pub use events::{GestureRecord, HostEvent};
+pub use events::{GestureRecord, HostEvent, RunTimeRecord};
 pub use host_events::HostEventDrain;
 pub use host_id::{RESERVED_HOST_IDS, host_id};
 pub use list::{Derived, List, ListCommit, ListTracker, TrackedList};
 pub use meta::fit_text;
 pub use origin::{Origin, Reading, UnknownOrigin};
-pub use param::{AnyParam, Bind, BindError, Bool, Choice, Choices, Float, Writable};
+pub use param::{
+    AnyParam, Bind, BindError, Bool, Choice, Choices, Float, Named, ParamRef, WeakParamRef,
+    Writable,
+};
 pub use program::{Load, ProgramParams};
 pub use set::{AudioParams, DeclError, MAX_KEY_LEN, ParamSet, ParamSetBuilder};
 pub use ui::{Edit, Gesture, GestureRecords, UiParams};

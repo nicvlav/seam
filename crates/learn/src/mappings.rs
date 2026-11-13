@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use seam_params::ParamSet;
+use seam_params::{ParamRef, ParamSet};
 use seam_session::{Registration, Section};
 
 use crate::capture::{Arm, Learned, Policy, Slots, Stager, Takes};
@@ -15,7 +15,8 @@ use crate::snapshot::{Publisher, snapshot};
 use crate::table::{Route, Table};
 use crate::target::{BURST_IDLE_TICKS, Staging};
 use crate::{
-    CcReservation, Curve, CustomId, LearnAudio, NrpnReservation, Source, Target, TargetId,
+    CcReservation, Curve, CustomId, LearnAudio, Learnable, NrpnReservation, RunTimeId, Source,
+    Target, TargetId,
 };
 
 /// The mapping ceiling unless a plugin sets its own.
@@ -324,9 +325,15 @@ pub struct Learn {
     /// They are restored ones kept as they were saved, so a save writes them
     /// back unchanged, and the mappings of detached targets.
     held: BTreeMap<String, Section>,
+    /// Each parameter made at run time that is armed or mapped. Learn lets
+    /// one go at the first poll after the plugin has, so its cost is these,
+    /// never how many parameters the plugin made.
+    run_time: BTreeMap<RunTimeId, ParamRef>,
     /// The session registration that saves the section, once attached.
     registration: Option<Registration>,
     publisher: Publisher,
+    /// Moves with every table published: a mapping made, changed or gone.
+    revision: u64,
     arm: Arm,
 }
 
@@ -350,8 +357,10 @@ impl Learn {
             customs: BTreeMap::new(),
             next_custom: 0,
             held: BTreeMap::new(),
+            run_time: BTreeMap::new(),
             registration: None,
             publisher,
+            revision: 0,
             arm: Arm::new(slots),
         };
         (learn, audio)
@@ -520,8 +529,8 @@ impl Learn {
     /// assert!(!learn.cancel());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn arm(&mut self, target: impl Into<TargetId>, takes: Takes) -> Result<(), LearnError> {
-        let target = target.into();
+    pub fn arm(&mut self, target: impl Learnable, takes: Takes) -> Result<(), LearnError> {
+        let target = self.take_in(&target);
         if !self.known(target) {
             return Err(LearnError::UnknownTarget(target));
         }
@@ -603,7 +612,51 @@ impl Learn {
     pub fn poll(&mut self) -> Option<Learned> {
         let learned = self.commit();
         self.customs.values_mut().for_each(Custom::tick);
+        self.let_go();
         learned
+    }
+
+    /// The target `target` names, keeping a parameter made at run time it
+    /// hands over, so the table can route to its store. One another instance
+    /// made is not kept, so learn does not know it.
+    fn take_in(&mut self, target: &impl Learnable) -> TargetId {
+        let (id, param) = target.learnable();
+        if let (TargetId::RunTime(run_time), Some(param)) = (id, param)
+            && param.made_by(&self.set)
+        {
+            self.run_time.entry(run_time).or_insert(param);
+        }
+        id
+    }
+
+    /// Lets go of each parameter made at run time that the plugin no longer
+    /// holds, unmapping it and ending its arm, and of each that is neither
+    /// armed nor mapped. Publishes once, when it unmapped any.
+    fn let_go(&mut self) {
+        let armed = self.arm.armed().map(|(target, _)| target);
+        let gone: Vec<RunTimeId> = self
+            .run_time
+            .iter()
+            .filter(|&(&id, param)| {
+                let target = TargetId::RunTime(id);
+                !param.held() || (armed != Some(target) && !self.mappings.contains_key(&target))
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        let mut unmapped = false;
+        for id in gone {
+            let target = TargetId::RunTime(id);
+            if armed == Some(target) {
+                self.arm.disarm();
+            }
+            unmapped |= self.mappings.remove(&target).is_some();
+            self.run_time.remove(&id);
+        }
+        if unmapped {
+            // The tables published before still route to the stores let go
+            // here, until later publishes replace them, on this thread.
+            self.publish();
+        }
     }
 
     fn commit(&mut self) -> Option<Learned> {
@@ -647,10 +700,10 @@ impl Learn {
     /// ```
     pub fn map(
         &mut self,
-        target: impl Into<TargetId>,
+        target: impl Learnable,
         mapping: Mapping,
     ) -> Result<Option<Mapping>, LearnError> {
-        let target = target.into();
+        let target = self.take_in(&target);
         self.check(target, &mapping)?;
         self.edited(target);
         let replaced = self.insert(target, mapping);
@@ -689,8 +742,8 @@ impl Learn {
     /// assert!(learn.is_empty());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn unmap(&mut self, target: impl Into<TargetId>) -> Option<Mapping> {
-        let target = target.into();
+    pub fn unmap(&mut self, target: impl Learnable) -> Option<Mapping> {
+        let target = target.learnable().0;
         self.edited(target);
         let removed = self.mappings.remove(&target)?;
         // The poll never writes the target again.
@@ -710,16 +763,20 @@ impl Learn {
     fn custom(&mut self, target: TargetId) -> Option<&mut Custom> {
         match target {
             TargetId::Custom(id) => self.customs.get_mut(&id),
-            TargetId::Param(_) => None,
+            TargetId::Param(_) | TargetId::RunTime(_) => None,
         }
     }
 
     /// Returns the key `target` saves under: a parameter's key, or the key a
     /// custom target registered with. `None` for a target not known here.
-    pub fn key(&self, target: impl Into<TargetId>) -> Option<&str> {
-        match target.into() {
+    ///
+    /// A parameter made at run time is known while it is armed or mapped,
+    /// and its key is its declaration's, which the plugin's owners share.
+    pub fn key(&self, target: impl Learnable) -> Option<&str> {
+        match target.learnable().0 {
             TargetId::Param(id) => (id.index() < self.set.len()).then(|| self.set.decl(id).key),
             TargetId::Custom(id) => self.customs.get(&id).map(|custom| custom.key.as_str()),
+            TargetId::RunTime(id) => self.run_time.get(&id).map(|param| param.decl().key),
         }
     }
 
@@ -731,16 +788,27 @@ impl Learn {
     }
 
     /// Returns `target`'s mapping, or `None` while it is unmapped.
-    pub fn mapping(&self, target: impl Into<TargetId>) -> Option<&Mapping> {
-        self.mappings.get(&target.into())
+    pub fn mapping(&self, target: impl Learnable) -> Option<&Mapping> {
+        self.mappings.get(&target.learnable().0)
     }
 
     /// Returns every mapping: parameters in declaration order, then custom
-    /// targets in registration order.
+    /// targets in registration order, then parameters made at run time in
+    /// the order they were made.
     pub fn mappings(&self) -> impl ExactSizeIterator<Item = (TargetId, &Mapping)> {
         self.mappings
             .iter()
             .map(|(&target, mapping)| (target, mapping))
+    }
+
+    /// Returns each parameter made at run time that is mapped, with its
+    /// mapping, in the order they were made.
+    #[doc(hidden)]
+    pub fn run_time_mappings(&self) -> impl Iterator<Item = (&ParamRef, &Mapping)> {
+        self.run_time.iter().filter_map(|(&id, param)| {
+            let mapping = self.mappings.get(&TargetId::RunTime(id))?;
+            Some((param, mapping))
+        })
     }
 
     /// Returns how many targets are mapped.
@@ -791,11 +859,25 @@ impl Learn {
         Ok(())
     }
 
+    /// Returns a number that moves with every table published: whenever a
+    /// mapping is made, changed or removed, and at times when none is.
+    #[doc(hidden)]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     fn publish(&mut self) {
+        self.revision += 1;
         let customs = &self.customs;
         let table = Table::new(self.mappings.iter().map(|(target, mapping)| {
             let route = match target {
                 TargetId::Param(id) => Route::Param(*id),
+                TargetId::RunTime(id) => Route::RunTime(
+                    self.run_time
+                        .get(id)
+                        .cloned()
+                        .expect("a mapped parameter made at run time is kept until unmapped"),
+                ),
                 TargetId::Custom(id) => {
                     let staging = customs.get(id).and_then(|custom| custom.staging.as_ref());
                     Route::Staged(Arc::clone(

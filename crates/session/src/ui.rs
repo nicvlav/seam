@@ -34,6 +34,10 @@
 //! - `answered`: the keys that took the newest restore's answer, in a pass or
 //!   late. Each restore clears it. A key that is not `carried` and not
 //!   `answered` is reset once when it registers; after that it is `answered`.
+//! - `covered`, this side's own: the restore clock's stored count when the
+//!   last finished pass took its owed apply. A restore stores its sections
+//!   and moves the count under the session's lock, where a pass reads it, so
+//!   a pass that covers a count began after every restore stored up to it.
 //!
 //! [glossary-held]: https://github.com/nicvlav/seam/blob/main/docs/glossary.md#held
 
@@ -92,6 +96,7 @@ struct UiState {
     /// In registration order.
     entries: RefCell<Vec<Rc<Entry>>>,
     passing: Cell<bool>,
+    covered: Cell<u64>,
 }
 
 impl Drop for UiState {
@@ -342,6 +347,7 @@ impl SessionUi {
                 shared,
                 entries: RefCell::new(Vec::new()),
                 passing: Cell::new(false),
+                covered: Cell::new(0),
             }),
         }
     }
@@ -482,9 +488,13 @@ impl SessionUi {
                 let _ = catch_unwind(AssertUnwindSafe(|| ui.capture(entry)));
             }
         }
-        if !std::mem::take(&mut ui.shared.lock().owed) {
-            return;
-        }
+        let covers = {
+            let mut state = ui.shared.lock();
+            if !std::mem::take(&mut state.owed) {
+                return;
+            }
+            ui.shared.clock.stored_count()
+        };
         let _passing = Passing::new(ui);
         let entries = ui.entries.borrow().clone();
         let mut finished = true;
@@ -498,7 +508,22 @@ impl SessionUi {
         // that participant stays busy.
         if finished {
             ui.shared.clock.completed();
+            ui.covered.set(covers);
         }
+    }
+
+    /// Returns the restore clock's stored count when the last finished pass
+    /// began, 0 before any: that pass applied every section a restore stored
+    /// up to that count. A pass that left a busy participant owed has not
+    /// finished.
+    ///
+    /// Plumbing for the saved state, which holds what a load stored outside
+    /// the session until the pass that applies the load has run.
+    ///
+    /// Thread: UI.
+    #[doc(hidden)]
+    pub fn covered(&self) -> u64 {
+        self.state.covered.get()
     }
 }
 

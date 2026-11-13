@@ -110,4 +110,19 @@ pub use mappings::{Config, DEFAULT_MAX_MAPPINGS, Learn, LearnError, Mapping};
 pub use reservation::{CcReservation, NrpnReservation, ReservationError};
 pub use saved::SESSION_KEY;
 pub use source::{Control, Source};
-pub use target::{CustomId, Target, TargetId};
+pub use target::{CustomId, Learnable, RunTimeId, Target, TargetId};
+
+/// Returns one mapping in the saved form learn's own section writes it in,
+/// naming its target `key`: what the saved block keeps beside a parameter
+/// made at run time.
+#[doc(hidden)]
+pub fn encode_mapping(key: &str, mapping: &Mapping) -> seam_session::Section {
+    saved::encode(key, mapping)
+}
+
+/// Returns the key and mapping [`encode_mapping`] wrote, or `None` for an
+/// entry this build cannot read.
+#[doc(hidden)]
+pub fn decode_mapping(entry: &seam_session::Section) -> Option<(String, Mapping)> {
+    saved::decode(entry)
+}

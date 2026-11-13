@@ -84,6 +84,14 @@ impl RestoreWriter {
         self.clock.stored.fetch_add(1, Ordering::Release);
     }
 
+    /// Returns how many restores have been stored: every load's write and
+    /// every session restore moves it.
+    ///
+    /// Thread: any but audio.
+    pub fn stored_count(&self) -> u64 {
+        self.clock.stored.load(Ordering::Acquire)
+    }
+
     /// Holds the applying mark on the calling thread while one participant's
     /// section applies, a late participant's included.
     ///

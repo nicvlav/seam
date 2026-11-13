@@ -540,7 +540,7 @@ unsafe extern "C" fn save<P: Plugin>(
         return false;
     };
     instance.guard(false, || {
-        let bytes = instance.saved().save();
+        let bytes = instance.save();
         // SAFETY: the header's contract: `write` may be called with its
         // `context` during this call and does not unwind; `bytes` outlives
         // the call to it.

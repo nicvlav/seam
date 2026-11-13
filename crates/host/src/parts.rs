@@ -2,13 +2,13 @@
 //! [`Plugin::new`]: its parameters, and its [`Parts`]; and the [`Driver`]
 //! an engine runs the parts through.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::ops::DerefMut;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use seam_learn::{Config, Learn, LearnAudio};
-use seam_params::{DeclError, ParamSet, UiParams, Value};
+use seam_params::{DeclError, Declaration, ParamSet, Params, UiParams, Value};
 use seam_session::{Session, SessionError, SessionUi};
 use seam_undo::{Bound, History};
 use serde::Serialize;
@@ -16,8 +16,10 @@ use serde::de::DeserializeOwned;
 
 use crate::{Plugin, SavedState};
 
+mod run_time;
 mod saved;
 
+pub use run_time::Maker;
 use saved::{SavedValue, Synced};
 
 /// One instance's parts, already joined: its parameter set, the session
@@ -135,6 +137,10 @@ struct Ticked {
     learn: OnceCell<Rc<RefCell<Learn>>>,
     /// The values [`Parts::saved_value`] made, in the order they were made.
     values: RefCell<Vec<Box<dyn Synced>>>,
+    saved: Arc<SavedState>,
+    /// Learn's revision when the tick last handed a save the mappings of
+    /// the parameters made at run time.
+    learned_at: Cell<Option<u64>>,
 }
 
 impl Ticked {
@@ -145,11 +151,14 @@ impl Ticked {
             // for.
             let _learned = learn.borrow_mut().poll();
         }
+        self.forget_replaced();
         self.session.tick();
+        self.assign_held();
         if let Some(history) = self.history.get() {
             history.tick();
         }
         self.sync();
+        self.capture_learned();
     }
 
     fn sync(&self) {
@@ -183,8 +192,9 @@ impl Parts {
         if P::SCHEMA_VERSION > 0 {
             saved = saved.with_migration(P::SCHEMA_VERSION, P::migrate);
         }
+        let saved = Arc::new(saved);
         let parts = Parts {
-            saved: Arc::new(saved),
+            saved: Arc::clone(&saved),
             // Both were made above, so each hands out its first handle.
             params: set.take_ui().expect("a new set's first UI handle"),
             ticked: Rc::new(Ticked {
@@ -192,6 +202,8 @@ impl Parts {
                 history: OnceCell::new(),
                 learn: OnceCell::new(),
                 values: RefCell::new(Vec::new()),
+                saved,
+                learned_at: Cell::new(None),
             }),
             set,
             midi_input: P::INFO.midi_input,
@@ -383,6 +395,121 @@ impl Parts {
     /// Thread: main.
     pub fn sync(&mut self) {
         self.ticked.sync();
+    }
+
+    /// Makes `P`'s parameters while the plugin runs, under `scope`, and
+    /// hands them back: the same [`Float`](seam_params::Float),
+    /// [`Bool`](seam_params::Bool) and [`Choice`](seam_params::Choice) that
+    /// the listed ones are, listed to no host.
+    ///
+    /// Which to use for state a plugin keeps: a number the DSP reads is a
+    /// parameter. It is listed in the plugin's [`Params`](Plugin::Params)
+    /// when a host should see it, and made here when it should not, or when
+    /// how many there are is known only as the plugin runs: a tree of
+    /// instruments, articulations or groups, with parameters at each node.
+    /// Text, a path or structure is a [`Value`], made with
+    /// [`saved_value`](Self::saved_value).
+    ///
+    /// A parameter made here is written through [`ui`](Self::ui) as a listed
+    /// one is, read with `get` from any thread, so the audio thread reads a
+    /// write in its next block, and taken by undo and learn as a listed one
+    /// is. The host hears nothing of it.
+    ///
+    /// Each is saved under its path, `scope/key` (`group/17/volume`), its
+    /// value read at the save, and its learned mapping beside it. A scope is
+    /// any string; `/` separates its levels by convention, and the empty
+    /// scope puts the key at the top. After a load, a declare under a path
+    /// the load holds makes the parameter holding the saved value, learned to
+    /// the saved controller, before anything else can see it.
+    ///
+    /// The owner saves its structure only, the ids its scopes are made from,
+    /// in a session participant whose apply declares each owner again through
+    /// a [`Maker`]. Register that participant in [`Plugin::new`]: a load's
+    /// values are held for the declares the pass that applies it makes, so a
+    /// participant that registers after that pass, or whose apply fails,
+    /// declares its owners at their defaults. A parameter declared before a
+    /// load and still held when that pass finishes, one made once in `new`
+    /// say, takes the load's value for its path, or its default, at that
+    /// tick.
+    ///
+    /// Two parameters the plugin holds under one path are a fault, and a save
+    /// writes only the later; declaring the paths of a tree a load replaces,
+    /// in that load's apply, is not. So an owner's id stays unique for as
+    /// long as undo can bring the owner back: a counter that only grows,
+    /// saved with the tree, does it.
+    ///
+    /// Thread: main.
+    ///
+    /// # Panics
+    ///
+    /// On a mistake fixed in the plugin's source: a declaration refused, a
+    /// bypass, a key the struct declares twice, or a plain table
+    /// ([`Declarer::extend`](seam_params::Declarer::extend)). A struct the
+    /// derive wrote was checked while compiling, so it never panics here.
+    /// And while learn is on and borrowed, as [`learn`](Self::learn) says.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    #[doc = include_str!("../doc/gain.rs")]
+    /// struct Group {
+    ///     volume: Float,
+    /// }
+    ///
+    /// impl Params for Group {
+    ///     fn declare(p: &mut Declarer) -> Self {
+    ///         Group { volume: p.add(FloatDecl::new("volume", "Volume", -60.0..=12.0, 0.0)) }
+    ///     }
+    /// }
+    ///
+    /// let (_params, parts) = Parts::for_plugin::<Gain>()?;
+    /// let group: Group = parts.declare("group/17");
+    ///
+    /// // Written as a listed parameter is, and read with `get`.
+    /// assert!(parts.ui().write(&group.volume, -6.0));
+    /// assert_eq!(group.volume.get(), -6.0);
+    ///
+    /// // The host lists only the gain; a save writes the group's volume too.
+    /// assert_eq!(parts.set().len(), 1);
+    /// let block: serde_json::Value = serde_json::from_slice(&parts.saved().save())?;
+    /// assert_eq!(block["runTime"]["group/17/volume"]["value"], -6.0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn declare<P: Params>(&self, scope: &str) -> P {
+        self.maker().declare(scope)
+    }
+
+    /// Makes one parameter while the plugin runs, under `scope`, as
+    /// [`declare`](Self::declare) makes a struct's: a parameter the DSP
+    /// reads that no host should see, made once in [`Plugin::new`], say.
+    ///
+    /// Thread: main.
+    ///
+    /// # Panics
+    ///
+    /// As [`declare`](Self::declare) says.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    #[doc = include_str!("../doc/gain.rs")]
+    /// let (_params, parts) = Parts::for_plugin::<Gain>()?;
+    /// let drive: Float = parts.add("", FloatDecl::new("drive", "Drive", 0.0..=1.0, 0.0));
+    /// assert!(parts.ui().write(&drive, 0.5));
+    ///
+    /// let block: serde_json::Value = serde_json::from_slice(&parts.saved().save())?;
+    /// assert_eq!(block["runTime"]["drive"]["value"], 0.5);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn add<D: Declaration>(&self, scope: &str, decl: D) -> D::Param {
+        self.maker().add(scope, decl)
+    }
+
+    /// Returns the handle that makes parameters while the plugin runs, for
+    /// code that cannot reach the parts. [`Maker`] shows a session
+    /// participant that brings a tree back through one.
+    pub fn maker(&self) -> Maker {
+        Maker::new(Rc::downgrade(&self.ticked), Arc::clone(&self.saved))
     }
 }
 

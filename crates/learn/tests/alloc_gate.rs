@@ -8,7 +8,9 @@ use std::sync::Arc;
 use seam_learn::{
     CcReservation, Config, Control, Learn, Learned, Mapping, NrpnReservation, Source, Takes, Target,
 };
-use seam_params::{Kind, ParamDecl, ParamSet, ParamSetBuilder, Range};
+use seam_params::{
+    Declarer, Float, FloatDecl, Kind, ParamDecl, ParamSet, ParamSetBuilder, Range, audio_thread,
+};
 use seam_testkit::alloc::assert_no_allocations;
 use seam_ump::{ChannelVoice, Event, EventList, Voice};
 
@@ -219,5 +221,48 @@ fn staging_ui_targets_and_polling_neither_allocate_nor_free() {
         for _ in 0..32 {
             assert!(learn.poll().is_none());
         }
+    });
+}
+
+#[test]
+fn dispatch_to_parameters_made_at_run_time_neither_allocates_nor_frees() {
+    let set = ParamSetBuilder::new().build();
+    let made: Vec<Float> = (0..TARGETS)
+        .map(|_| {
+            let decl = FloatDecl::new("level", "Level", 20.0..=20_000.0, 1_000.0);
+            Declarer::run_time_one(&set, Box::new(|_| None), decl).0
+        })
+        .collect();
+    let (mut learn, mut audio) = Learn::new(&set, Config::default());
+    let events = events();
+    // Under the audio thread's mark too: a store let go here would panic.
+    let block = |audio: &mut seam_learn::LearnAudio| {
+        let _mark = audio_thread::enter();
+        audio.process(&events);
+    };
+
+    for (index, param) in made.iter().enumerate() {
+        learn
+            .map(param, Mapping::new(source(index)))
+            .expect("legal");
+    }
+    assert_no_allocations("the first block after a publish", || block(&mut audio));
+    assert_no_allocations("warm blocks", || {
+        for _ in 0..64 {
+            block(&mut audio);
+        }
+    });
+    let moved = made.iter().filter(|param| param.get() != 1_000.0).count();
+    assert_eq!(moved, TARGETS, "the gate ran real dispatch");
+
+    // The plugin lets some go: learn unmaps them at its poll and publishes.
+    // The block after takes the new table and drops nothing: the old one,
+    // which still routes to them, drops on this thread at a later publish.
+    let mut made = made;
+    made.truncate(TARGETS - 4);
+    assert!(learn.poll().is_none());
+    assert_eq!(learn.len(), TARGETS - 4);
+    assert_no_allocations("the block after a publish that let some go", || {
+        block(&mut audio);
     });
 }

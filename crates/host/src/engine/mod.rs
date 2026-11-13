@@ -458,10 +458,24 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
         &self.set
     }
 
-    /// The saved block the host's save and load go through. Any thread but
-    /// audio.
-    pub(crate) fn saved(&self) -> &SavedState {
-        &self.saved
+    /// Writes the block the host saves, and records a save left short as a
+    /// fault, as [`faults`](crate::faults) says. Any thread but audio.
+    pub(crate) fn save(&self) -> Vec<u8> {
+        let bytes = self.saved.save();
+        self.record_saved_faults();
+        bytes
+    }
+
+    /// Records what the parameters made at run time flagged since the last
+    /// call: a path two of them shared, a save left short.
+    fn record_saved_faults(&self) {
+        let (shared_path, no_room) = self.saved.run_time().take_faults();
+        if shared_path {
+            self.faults.record(Fault::SharedPath);
+        }
+        if no_room {
+            self.faults.record(Fault::NoRoom);
+        }
     }
 
     /// Loads a block the host handed over, and answers whether it took. The
@@ -754,6 +768,8 @@ impl<P: Plugin, H: HostLink> Engine<P, H> {
                     on_thread.driver.tick();
                 }
                 plugin.idle();
+                // After the plugin's idle too, which may declare.
+                self.record_saved_faults();
             }
             // A host's callback into the plugin from inside one of its own:
             // the next tick runs instead.

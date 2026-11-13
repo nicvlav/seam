@@ -21,7 +21,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::set::ParamCell;
-use crate::{Kind, ParamId, ParamSet, UiParams, audio_thread};
+use crate::{Kind, ParamId, ParamSet, audio_thread};
 
 /// A continuous parameter, read as its value in real units.
 ///
@@ -124,6 +124,29 @@ pub struct Bool(pub(crate) Arc<ParamCell>);
 /// ```
 pub struct Choice<E>(pub(crate) Arc<ParamCell>, pub(crate) PhantomData<fn() -> E>);
 
+// Each typed parameter is made through `from_cell`, so the cell counts it:
+// on declaring, on binding and on cloning.
+impl Float {
+    pub(crate) fn from_cell(cell: Arc<ParamCell>) -> Self {
+        cell.hold();
+        Float(cell)
+    }
+}
+
+impl Bool {
+    pub(crate) fn from_cell(cell: Arc<ParamCell>) -> Self {
+        cell.hold();
+        Bool(cell)
+    }
+}
+
+impl<E> Choice<E> {
+    pub(crate) fn from_cell(cell: Arc<ParamCell>) -> Self {
+        cell.hold();
+        Choice(cell, PhantomData)
+    }
+}
+
 impl Float {
     /// Returns the value now, in real units. One atomic load: any thread.
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
@@ -132,13 +155,16 @@ impl Float {
     }
 
     /// Returns its place in the set it was declared in, which the calls
-    /// that take a [`ParamId`] name it by.
+    /// that take a [`ParamId`] name it by. Those calls take the parameter
+    /// itself too.
     ///
     /// # Panics
     ///
     /// In a build with `debug_assertions`, before its set is built: inside
     /// [`Params::declare`](crate::Params::declare), where no parameter has
-    /// its place yet, and for one a refused declaration handed back.
+    /// its place yet, and for one a refused declaration handed back. And for
+    /// a parameter made at run time, which no set lists: pass the parameter
+    /// itself instead.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -156,7 +182,8 @@ impl Bool {
     ///
     /// # Panics
     ///
-    /// As [`Float::id`] does, before its set is built.
+    /// As [`Float::id`] does: before its set is built, and for a parameter
+    /// made at run time.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -176,7 +203,8 @@ impl<E> Choice<E> {
     ///
     /// # Panics
     ///
-    /// As [`Float::id`] does, before its set is built.
+    /// As [`Float::id`] does: before its set is built, and for a parameter
+    /// made at run time.
     pub fn id(&self) -> ParamId {
         self.0.id()
     }
@@ -209,36 +237,39 @@ fn encode_choice<E: Choices>(value: E) -> f32 {
 // `E`, which it never holds, and would compare stores by value, not identity.
 impl Clone for Float {
     fn clone(&self) -> Self {
-        Float(Arc::clone(&self.0))
+        Float::from_cell(Arc::clone(&self.0))
     }
 }
 
 impl Clone for Bool {
     fn clone(&self) -> Self {
-        Bool(Arc::clone(&self.0))
+        Bool::from_cell(Arc::clone(&self.0))
     }
 }
 
 impl<E> Clone for Choice<E> {
     fn clone(&self) -> Self {
-        Choice(Arc::clone(&self.0), PhantomData)
+        Choice::from_cell(Arc::clone(&self.0))
     }
 }
 
 impl Drop for Float {
     fn drop(&mut self) {
+        self.0.let_go();
         audio_thread::assert_not_here("dropping a Float");
     }
 }
 
 impl Drop for Bool {
     fn drop(&mut self) {
+        self.0.let_go();
         audio_thread::assert_not_here("dropping a Bool");
     }
 }
 
 impl<E> Drop for Choice<E> {
     fn drop(&mut self) {
+        self.0.let_go();
         audio_thread::assert_not_here("dropping a Choice");
     }
 }
@@ -413,6 +444,98 @@ pub trait AnyParam: sealed::Sealed {
     /// writes it has taken.
     #[doc(hidden)]
     fn stamp(&self, token: sealed::Token) -> (u64, u64);
+
+    /// Returns the parameter with its type erased, as Seam's other crates
+    /// hold it.
+    #[doc(hidden)]
+    fn erased(&self) -> ParamRef;
+}
+
+/// A parameter of any kind with its type erased, as Seam's other crates hold
+/// one: a learn route, an undo record, the save's list. It does not count as
+/// the plugin holding the parameter.
+///
+/// # Panics
+///
+/// In a build with `debug_assertions`, dropping one panics while the thread
+/// holds an [`audio_thread`] mark.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ParamRef(pub(crate) Arc<ParamCell>);
+
+/// A [`ParamRef`] that keeps nothing alive: what an undo step holds.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct WeakParamRef(std::sync::Weak<ParamCell>);
+
+impl Clone for ParamRef {
+    fn clone(&self) -> Self {
+        ParamRef(Arc::clone(&self.0))
+    }
+}
+
+impl Drop for ParamRef {
+    fn drop(&mut self) {
+        audio_thread::assert_not_here("dropping a ParamRef");
+    }
+}
+
+impl ParamRef {
+    /// Returns which store this is, for as long as the process runs.
+    pub fn serial(&self) -> u64 {
+        self.0.serial()
+    }
+
+    /// Returns its place in its set, or `None` for one made at run time.
+    pub fn listed(&self) -> Option<ParamId> {
+        self.0.placed()
+    }
+
+    /// Returns its declaration.
+    pub fn decl(&self) -> &crate::ParamDecl {
+        self.0.decl()
+    }
+
+    /// Returns the value now, in real units.
+    pub fn value(&self) -> f32 {
+        self.0.value()
+    }
+
+    /// Returns its change count, then its value and that value's origin, as
+    /// [`ParamSet::read`] does for a listed one.
+    pub fn read(&self) -> crate::Reading<f32> {
+        self.0.read()
+    }
+
+    /// Returns whether the plugin still holds it through a typed parameter.
+    pub fn held(&self) -> bool {
+        self.0.held()
+    }
+
+    /// Returns whether `set`'s instance made it at run time.
+    pub fn made_by(&self, set: &ParamSet) -> bool {
+        set.made(&self.0)
+    }
+
+    /// Writes a learned controller's 0 to 1, as
+    /// [`AudioParams::learned_write`](crate::AudioParams::learned_write)
+    /// does. Never allocates, locks or frees: audio thread.
+    #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
+    pub fn learned_write(&self, normalized: f64) {
+        self.0.learned_write(normalized);
+    }
+
+    /// Returns a link that keeps it alive no longer.
+    pub fn downgrade(&self) -> WeakParamRef {
+        WeakParamRef(Arc::downgrade(&self.0))
+    }
+}
+
+impl WeakParamRef {
+    /// Returns the parameter while anything still keeps it alive.
+    pub fn upgrade(&self) -> Option<ParamRef> {
+        self.0.upgrade().map(ParamRef)
+    }
 }
 
 /// The stamp of the store `cell` is.
@@ -424,11 +547,19 @@ impl AnyParam for Float {
     fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
     }
+
+    fn erased(&self) -> ParamRef {
+        ParamRef(Arc::clone(&self.0))
+    }
 }
 
 impl AnyParam for Bool {
     fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
+    }
+
+    fn erased(&self) -> ParamRef {
+        ParamRef(Arc::clone(&self.0))
     }
 }
 
@@ -436,12 +567,19 @@ impl<E> AnyParam for Choice<E> {
     fn stamp(&self, _: sealed::Token) -> (u64, u64) {
         stamp(&self.0)
     }
+
+    fn erased(&self) -> ParamRef {
+        ParamRef(Arc::clone(&self.0))
+    }
 }
 
-/// What [`UiParams::write`] takes: a typed parameter, by reference, with a
-/// value of its type, or a [`ParamId`] with the stored `f32`.
+/// What [`UiParams::write`](crate::UiParams::write) and the other calls that name one parameter
+/// take: a typed parameter, by reference, with a value of its type, or a
+/// [`ParamId`] with the stored `f32`.
 ///
-/// It is sealed: only this crate's parameters and [`ParamId`] implement it.
+/// A typed parameter reaches one the host lists and one made at run time
+/// alike; a [`ParamId`] reaches only a listed one. It is sealed: only this
+/// crate's parameters and [`ParamId`] implement it.
 ///
 /// # Examples
 ///
@@ -465,40 +603,93 @@ pub trait Writable: sealed::Sealed {
     /// enum.
     type Value;
 
-    /// Makes the user's write through `ui`.
+    /// Names the parameter, for [`UiParams`](crate::UiParams) to find.
     #[doc(hidden)]
-    fn write_through(self, ui: &UiParams, value: Self::Value, token: sealed::Token) -> bool;
+    fn named(&self, token: sealed::Token) -> Named<'_>;
+
+    /// The `f32` a store holds for `value`.
+    #[doc(hidden)]
+    fn encode(value: Self::Value, token: sealed::Token) -> f32;
+
+    /// The value a store's `f32` reads as.
+    #[doc(hidden)]
+    fn decode(stored: f32, token: sealed::Token) -> Self::Value;
+}
+
+/// A parameter as a [`Writable`] names it, for [`UiParams`](crate::UiParams) to find among
+/// its own.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub struct Named<'a>(pub(crate) Naming<'a>);
+
+/// How a [`Writable`] names its parameter: by place, or by store.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Naming<'a> {
+    Id(ParamId),
+    Store(&'a Arc<ParamCell>),
 }
 
 impl Writable for ParamId {
     type Value = f32;
 
-    fn write_through(self, ui: &UiParams, value: f32, _: sealed::Token) -> bool {
-        ui.user_write(self, value)
+    fn named(&self, _: sealed::Token) -> Named<'_> {
+        Named(Naming::Id(*self))
+    }
+
+    fn encode(value: f32, _: sealed::Token) -> f32 {
+        value
+    }
+
+    fn decode(stored: f32, _: sealed::Token) -> f32 {
+        stored
     }
 }
 
 impl Writable for &Float {
     type Value = f32;
 
-    fn write_through(self, ui: &UiParams, value: f32, _: sealed::Token) -> bool {
-        ui.user_write_cell(&self.0, value)
+    fn named(&self, _: sealed::Token) -> Named<'_> {
+        Named(Naming::Store(&self.0))
+    }
+
+    fn encode(value: f32, _: sealed::Token) -> f32 {
+        value
+    }
+
+    fn decode(stored: f32, _: sealed::Token) -> f32 {
+        stored
     }
 }
 
 impl Writable for &Bool {
     type Value = bool;
 
-    fn write_through(self, ui: &UiParams, value: bool, _: sealed::Token) -> bool {
-        ui.user_write_cell(&self.0, encode_bool(value))
+    fn named(&self, _: sealed::Token) -> Named<'_> {
+        Named(Naming::Store(&self.0))
+    }
+
+    fn encode(value: bool, _: sealed::Token) -> f32 {
+        encode_bool(value)
+    }
+
+    fn decode(stored: f32, _: sealed::Token) -> bool {
+        decode_bool(stored)
     }
 }
 
 impl<E: Choices> Writable for &Choice<E> {
     type Value = E;
 
-    fn write_through(self, ui: &UiParams, value: E, _: sealed::Token) -> bool {
-        ui.user_write_cell(&self.0, encode_choice(value))
+    fn named(&self, _: sealed::Token) -> Named<'_> {
+        Named(Naming::Store(&self.0))
+    }
+
+    fn encode(value: E, _: sealed::Token) -> f32 {
+        encode_choice(value)
+    }
+
+    fn decode(stored: f32, _: sealed::Token) -> E {
+        decode_choice(stored)
     }
 }
 
@@ -560,7 +751,7 @@ fn declared<'s>(
 impl Bind for Float {
     fn bind(set: &ParamSet, key: &'static str) -> Result<Self, BindError> {
         match declared(set, key)? {
-            (cell, Kind::Continuous(_)) => Ok(Float(Arc::clone(cell))),
+            (cell, Kind::Continuous(_)) => Ok(Float::from_cell(Arc::clone(cell))),
             _ => Err(BindError::WrongKind(key)),
         }
     }
@@ -569,7 +760,7 @@ impl Bind for Float {
 impl Bind for Bool {
     fn bind(set: &ParamSet, key: &'static str) -> Result<Self, BindError> {
         match declared(set, key)? {
-            (cell, Kind::Bool) => Ok(Bool(Arc::clone(cell))),
+            (cell, Kind::Bool) => Ok(Bool::from_cell(Arc::clone(cell))),
             _ => Err(BindError::WrongKind(key)),
         }
     }
@@ -579,7 +770,7 @@ impl<E: Choices> Bind for Choice<E> {
     fn bind(set: &ParamSet, key: &'static str) -> Result<Self, BindError> {
         match declared(set, key)? {
             (cell, Kind::Choice(labels)) if labels == E::LABELS => {
-                Ok(Choice(Arc::clone(cell), PhantomData))
+                Ok(Choice::from_cell(Arc::clone(cell)))
             }
             (_, Kind::Choice(_)) => Err(BindError::LabelsDiffer(key)),
             _ => Err(BindError::WrongKind(key)),

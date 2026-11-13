@@ -7,6 +7,7 @@
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU64, Ordering};
 use std::sync::atomic::AtomicU64 as SerialCounter;
+use std::sync::atomic::AtomicUsize as HolderCount;
 use std::sync::atomic::{AtomicU32 as IdWord, Ordering as IdOrdering};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,6 +28,10 @@ static SERIALS: SerialCounter = SerialCounter::new(0);
 /// write before the other thread's reads.
 const UNPLACED: u32 = u32::MAX;
 
+/// The instance word of a cell a set lists, or will once it is built. A set
+/// numbers its instance from 1.
+pub(crate) const LISTED: u32 = 0;
+
 /// One parameter's store, shared by its set and by whatever holds it.
 ///
 /// `repr(C)` keeps the fields in this order: what a block reads (the value
@@ -46,6 +51,22 @@ pub(crate) struct ParamCell {
     /// when the set is built. Read on every call of a typed parameter's `id`,
     /// so it is one plain load.
     id: IdWord,
+    /// [`LISTED`], or for a parameter made at run time the number of the
+    /// instance that made it, so another instance's handles refuse it. In
+    /// the padding the id word leaves.
+    instance: u32,
+    /// How many typed parameters (`Float`, `Bool`, `Choice`) hold it. What
+    /// Seam holds itself, a learn route, an undo step, an open gesture or
+    /// the save's list, does not count, so learn and the save can tell when
+    /// the plugin has let a parameter made at run time go.
+    ///
+    /// It orders nothing, so every access is relaxed. For a cell made at run
+    /// time, zero is final: a typed parameter is made from the store only
+    /// once, when it is declared, and every later one is a clone, counted
+    /// before the parameter it was cloned from can drop. A listed cell's
+    /// count can rise from zero again, through `ParamSet::bind`, and nothing
+    /// reads a listed cell's.
+    holders: HolderCount,
     decl: ParamDecl,
 }
 
@@ -53,12 +74,62 @@ impl ParamCell {
     /// A cell at its declaration's snapped default, as a restore's write,
     /// with no id until a set places it.
     pub(crate) fn new(decl: ParamDecl) -> Self {
+        let value = decl.default_value();
+        Self::holding(decl, value, LISTED)
+    }
+
+    /// A cell for a parameter made at run time by instance `instance`, born
+    /// holding `value`, which must be legal for `decl`, as a restore's write.
+    /// No set ever places it.
+    pub(crate) fn run_time(decl: ParamDecl, value: f32, instance: u32) -> Self {
+        debug_assert!(instance != LISTED, "a run-time cell names its instance");
+        Self::holding(decl, value, instance)
+    }
+
+    fn holding(decl: ParamDecl, value: f32, instance: u32) -> Self {
         ParamCell {
-            value: ValueCell::new(Packed::new(decl.default_value(), Origin::Restore)),
+            value: ValueCell::new(Packed::new(value, Origin::Restore)),
             changes: AtomicU64::new(0),
             serial: SERIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             id: IdWord::new(UNPLACED),
+            instance,
+            holders: HolderCount::new(0),
             decl,
+        }
+    }
+
+    /// One more typed parameter holds it.
+    pub(crate) fn hold(&self) {
+        self.holders.fetch_add(1, IdOrdering::Relaxed);
+    }
+
+    /// One typed parameter let it go.
+    pub(crate) fn let_go(&self) {
+        self.holders.fetch_sub(1, IdOrdering::Relaxed);
+    }
+
+    /// Whether a typed parameter still holds it.
+    pub(crate) fn held(&self) -> bool {
+        self.holders.load(IdOrdering::Relaxed) > 0
+    }
+
+    /// The instance a parameter made at run time belongs to, or [`LISTED`].
+    pub(crate) fn instance(&self) -> u32 {
+        self.instance
+    }
+
+    /// Whether it was made at run time, in no set.
+    pub(crate) fn is_run_time(&self) -> bool {
+        self.instance != LISTED
+    }
+
+    /// Writes a learned controller's 0 to 1 as
+    /// [`AudioParams::learned_write`](crate::AudioParams::learned_write)
+    /// does: what [`ParamDecl::learned_value`] makes of it, and NaN writes
+    /// nothing. Never allocates, locks or frees: audio thread.
+    pub(crate) fn learned_write(&self, normalized: f64) {
+        if let Some(value) = self.decl.learned_value(normalized) {
+            self.store_then_publish(value, Origin::Learn, || {});
         }
     }
 
@@ -75,10 +146,15 @@ impl ParamCell {
 
     /// Its place in its set.
     ///
-    /// Asking before the set is built is the caller's bug: a debug build
-    /// panics, and a release build returns an id past any set's end.
+    /// Asking for a parameter made at run time, or before the set is built,
+    /// is the caller's bug: a debug build panics, and a release build returns
+    /// an id past any set's end.
     pub(crate) fn id(&self) -> ParamId {
         let raw = self.id.load(IdOrdering::Relaxed);
+        debug_assert!(
+            !self.is_run_time(),
+            "a parameter made at run time has no id: pass the parameter itself"
+        );
         debug_assert!(
             raw != UNPLACED,
             "a parameter has no id until its set is built: ask for it after ParamSet::declare returns"

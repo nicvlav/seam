@@ -8,6 +8,7 @@ use seam_session::{ApplyError, Participant, Section, SessionError, SessionUi};
 use serde_json::Value as Json;
 
 use super::{Custom, Learn};
+use crate::TargetId;
 use crate::saved::{SCHEMA, SESSION_KEY, decode, encode};
 
 impl Learn {
@@ -34,6 +35,9 @@ impl Learn {
         let mut entries: Vec<(&str, Section)> = self
             .mappings
             .iter()
+            // A parameter made at run time is saved beside its value, under
+            // its owner's scope: its key alone names no one parameter.
+            .filter(|(target, _)| !matches!(target, TargetId::RunTime(_)))
             .filter_map(|(&target, mapping)| {
                 let key = self.key(target)?;
                 Some((key, encode(key, mapping)))
@@ -98,7 +102,11 @@ impl Learn {
         let readable =
             section.is_none_or(|s| s.get("schema").and_then(Json::as_u64) == Some(SCHEMA));
         self.arm.disarm();
-        self.mappings.clear();
+        // A parameter made at run time keeps its mapping: it is saved and
+        // brought back with its value, whichever of the plugin's tree and
+        // this section a pass applies first.
+        self.mappings
+            .retain(|target, _| matches!(target, TargetId::RunTime(_)));
         self.held.clear();
         for custom in self.customs.values_mut() {
             custom.staging = None;

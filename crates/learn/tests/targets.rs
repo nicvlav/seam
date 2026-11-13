@@ -8,7 +8,7 @@ use seam_learn::{
     Config, Control, CustomId, Learn, LearnAudio, LearnError, Learned, Mapping, SESSION_KEY,
     Source, Takes, Target, TargetId,
 };
-use seam_params::{Kind, ParamDecl, ParamSet, ParamSetBuilder};
+use seam_params::{Declarer, Float, FloatDecl, Kind, ParamDecl, ParamSet, ParamSetBuilder};
 use seam_session::Session;
 use seam_ump::{ChannelVoice, EventList, Voice};
 
@@ -535,4 +535,117 @@ fn a_re_pointed_target_never_applies_a_value_its_old_source_staged() {
         .expect("legal");
     rig.learn.poll();
     assert!(rig.taken().is_empty());
+}
+
+/// A parameter `set`'s instance makes at run time, as a plugin's parts do.
+fn made(set: &ParamSet, key: &'static str) -> Float {
+    let decl = FloatDecl::new(key, "Volume", -60.0..=12.0, 0.0);
+    Declarer::run_time_one(set, Box::new(|_| None), decl).0
+}
+
+#[test]
+fn typed_parameters_listed_and_made_at_run_time_are_targets() {
+    let set = set();
+    let gain: Float = set.bind("gain").expect("declared");
+    let volume = made(&set, "volume");
+    let (mut learn, _audio) = Learn::new(&set, Config::default());
+    let mapping = Mapping::new(Source::any(Control::Cc(7)));
+
+    // A listed typed parameter is the target its id names.
+    learn.arm(&gain, Takes::CONTROLLER).expect("known");
+    assert_eq!(learn.armed(), Some((gain.id().into(), Takes::CONTROLLER)));
+    learn.map(&gain, mapping).expect("legal");
+    assert_eq!(learn.mapping(gain.id()), Some(&mapping));
+    assert_eq!(learn.key(&gain), Some("gain"));
+
+    // One made at run time is a target of its own kind, known while it is
+    // armed or mapped.
+    assert_eq!(learn.key(&volume), None);
+    learn.arm(&volume, Takes::CONTROLLER).expect("known");
+    assert!(matches!(learn.armed(), Some((TargetId::RunTime(_), _))));
+    assert_eq!(learn.key(&volume), Some("volume"));
+    learn.map(&volume, mapping).expect("legal");
+    assert_eq!(learn.armed(), None, "mapping the armed target ends the arm");
+    assert_eq!(learn.mapping(&volume), Some(&mapping));
+    let targets: Vec<_> = learn.mappings().map(|(target, _)| target).collect();
+    assert!(matches!(
+        targets[..],
+        [TargetId::Param(_), TargetId::RunTime(_)]
+    ));
+    assert_eq!(learn.unmap(&volume), Some(mapping));
+    assert_eq!(learn.mapping(&volume), None);
+}
+
+#[test]
+fn a_run_time_mapping_is_left_out_of_learns_section_and_kept_across_its_restore() {
+    let set = set();
+    let volume = made(&set, "volume");
+    let (mut learn, _audio) = Learn::new(&set, Config::default());
+    let mapping = Mapping::new(Source::any(Control::Cc(7)));
+    learn
+        .map(set.id("gain").expect("declared"), mapping)
+        .expect("legal");
+    learn.map(&volume, mapping).expect("legal");
+
+    let saved = learn.save();
+    let targets: Vec<_> = saved["mappings"]
+        .as_array()
+        .expect("an array")
+        .iter()
+        .map(|entry| entry["target"].clone())
+        .collect();
+    assert_eq!(targets, ["gain"], "its key alone names no one parameter");
+
+    learn.restore(None).expect("readable");
+    assert_eq!(learn.mapping(&volume), Some(&mapping), "kept");
+    assert_eq!(learn.len(), 1, "the listed mapping cleared");
+    learn.restore(Some(&saved)).expect("readable");
+    assert_eq!(learn.len(), 2);
+}
+
+#[test]
+fn another_instances_run_time_parameter_is_an_unknown_target() {
+    let ours = set();
+    let theirs = set();
+    let volume = made(&theirs, "volume");
+    let (mut learn, _audio) = Learn::new(&ours, Config::default());
+    let mapping = Mapping::new(Source::any(Control::Cc(7)));
+
+    assert!(matches!(
+        learn.arm(&volume, Takes::CONTROLLER),
+        Err(LearnError::UnknownTarget(TargetId::RunTime(_)))
+    ));
+    assert!(matches!(
+        learn.map(&volume, mapping),
+        Err(LearnError::UnknownTarget(_))
+    ));
+    assert_eq!(learn.mapping(&volume), None);
+    assert_eq!(learn.key(&volume), None);
+    assert_eq!(learn.unmap(&volume), None);
+    assert!(learn.is_empty());
+}
+
+#[test]
+fn learn_lets_a_parameter_go_at_the_poll_after_the_plugin_does() {
+    let set = set();
+    let (mut learn, mut audio) = Learn::new(&set, Config::default());
+    let volume = made(&set, "volume");
+    let armed = made(&set, "armed");
+    learn
+        .map(&volume, Mapping::new(Source::any(Control::Cc(7))))
+        .expect("legal");
+    learn.arm(&armed, Takes::CONTROLLER).expect("known");
+    let copy = volume.clone();
+
+    drop((volume, armed));
+    assert!(learn.poll().is_none());
+    assert_eq!(learn.len(), 1, "a clone still holds it");
+    assert_eq!(learn.armed(), None, "the armed one let go");
+
+    audio.process(&controllers(&[(7, 127)]));
+    assert_eq!(copy.get(), 12.0, "a learned write reaches its store");
+    drop(copy);
+    assert_eq!(learn.len(), 1, "until the next poll");
+    assert!(learn.poll().is_none());
+    assert!(learn.is_empty());
 }

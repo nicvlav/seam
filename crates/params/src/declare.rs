@@ -1,10 +1,10 @@
 //! Declaring parameters where they are held: a typed declaration says what a
 //! parameter is, and declaring it hands the parameter back.
 
-use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
+use crate::param::ParamRef;
 use crate::param::sealed::{Sealed, Token};
 use crate::set::ParamCell;
 use crate::{
@@ -423,7 +423,7 @@ impl Declaration for FloatDecl {
         let decl = ParamDecl::new(self.key, self.name, kind, self.default)
             .with_unit(self.unit)
             .with_group(self.group);
-        Float(p.store(decl, refused))
+        Float::from_cell(p.store(decl, refused))
     }
 }
 
@@ -434,7 +434,7 @@ impl Declaration for BoolDecl {
         let default = if self.default { 1.0 } else { 0.0 };
         let decl = ParamDecl::new(self.key, self.name, Kind::Bool, default).with_group(self.group);
         let decl = if self.bypass { decl.as_bypass() } else { decl };
-        Bool(p.store(decl, self.check().err()))
+        Bool::from_cell(p.store(decl, self.check().err()))
     }
 }
 
@@ -448,7 +448,7 @@ impl<E: Choices> Declaration for ChoiceDecl<E> {
         });
         let decl = ParamDecl::new(self.key, self.name, Kind::Choice(E::LABELS), index as f32)
             .with_group(self.group);
-        Choice(p.store(decl, refused), PhantomData)
+        Choice::from_cell(p.store(decl, refused))
     }
 }
 
@@ -641,6 +641,34 @@ impl Params for () {
 pub struct Declarer {
     builder: ParamSetBuilder,
     refused: Option<DeclError>,
+    /// Set when the parameters are made at run time: in no set, listed to
+    /// no host.
+    run_time: Option<RunTime>,
+}
+
+/// The value a load holds for a key, which a parameter made at run time
+/// under that key is born holding. It owns what it reads, since the
+/// plugin's own code runs while it is held.
+#[doc(hidden)]
+pub type HeldValues = Box<dyn Fn(&str) -> Option<f32>>;
+
+/// What a declarer making parameters at run time keeps.
+struct RunTime {
+    /// The number of the instance making them.
+    instance: u32,
+    held: HeldValues,
+    /// The keys made so far, so one struct cannot repeat one.
+    keys: Vec<&'static str>,
+    /// Each parameter made, in declaration order.
+    made: Vec<ParamRef>,
+}
+
+impl std::fmt::Debug for RunTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunTime")
+            .field("keys", &self.keys)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Declarer {
@@ -648,7 +676,62 @@ impl Declarer {
         Declarer {
             builder: ParamSetBuilder::new(),
             refused: None,
+            run_time: None,
         }
+    }
+
+    /// A declarer that makes parameters at run time for `set`'s instance.
+    fn run_time_for(set: &ParamSet, held: HeldValues) -> Self {
+        Declarer {
+            run_time: Some(RunTime {
+                instance: set.instance(),
+                held,
+                keys: Vec::new(),
+                made: Vec::new(),
+            }),
+            ..Declarer::new()
+        }
+    }
+
+    /// The parameters made so far, in declaration order.
+    fn made(self) -> Vec<ParamRef> {
+        self.run_time
+            .map(|run_time| run_time.made)
+            .unwrap_or_default()
+    }
+
+    /// Makes `P`'s parameters at run time for `set`'s instance: in no set,
+    /// listed to no host. Each is born holding what `held` gives for its
+    /// key, made legal as a load's value is, and its default otherwise.
+    /// Hands back the struct, and each parameter with its type erased, in
+    /// declaration order.
+    ///
+    /// # Panics
+    ///
+    /// On a mistake fixed in the plugin's source: a declaration refused, a
+    /// bypass, a key the struct declares twice, or a plain table
+    /// ([`extend`](Self::extend)).
+    #[doc(hidden)]
+    pub fn run_time<P: Params>(set: &ParamSet, held: HeldValues) -> (P, Vec<ParamRef>) {
+        let mut declarer = Declarer::run_time_for(set, held);
+        let params = P::declare(&mut declarer);
+        (params, declarer.made())
+    }
+
+    /// [`run_time`](Self::run_time) for one declaration.
+    ///
+    /// # Panics
+    ///
+    /// As [`run_time`](Self::run_time) does, but for the repeated key.
+    #[doc(hidden)]
+    pub fn run_time_one<D: Declaration>(
+        set: &ParamSet,
+        held: HeldValues,
+        decl: D,
+    ) -> (D::Param, Vec<ParamRef>) {
+        let mut declarer = Declarer::run_time_for(set, held);
+        let param = declarer.add(decl);
+        (param, declarer.made())
     }
 
     /// Declares one parameter and hands it back, carrying its store.
@@ -692,7 +775,18 @@ impl Declarer {
     /// assert_eq!(b.get(), 0.5);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// When the parameters are made at run time: a plain table hands back no
+    /// typed parameter, and one made at run time cannot be bound by key
+    /// later.
     pub fn extend(&mut self, decls: impl IntoIterator<Item = ParamDecl>) {
+        assert!(
+            self.run_time.is_none(),
+            "Declarer::extend while making parameters at run time: a plain table hands back no \
+             parameter, so declare each with Declarer::add"
+        );
         for decl in decls {
             if self.refused.is_some() {
                 return;
@@ -707,6 +801,9 @@ impl Declarer {
     /// it were accepted, and alone otherwise. `refused` is what the typed
     /// declaration found wrong with itself.
     fn store(&mut self, decl: ParamDecl, refused: Option<DeclError>) -> Arc<ParamCell> {
+        if let Some(run_time) = &mut self.run_time {
+            return run_time.store(decl, refused);
+        }
         if self.refused.is_none() {
             let added = match refused {
                 None => self.builder.add_cell(decl),
@@ -718,6 +815,34 @@ impl Declarer {
             }
         }
         Arc::new(ParamCell::new(decl))
+    }
+}
+
+impl RunTime {
+    /// A store of its own for `decl`, born holding the held value for its
+    /// key. Panics on a mistake fixed in the plugin's source, as
+    /// [`Declarer::run_time`] says.
+    fn store(&mut self, decl: ParamDecl, refused: Option<DeclError>) -> Arc<ParamCell> {
+        let key = decl.key;
+        if let Some(error) = refused {
+            panic!("{key:?}, made at run time, was refused: {error}");
+        }
+        assert!(
+            !decl.bypass,
+            "{key:?} is a bypass, but a parameter made at run time is listed to no host: \
+             declare the bypass in the plugin's Params"
+        );
+        assert!(
+            !self.keys.contains(&key),
+            "{key:?} is declared twice in one struct made at run time: its saved value and \
+             learned mapping are found by key, so give each its own"
+        );
+        self.keys.push(key);
+        let value =
+            (self.held)(key).map_or_else(|| decl.default_value(), |held| decl.restore_value(held));
+        let cell = Arc::new(ParamCell::run_time(decl, value, self.instance));
+        self.made.push(ParamRef(Arc::clone(&cell)));
+        cell
     }
 }
 

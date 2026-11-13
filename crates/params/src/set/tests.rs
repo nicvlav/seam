@@ -1,5 +1,16 @@
-//! The loom models of the store: its count-then-value read, two writers,
-//! and a write's step between store and publish.
+//! The store's size, and the loom models of the store: its count-then-value
+//! read, two writers, and a write's step between store and publish.
+
+/// A parameter made at run time is one cell behind an `Arc`, so the cell is
+/// what each costs: the instance number fits the padding after the id word,
+/// and the holder count takes one word more.
+#[cfg(not(loom))]
+#[test]
+fn a_cell_and_its_arc_counts_stay_under_224_bytes() {
+    let arc_counts = 2 * size_of::<usize>();
+    let cell = size_of::<super::ParamCell>();
+    assert!(cell + arc_counts < 224, "{cell} bytes");
+}
 
 #[cfg(loom)]
 mod loom_models {

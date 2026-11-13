@@ -9,7 +9,7 @@ use seam_host::{
     AuCodes, Block, Category, Driver, Event, EventList, Layout, Parts, Plugin, PluginInfo,
     ProcessSetup, Processor, Status,
 };
-use seam_learn::Config;
+use seam_learn::{Config, Control, Mapping, Source};
 use seam_params::{Declarer, Float, FloatDecl, Params};
 use seam_testkit::alloc::assert_no_allocations;
 use seam_undo::Bound;
@@ -101,6 +101,35 @@ fn an_idle_tick_of_a_plugin_s_parts_does_not_allocate() {
             driver.tick();
         }
     });
+}
+
+#[test]
+fn an_idle_tick_with_ten_thousand_parameters_made_at_run_time_does_not_allocate() {
+    let (_params, mut parts) = Parts::for_plugin::<Listening>().expect("valid declarations");
+    let _history = parts.undo(Bound::default());
+    parts.midi_learn(Config::default());
+    let driver = Driver::of(&parts);
+    let _audio = driver.learn_audio();
+    let made: Vec<Float> = (0..10_000)
+        .map(|node| {
+            let decl = FloatDecl::new("level", "Level", 0.0..=1.0, 0.5);
+            parts.add(&format!("node/{node}"), decl)
+        })
+        .collect();
+    // A few learned, so learn's poll walks them.
+    for (number, param) in (20..28).zip(&made) {
+        let mapping = Mapping::new(Source::any(Control::Cc(number)));
+        parts.learn().map(param, mapping).expect("legal");
+    }
+    driver.tick();
+    assert_no_allocations(
+        "idle ticks with ten thousand parameters made at run time",
+        || {
+            for _ in 0..64 {
+                driver.tick();
+            }
+        },
+    );
 }
 
 /// A plugin that keeps its parts, with undo and learn on, so the engine

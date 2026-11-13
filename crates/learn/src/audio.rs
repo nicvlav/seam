@@ -98,6 +98,7 @@ impl LearnAudio {
                 table.dispatch(&message, |route, value| match route {
                     Route::Param(target) => self.params.learned_write(*target, value),
                     Route::Staged(staging) => staging.stage(value),
+                    Route::RunTime(param) => param.learned_write(value),
                 });
             }
         });
