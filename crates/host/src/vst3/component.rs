@@ -500,7 +500,7 @@ impl<P: Plugin> IComponentTrait for Component<P> {
             let Some(engine) = self.engine() else {
                 return kNotInitialized;
             };
-            let bytes = engine.saved().save();
+            let bytes = engine.save();
             // SAFETY: the SDK's contract: `stream` is null or an `IBStream`
             // the host keeps alive until this call returns, as `write_all`
             // requires.

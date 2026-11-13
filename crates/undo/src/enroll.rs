@@ -4,7 +4,10 @@ use std::any::Any;
 use std::fmt;
 use std::rc::{Rc, Weak};
 
-use seam_params::{Commit, ParamId, RestoreStamp, Stamped, TrackedRef, Tracker, UiParams, Value};
+use seam_params::{
+    Commit, ParamId, ParamRef, RestoreStamp, Stamped, TrackedRef, Tracker, UiParams, Value,
+    WeakParamRef,
+};
 
 use crate::history::{Step, booked};
 use crate::{History, HistoryError, UndoEq, UndoSize};
@@ -134,16 +137,37 @@ impl<T: Clone + UndoEq + UndoSize + 'static> Polled for Enrolled<T> {
 /// handle as one complete host gesture.
 struct ParamStep {
     ui: UiParams,
-    id: ParamId,
+    target: Replayed,
     before: f32,
     after: f32,
-    enrolment: Weak<()>,
+}
+
+/// What a parameter's step replays onto.
+#[derive(Debug)]
+enum Replayed {
+    /// A listed parameter, while it stays enrolled.
+    Listed { id: ParamId, enrolment: Weak<()> },
+    /// A parameter made at run time, held weakly: a step never keeps one
+    /// alive. While its owner can come back (a list's remove step owns it),
+    /// so can the parameter. Once the plugin holds it no longer, the step
+    /// replays as nothing, even while a learn table that has not been
+    /// replaced yet keeps its store alive.
+    RunTime(WeakParamRef),
 }
 
 impl ParamStep {
     fn replay(&self, value: f32) {
-        if self.enrolment.strong_count() > 0 {
-            self.ui.replay(self.id, value);
+        match &self.target {
+            Replayed::Listed { id, enrolment } => {
+                if enrolment.strong_count() > 0 {
+                    self.ui.replay(*id, value);
+                }
+            }
+            Replayed::RunTime(param) => {
+                if let Some(param) = param.upgrade().filter(ParamRef::held) {
+                    self.ui.replay_run_time(&param, value);
+                }
+            }
         }
     }
 }
@@ -151,7 +175,7 @@ impl ParamStep {
 impl fmt::Debug for ParamStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ParamStep")
-            .field("id", &self.id)
+            .field("target", &self.target)
             .field("before", &self.before)
             .field("after", &self.after)
             .finish_non_exhaustive()
@@ -431,13 +455,31 @@ impl History {
                 }
                 let step = ParamStep {
                     ui: shared.ui.clone(),
-                    id: record.id,
+                    target: Replayed::Listed {
+                        id: record.id,
+                        enrolment: Rc::downgrade(enrolment),
+                    },
                     before: record.before,
                     after: record.after,
-                    enrolment: Rc::downgrade(enrolment),
                 };
                 let name = shared.ui.set().decl(record.id).name;
                 steps.push((record.sequence, name.to_owned(), Box::new(step)));
+            }
+            // A parameter made at run time records whenever undo is on:
+            // there is nothing to enrol, and the cost is the gestures that
+            // closed, never how many such parameters exist.
+            for record in shared.records.take_run_time() {
+                if record.stamp != seen {
+                    continue;
+                }
+                let name = record.param.decl().name.to_owned();
+                let step = ParamStep {
+                    ui: shared.ui.clone(),
+                    target: Replayed::RunTime(record.param.downgrade()),
+                    before: record.before,
+                    after: record.after,
+                };
+                steps.push((record.sequence, name, Box::new(step)));
             }
             let mut values = shared.values.borrow_mut();
             for enrolled in values.iter_mut() {
@@ -476,10 +518,12 @@ mod tests {
         let ui = set.take_ui().expect("UI");
         let step = ParamStep {
             ui,
-            id: set.id("p").expect("declared"),
+            target: Replayed::Listed {
+                id: set.id("p").expect("declared"),
+                enrolment: Weak::new(),
+            },
             before: 0.0,
             after: 1.0,
-            enrolment: Weak::new(),
         };
         assert!(step.writes_parameters());
         let value = Value::new(1_i32, &set);

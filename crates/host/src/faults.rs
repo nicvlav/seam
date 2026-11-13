@@ -1,8 +1,9 @@
-//! Faults at the boundary: what the exporters catch where a host calls in,
-//! each of the [`Fault`] kinds, counted for the process and for each
-//! instance.
+//! Faults: what the exporters catch where a host calls in, and what an
+//! instance's own state did wrong with no host's call to blame, each of the
+//! [`Fault`] kinds, counted for the process and for each instance.
 //!
-//! To a user each looks like a plugin gone quiet, so each is made visible.
+//! To a user each looks like a plugin gone quiet, or a project that does not
+//! come back as it was saved, so each is made visible.
 //! The rule in full, which other docs point to:
 //!
 //! - **Counting** is wait-free and safe on any thread, the audio thread
@@ -47,15 +48,17 @@ static TOTAL: AtomicU64 = AtomicU64::new(0);
 /// The kinds reported for faults outside any instance.
 static REPORTED: AtomicU8 = AtomicU8::new(0);
 
-/// Returns how many faults the exporters have caught in this process, on
+/// Returns how many faults the exporters have recorded in this process, on
 /// every thread and in every instance.
 ///
-/// The faults include panics that would have unwound into the host, and
-/// calls refused for the thread they arrived on. Nothing in a working
-/// plugin moves the count. In a host, a count that moved is the first thing
-/// to check when a plugin goes quiet. Each instance also writes the first
-/// fault of each kind as a line of text, to an attached debugger on Windows
-/// and to stderr elsewhere.
+/// The faults include panics that would have unwound into the host, calls
+/// refused for the thread they arrived on, and a save that could not write
+/// every parameter made at run time as the plugin holds them. Nothing in a
+/// working plugin moves the count. In a host, a count that moved is the
+/// first thing to check when a plugin goes quiet or a project does not come
+/// back as it was saved. Each instance also writes the first fault of each
+/// kind as a line of text, to an attached debugger on Windows and to stderr
+/// elsewhere.
 ///
 /// # Examples
 ///
@@ -89,7 +92,7 @@ pub fn boundary_faults() -> u64 {
     TOTAL.load(Ordering::Relaxed)
 }
 
-/// What went wrong at the boundary.
+/// What went wrong: at the boundary, or in what an instance saves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Fault {
     /// A host's call panicked inside and was answered as refused.
@@ -111,17 +114,26 @@ pub(crate) enum Fault {
     /// No main-thread timer started: the system refused one, or the
     /// instance has no thread of its own to run one on.
     NoTimer,
+    /// Two parameters the plugin made at run time, and still holds, were
+    /// declared under one path; a save writes only the later.
+    SharedPath,
+    /// A save left out parameters made at run time: the block had no room
+    /// for them.
+    NoRoom,
 }
 
 impl Fault {
-    /// Every kind, each once, in the order a report lists them.
-    const ALL: [Fault; 6] = [
+    /// Every kind, each once, in the order a report lists them. Eight fill
+    /// the `u8`s the kinds are kept in; a ninth widens them.
+    const ALL: [Fault; 8] = [
         Fault::Panic,
         Fault::AudioPanic,
         Fault::WrongThread,
         Fault::HeldElsewhere,
         Fault::Reentered,
         Fault::NoTimer,
+        Fault::SharedPath,
+        Fault::NoRoom,
     ];
 
     fn bit(self) -> u8 {
@@ -150,6 +162,13 @@ impl Fault {
                 "a main-thread timer did not start (the system refused one, or the instance has \
                  no thread of its own), so it never ticks the plugin"
             }
+            Fault::SharedPath => {
+                "two parameters made at run time were declared under one path; a save writes \
+                 only the later"
+            }
+            Fault::NoRoom => {
+                "a save left out parameters made at run time: the saved block had no room for them"
+            }
         }
     }
 }
@@ -161,16 +180,18 @@ impl Fault {
 // until the match reads its new place too. The assertion keeps each kind's
 // bit inside the `u8`s that hold them.
 const _: () = {
-    const ALL: [Fault; 6] = Fault::ALL;
+    const ALL: [Fault; 8] = Fault::ALL;
     const FIRST: Fault = ALL[0];
     const SECOND: Fault = ALL[1];
     const THIRD: Fault = ALL[2];
     const FOURTH: Fault = ALL[3];
     const FIFTH: Fault = ALL[4];
     const SIXTH: Fault = ALL[5];
+    const SEVENTH: Fault = ALL[6];
+    const EIGHTH: Fault = ALL[7];
     assert!(Fault::ALL.len() <= u8::BITS as usize);
     match Fault::Panic {
-        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH => {}
+        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH | SEVENTH | EIGHTH => {}
     }
 };
 

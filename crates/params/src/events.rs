@@ -1,6 +1,6 @@
 //! What edits tell the host, and the gestures undo records.
 
-use crate::{ParamId, RestoreStamp};
+use crate::{ParamId, ParamRef, RestoreStamp};
 
 /// What an edit tells the host: a user's, the plugin's own or an undo
 /// replay's.
@@ -67,5 +67,22 @@ pub struct GestureRecord {
     pub stamp: RestoreStamp,
     /// The close's place in the clock's one sequence, so undo records it in
     /// time order with plain values and lists.
+    pub sequence: u64,
+}
+
+/// A user gesture on a parameter made at run time, as [`GestureRecord`] is
+/// for a listed one: the parameter by its store, which no id names.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct RunTimeRecord {
+    /// The parameter.
+    pub param: ParamRef,
+    /// The value before the gesture's first changing write.
+    pub before: f32,
+    /// Its last write.
+    pub after: f32,
+    /// The restore it happened after.
+    pub stamp: RestoreStamp,
+    /// Its place among every change, listed or made at run time.
     pub sequence: u64,
 }

@@ -70,6 +70,9 @@ impl<T> Shared<T> {
 /// path or a view setting, readable and writable from any thread but the
 /// audio thread. Clones share it.
 ///
+/// A number the DSP reads is a parameter, a [`Float`](crate::Float) say,
+/// not a value: the audio thread reads a parameter with no lock.
+///
 /// Every write moves a change counter and names its [`Origin`], so a
 /// surface polls it as it polls a parameter. Undo records a write through
 /// [`set`](Self::set) and never one through [`set_from`](Self::set_from).

@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use seam_params::ParamId;
+use seam_params::{ParamId, ParamRef};
 
 use crate::parse::Message;
 use crate::source::key;
@@ -31,6 +31,11 @@ pub(crate) enum Route {
     /// A UI-tier target's staging slot, which the table owns while it can
     /// reach it, so a block in flight never writes one that is gone.
     Staged(Arc<Staging>),
+    /// A parameter made at run time, which no set holds: the table holds
+    /// its store, so the audio thread writes it with no set. A replaced
+    /// table drops on the UI thread, as the snapshot's module says, so the
+    /// audio thread never lets a store go.
+    RunTime(ParamRef),
 }
 
 /// One mapping, as the audio thread reads it.

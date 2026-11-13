@@ -116,9 +116,12 @@ exporters are thin shells over one core, the engine
 
 ### Fault
 
-A panic or a refused call an exporter caught at its boundary. It is counted for
-the instance and the process, and the first of each kind is reported as one line
-([faults.rs](../crates/host/src/faults.rs)).
+A panic or a refused call an exporter caught at its boundary, or a save that
+could not write the [parameters made at
+run time](#parameter-made-at-run-time) as the plugin holds them: two under one
+[path](#path), or no [room](#room) for them. The last two have no host's call
+to blame. It is counted for the instance and the process, and the first of each
+kind is reported as one line ([faults.rs](../crates/host/src/faults.rs)).
 
 ### Gesture
 
@@ -158,6 +161,14 @@ Several senses:
 - **Held**, a decision's status: the work does not need the decision yet, so its
   section keeps a recommendation ([the decision
   record](decisions.md#overview)).
+- **Held by the plugin**: a [parameter made at
+  run time](#parameter-made-at-run-time) is held while a typed parameter for it
+  lives, in the plugin or in its processor. Learn, undo and the save let it go
+  once it is not, whatever else keeps its store alive.
+- **A load's held entries**: the values and mappings a load read for parameters
+  made at run time, kept until the pass that applies the load has finished, for
+  the parameters declared under their paths to be born holding
+  ([state/run_time.rs](../crates/host/src/state/run_time.rs)).
 
 ### Learned write
 
@@ -190,6 +201,14 @@ plugin's own code, or an undo replay. Every write names one, and the origin
 alone decides the write's side effects
 ([`Origin`](../crates/params/src/origin.rs)).
 
+### Parameter made at run time
+
+A [typed parameter](#typed-parameter) a plugin makes while it runs, with
+`Parts::declare` or `Parts::add`, from the same declarations as a listed one.
+It is in no set, so no host lists it or hears of it; a write, undo and learn
+reach it as they reach a listed one, and a save writes it under its
+[path](#path) ([`Parts::declare`](../crates/host/src/parts.rs)).
+
 ### Participant
 
 An owner of saved state beyond parameters, such as learn's mappings or an
@@ -211,6 +230,13 @@ A session's apply pass. On a tick,
 [`SessionUi::tick`](../crates/session/src/ui.rs) applies the newest stored
 restore to every participant in registration order. Restores stored before the
 tick collapse into one pass, and passes never nest.
+
+### Path
+
+Where a [parameter made at run time](#parameter-made-at-run-time) is saved:
+its owner's [scope](#scope), a `/`, and its key, `group/17/volume`. The
+parameter declared last under a path is the one a save writes
+([state/run_time.rs](../crates/host/src/state/run_time.rs)).
 
 ### Piece
 
@@ -256,10 +282,26 @@ makes it, so every part of one plugin shares one
 
 ### Room
 
-The fixed capacity a block's automation has: 8 points per parameter on average,
-shared by the block's queues and fixed when the engine is built. A parameter's
-first queue wins and its last point lands; a point past the room is counted as
-dropped ([automation.rs](../crates/host/src/engine/automation.rs)).
+Two senses:
+
+- **A block's automation room**: the fixed capacity a block's automation has: 8
+  points per parameter on average, shared by the block's queues and fixed when
+  the engine is built. A parameter's first queue wins and its last point lands;
+  a point past the room is counted as dropped
+  ([automation.rs](../crates/host/src/engine/automation.rs)).
+- **The saved block's room**: what the longest block a load reads leaves for a
+  part of it, after the frame, every declared parameter at its longest value
+  and the keys the last load kept. The session's sections take it first, then
+  the [parameters made at run time](#parameter-made-at-run-time)
+  ([state.rs](../crates/host/src/state.rs)).
+
+### Scope
+
+The string that names a [parameter made at
+run time](#parameter-made-at-run-time)'s owner, `group/17`, given to
+`Parts::declare`. With the parameter's key it makes its [path](#path); the
+empty scope puts the key at the top
+([`Parts::declare`](../crates/host/src/parts.rs)).
 
 ### Section
 
@@ -341,7 +383,8 @@ reads, with `get`, as the type its kind stands for: an `f32`, a `bool` or the
 plugin's enum. A clone is the same parameter. Declaring one with a
 [typed declaration](../crates/params/src/declare.rs) hands it back. Its
 [`ParamId`](../crates/params/src/decl.rs) is its place in its set, fixed when
-the set is built.
+the set is built; one [made at run time](#parameter-made-at-run-time) is in no
+set and has none.
 
 ### Watch
 

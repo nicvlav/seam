@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::{Origin, ParamId, ParamSet, RestoreWriter, audio_thread};
+use crate::{Origin, ParamId, ParamRef, ParamSet, RestoreWriter, audio_thread};
 
 /// The handle for writes from any thread but audio.
 ///
@@ -170,5 +170,23 @@ impl Load {
         // either wrote before this or sees the count moved and writes nothing.
         self.clock.stored();
         self.set.store(id, value, Origin::Restore);
+    }
+
+    /// [`restore`](Self::restore) for a parameter made at run time, under
+    /// the same hold.
+    ///
+    /// Thread: any but audio.
+    ///
+    /// # Panics
+    ///
+    /// In a build with `debug_assertions`, while the thread holds an
+    /// [`audio_thread`] mark.
+    #[doc(hidden)]
+    pub fn restore_run_time(&self, param: &ParamRef, value: f32) {
+        audio_thread::assert_not_here("Load::restore_run_time");
+        let value = param.decl().restore_value(value);
+        let _held = self.clock.hold_loads();
+        self.clock.stored();
+        param.0.store_then_publish(value, Origin::Restore, || {});
     }
 }

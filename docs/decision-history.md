@@ -860,6 +860,26 @@ can depend on data returns a `Result`, and that `Parts::undo` and
 building it beyond the wording of the two panics. The owner confirmed it on
 2026-11-12.
 
+### D96. Parameters made at run time
+
+[The decision](decisions.md#d96-parameters-made-at-run-time)
+
+The owner decided on 2026-11-10 that a plugin makes parameters while it runs:
+the same types, from the same declarations, owned by whatever holds them, with
+no pool and no flag. On 2026-11-12, from a working build, the owner decided
+that each is saved by its path, that `id()` stays and panics for one made at
+run time, that a cell shares nothing, that two live parameters with one path
+are a fault, and the run-time names. The same day, from a review of the
+design, the owner decided that a load writes none of them on the host's
+thread, and that `Gesture::id` returns an `Option`. A typed write for a
+gesture and a `TargetId` made from a typed parameter were approved and left
+until something calls them, and so were `watch` and `sync` taking one. Built
+on 2026-11-12; the choices the record lists as to confirm wait for the owner.
+The same day, from a review of the build, the owner decided that a load's
+mappings for them are made in one step when its pass finishes, learn's restore
+clearing them with the rest, and that a count of loads the saved state keeps,
+not the restore clock, decides which were declared before a load.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

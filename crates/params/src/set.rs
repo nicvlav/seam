@@ -23,7 +23,7 @@ use std::sync::Arc;
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(crate) use param_cell::ParamCell;
+pub(crate) use param_cell::{LISTED, ParamCell};
 
 use crate::declare::rules;
 use crate::host_events::{HostEventDrain, HostQueue};
@@ -366,7 +366,19 @@ impl ParamSetBuilder {
             host,
             ui_taken: AtomicBool::new(false),
             clock: RestoreClock::new(),
+            instance: next_instance(),
         })
+    }
+}
+
+/// A number no other live set has. Past `u32::MAX` sets it wraps, skipping
+/// the listed cells' word.
+fn next_instance() -> u32 {
+    loop {
+        let instance = INSTANCES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if instance != LISTED {
+            return instance;
+        }
     }
 }
 
@@ -461,7 +473,14 @@ pub struct ParamSet {
     host: HostQueue,
     ui_taken: AtomicBool,
     clock: Arc<RestoreClock>,
+    /// The instance's number, which each parameter it makes at run time
+    /// carries.
+    instance: u32,
 }
+
+/// The number the next set takes, from 1, after [`LISTED`]. Not a modelled
+/// atomic: it only hands out numbers, and orders nothing.
+static INSTANCES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 impl ParamSet {
     /// Declares a whole plugin's parameters at once: checks each, in order, as
@@ -758,6 +777,17 @@ impl ParamSet {
             .is_some_and(|own| Arc::ptr_eq(own, cell))
     }
 
+    /// The instance's number, which a parameter it makes at run time
+    /// carries.
+    pub(crate) fn instance(&self) -> u32 {
+        self.instance
+    }
+
+    /// Whether `cell` is a parameter this instance made at run time.
+    pub(crate) fn made(&self, cell: &ParamCell) -> bool {
+        cell.is_run_time() && cell.instance() == self.instance
+    }
+
     pub(crate) fn host(&self) -> &HostQueue {
         &self.host
     }
@@ -901,10 +931,7 @@ impl AudioParams {
     /// ```
     #[cfg_attr(seam_rtsan, sanitize(realtime = "nonblocking"))]
     pub fn learned_write(&self, id: ParamId, normalized: f64) {
-        let cell = self.set.cell(id);
-        if let Some(value) = cell.decl().learned_value(normalized) {
-            cell.store_then_publish(value, Origin::Learn, || {});
-        }
+        self.set.cell(id).learned_write(normalized);
     }
 }
 

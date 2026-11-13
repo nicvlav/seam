@@ -8,6 +8,7 @@ use seam_session::{ApplyError, Participant, Section, SessionError, SessionUi};
 use serde_json::Value as Json;
 
 use super::{Custom, Learn};
+use crate::TargetId;
 use crate::saved::{SCHEMA, SESSION_KEY, decode, encode};
 
 impl Learn {
@@ -34,6 +35,9 @@ impl Learn {
         let mut entries: Vec<(&str, Section)> = self
             .mappings
             .iter()
+            // A parameter made at run time is saved beside its value, under
+            // its owner's scope: its key alone names no one parameter.
+            .filter(|(target, _)| !matches!(target, TargetId::RunTime(_)))
             .filter_map(|(&target, mapping)| {
                 let key = self.key(target)?;
                 Some((key, encode(key, mapping)))
@@ -58,11 +62,14 @@ impl Learn {
     /// Replaces every mapping and every held entry from a saved section, in one
     /// publish, and ends any arm.
     ///
-    /// `None` clears them: a restore is a complete assignment. A restore
-    /// routes and never writes a value. An entry this build cannot read drops
-    /// on its own, and so does one the checks of [`map`](Self::map) refuse,
-    /// the ceiling included. An entry for a target not registered yet is
-    /// held, saved back unchanged and applied when that target registers.
+    /// `None` clears them: a restore is a complete assignment. A parameter
+    /// made at run time is saved beside its value, not in this section, and
+    /// its mapping clears with the rest: whatever saved it maps it again. A
+    /// restore routes and never writes a value. An entry this build cannot
+    /// read drops on its own, and so does one the checks of
+    /// [`map`](Self::map) refuse, the ceiling included. An entry for a target
+    /// not registered yet is held, saved back unchanged and applied when that
+    /// target registers.
     ///
     /// A section of another schema, a newer build's say, cannot be read. The
     /// mappings still clear, so the previous project's stop routing, and

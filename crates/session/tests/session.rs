@@ -1102,3 +1102,51 @@ fn a_pass_that_left_a_busy_participant_owed_is_not_completed() {
     assert_eq!(texts(&a).0, "restored");
     assert_eq!(rig.clock.stamp().completed(), 1);
 }
+
+#[test]
+fn a_finished_pass_covers_the_stored_count_it_began_at() {
+    // What the saved state reads to tell a pass that applied a restore from
+    // one that began before the restore stored its sections.
+    let rig = rig();
+    assert_eq!(rig.ui.covered(), 0, "before any pass");
+    let a = notes("x");
+    let _a = rig.ui.register("a", &a).expect("free");
+
+    rig.session.restore(Some(&json!({"a": "one"})));
+    let stored = rig.clock.stamp().stored();
+    assert_eq!(rig.ui.covered(), 0, "stored, not applied");
+    rig.ui.tick();
+    assert_eq!(rig.ui.covered(), stored);
+
+    // A participant busy through the pass leaves it owed and unfinished.
+    rig.session.restore(Some(&json!({"a": "two"})));
+    let busy = a.borrow();
+    rig.ui.tick();
+    assert_eq!(
+        rig.ui.covered(),
+        stored,
+        "an unfinished pass covers nothing"
+    );
+    drop(busy);
+    rig.ui.tick();
+    assert_eq!(rig.ui.covered(), rig.clock.stamp().stored());
+
+    // A restore stored inside a pass's apply is past what that pass covers:
+    // the next pass covers it.
+    let session = rig.session.clone();
+    let fired = Rc::new(Cell::new(false));
+    let once = Rc::clone(&fired);
+    a.borrow_mut().during_apply = Some(Box::new(move || {
+        if !once.replace(true) {
+            session.restore(Some(&json!({"a": "four"})));
+        }
+    }));
+    rig.session.restore(Some(&json!({"a": "three"})));
+    let began = rig.clock.stamp().stored();
+    rig.ui.tick();
+    assert_eq!(rig.ui.covered(), began);
+    assert!(rig.clock.stamp().stored() > began, "the restore inside it");
+    rig.ui.tick();
+    assert_eq!(rig.ui.covered(), rig.clock.stamp().stored());
+    assert_eq!(texts(&a).0, "four");
+}

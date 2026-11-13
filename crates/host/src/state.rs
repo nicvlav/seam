@@ -6,9 +6,14 @@ use std::error::Error;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use seam_params::{Kind, ParamSet};
+use seam_params::{Kind, ParamDecl, ParamSet};
 use seam_session::{Restored, Session};
 use serde_json::{Map, Value as Json};
+
+mod run_time;
+
+pub(crate) use run_time::{Assigned, RunTimeSaved};
+use run_time::{KEY as RUN_TIME, Loaded};
 
 /// The version of the block's frame this build of Seam writes: the shape Seam
 /// gives `parameters`, `extra` and the keys a load keeps. A plugin's own
@@ -154,6 +159,9 @@ pub struct SavedState {
     declared_bytes: usize,
     /// Held across a whole save or load, so the two never interleave.
     last: Mutex<LastLoad>,
+    /// The parameters made at run time a save writes, and the entries a
+    /// load holds for them.
+    run_time: RunTimeSaved,
 }
 
 /// The plugin's schema version and its upgrade of a block of an older one.
@@ -248,6 +256,28 @@ fn key_bytes(key: &str) -> usize {
     count.0
 }
 
+/// A parameter's value as a block writes it: a bool `true` or `false`, a
+/// choice its index as an integer, and anything else a double that holds
+/// the stored `f32` exactly.
+fn value_json(decl: &ParamDecl, value: f32) -> Json {
+    match decl.kind {
+        Kind::Bool => Json::Bool(value >= 0.5),
+        Kind::Choice(_) => Json::from(value as u64),
+        Kind::Continuous(_) => Json::from(f64::from(value)),
+    }
+}
+
+/// A block's value as a parameter's write takes it: a bool as 1 or 0, a
+/// number as the nearest `f32`, infinite outside its range. `None` for
+/// anything else.
+fn value_number(value: &Json) -> Option<f32> {
+    match value {
+        Json::Bool(on) => Some(if *on { 1.0 } else { 0.0 }),
+        Json::Number(number) => number.as_f64().map(|value| value as f32),
+        _ => None,
+    }
+}
+
 /// One `"key":value` entry of a JSON object.
 fn entry(key: &str, value: &Json) -> String {
     format!("{}:{value}", Json::from(key))
@@ -300,6 +330,7 @@ impl SavedState {
             migration: None,
             declared_bytes: frame.len() + parameters,
             last: Mutex::default(),
+            run_time: RunTimeSaved::default(),
         };
         state
             .session
@@ -427,20 +458,39 @@ impl SavedState {
         &self.set
     }
 
+    /// The parameters made at run time a save writes, and the entries a
+    /// load holds for them.
+    pub(crate) fn run_time(&self) -> &RunTimeSaved {
+        &self.run_time
+    }
+
     /// Returns the block as UTF-8 JSON with no byte-order mark:
     /// `{"seamStateVersion": 1, "pluginStateVersion": 0, "parameters": {...},
-    /// "extra": {...}}`.
+    /// "runTime": {...}, "extra": {...}}`.
     ///
     /// Both versions are always written, the plugin's at 0 too, so every
     /// block says what it holds. Each is the higher of this build's and the
     /// last loaded block's, on its own, so a newer build that loads the block
     /// does not migrate it as an older one, and finds what it wrote. The
     /// parameters come in declaration order, then the unknown keys the last
-    /// load kept. The session's `extra` is left out when there is nothing in
-    /// it. Last come the top-level keys the last load held that this build
-    /// does not read, in key order. A bool writes `true` or `false`, a choice
-    /// its index as an integer, and everything else a double that holds the
-    /// stored `f32` exactly.
+    /// load kept. A bool writes `true` or `false`, a choice its index as an
+    /// integer, and everything else a double that holds the stored `f32`
+    /// exactly.
+    ///
+    /// `runTime` holds the parameters the plugin made at run time and still
+    /// holds ([`Parts::declare`](crate::Parts::declare)), sorted by path:
+    /// each `{"value": ..., "learned": {...}}`, its value read now and
+    /// written as `parameters` writes one, and its learned mapping as the
+    /// last tick captured it. While a load's entries wait for the pass that
+    /// applies it, it holds them as loaded, and the live value only of a
+    /// parameter made since that load, with the load's mapping for its path.
+    /// It takes the room the rest of the block leaves: an entry with no room
+    /// is left out, and the instance records a fault. With no entry, the key
+    /// is left out.
+    ///
+    /// The session's `extra` is left out when there is nothing in it. Last
+    /// come the top-level keys the last load held that this build does not
+    /// read, in key order.
     ///
     /// Thread: any but audio.
     ///
@@ -468,13 +518,7 @@ impl SavedState {
         let last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let declared = self.set.ids().map(|id| {
             let decl = self.set.decl(id);
-            let value = self.set.value(id);
-            let value = match decl.kind {
-                Kind::Bool => Json::Bool(value >= 0.5),
-                Kind::Choice(_) => Json::from(value as u64),
-                Kind::Continuous(_) => Json::from(f64::from(value)),
-            };
-            entry(decl.key, &value)
+            entry(decl.key, &value_json(decl, self.set.value(id)))
         });
         let kept = sorted(&last.unknown.parameters)
             .into_iter()
@@ -487,7 +531,15 @@ impl SavedState {
             format!("{{\"{SEAM_VERSION}\":{seam},\"{PLUGIN_VERSION}\":{plugin},\"parameters\":{{");
         block.push_str(&parameters.join(","));
         block.push('}');
-        if let Some(extra) = self.session.save() {
+        let extra = self.session.save();
+        // What a load would count for `extra`: its text, or the `{` of an
+        // empty one.
+        let extra_bytes = extra.as_ref().map_or(1, json_bytes);
+        let room = self
+            .room_for_extra(&last.unknown)
+            .saturating_sub(extra_bytes);
+        self.run_time.write(&mut block, room);
+        if let Some(extra) = extra {
             block.push_str(",\"extra\":");
             block.push_str(&extra.to_string());
         }
@@ -521,6 +573,17 @@ impl SavedState {
     /// load marks the restore as stored before its first write, so no undo
     /// history replays anything from before it. Then the session stores
     /// `extra`, which it applies at a later tick.
+    ///
+    /// The load writes no parameter made at run time: on this thread those
+    /// are the tree the load replaces, still playing. It holds `runTime`'s
+    /// entries instead, replacing what an earlier load held. A parameter made
+    /// under a held path is born holding its value. Once a pass of the
+    /// session's tick that began after this load has finished, in one step,
+    /// each one made before the load and still held takes the value for its
+    /// path, or its default, every one still held takes the mapping held for
+    /// its path, and the entries go. The entries count against the room the
+    /// block leaves for `extra`, each value at its longest, so a block never
+    /// saves back longer than it loaded.
     ///
     /// # Errors
     ///
@@ -585,25 +648,32 @@ impl SavedState {
             .collect();
         root.remove(SEAM_VERSION);
         root.remove(PLUGIN_VERSION);
+        let run_time = Loaded::read(root.remove(RUN_TIME));
         let extra = Restored::new(root.remove("extra"));
         let unknown = Unknown { parameters, root };
-        let room = self.room_for_extra(&unknown);
+        // The run-time entries are counted as a save writes them back, each
+        // value at its longest, so a block never saves back longer.
+        let room = self
+            .room_for_extra(&unknown)
+            .saturating_sub(run_time.bytes());
         if extra.bytes() > room {
             return Err(LoadError::TooLarge);
         }
         let load = self.set.program().load();
         for (id, value) in self.set.ids().zip(declared) {
             let decl = self.set.decl(id);
-            let value = match value {
-                Some(Json::Bool(on)) => Some(if on { 1.0 } else { 0.0 }),
-                // A number outside f32's range becomes infinite here, and
-                // the restore write gives the default for that.
-                Some(Json::Number(number)) => number.as_f64().map(|value| value as f32),
-                _ => None,
-            };
+            // A number outside f32's range becomes infinite here, and the
+            // restore write gives the default for that.
+            let value = value.as_ref().and_then(value_number);
             load.restore(id, value.unwrap_or_else(|| decl.default_value()));
         }
         *last = LastLoad { versions, unknown };
+        // After the parameters' writes and before the session's store, so
+        // the count tells a pass that began after the store from one that
+        // began before it. Which parameters were declared before this load
+        // the registry decides by its own count of loads.
+        let at = self.set.clock().writer().stored_count();
+        self.run_time.hold(run_time, at);
         // The sections and their budget under one lock, so no capture is
         // judged against the budget before this one.
         self.session.restore_within(extra, room);

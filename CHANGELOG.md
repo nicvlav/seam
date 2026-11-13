@@ -27,9 +27,11 @@ delivered to a plugin through an exporter.
   carries its store and reads with `get`, on any thread, as an `f32`, a `bool`
   or the plugin's own enum. `ParamSet::bind` makes one by key and checks it
   against its declaration once, refusing a missing key, another kind or a
-  choice whose labels are not the enum's. `UiParams::write` takes a typed
-  parameter with a value of its type, or a `ParamId` with an `f32`. `Changes`
-  asks once per block whether any of the parameters it is given moved.
+  choice whose labels are not the enum's. `UiParams::write`, `begin`,
+  `is_open`, `shown`, `would_change` and `Edit::write` take a typed parameter
+  with a value of its type, or a `ParamId` with an `f32`; `Gesture::id` is
+  `None` for a parameter made at run time. `Changes` asks once per block
+  whether any of the parameters it is given moved.
 - `seam-params`: parameters declared where they are held. A struct
   implements `Params`, whose `declare` adds each parameter through a
   `Declarer`; a typed declaration, `FloatDecl`, `BoolDecl` or `ChoiceDecl<E>`,
@@ -74,7 +76,10 @@ delivered to a plugin through an exporter.
   controller pairs, curves, reservations and a saved `midiLearn` section. Half
   of a 14-bit pair waits at least a UI tick and a whole audio block for its
   other half. `Mapping` and `Config` are `non_exhaustive`, built with
-  `Mapping::new`, `with_curve` and `as_coarse`.
+  `Mapping::new`, `with_curve` and `as_coarse`. `arm`, `map`, `unmap`,
+  `mapping` and `key` take anything `Learnable`: a `TargetId`, a `ParamId`, a
+  `CustomId` or a typed parameter. A parameter made at run time is a target of
+  its own, `TargetId::RunTime`, named by an opaque `RunTimeId`.
 - `seam-ump`: Universal MIDI Packets: a fixed-capacity event list per block, and
   the channel voice messages read from it and written back.
 - `seam-host`: the `Plugin` and `Processor` traits and `PluginInfo`, and
@@ -109,6 +114,17 @@ delivered to a plugin through an exporter.
   saved without the key loads the same default. A
   change is captured at the next tick, or at once by `Parts::sync`, and a load
   is captured once, by its apply.
+- `seam-host`: parameters made at run time. `Parts::declare` and `Parts::add`,
+  and a `Maker` for a session participant, make a `Float`, `Bool` or
+  `Choice<E>` while the plugin runs, under a scope, from the same declarations
+  as listed ones: listed to no host, written through `Parts::ui`, undone and
+  learned as listed ones are, and read by the audio thread in the block after
+  a write. The saved block keeps them under `runTime`, by path, each with its
+  learned mapping. A load writes none of them on the host's thread: one
+  declared under a path it holds is born holding the saved value. Once the
+  load's pass has finished, each one still held takes the load's mapping for
+  its path, and one made before the load its value too. Two under one path,
+  and a save with no room for them, are faults.
 - The VST3 exporter (`export_vst3!`), for Windows and macOS, with its own
   main-thread timer.
 - The C interface (`export_cabi!`) and its generated header, `include/seam.h`,

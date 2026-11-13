@@ -20,15 +20,16 @@ use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use seam_params::ParamId;
+use seam_params::{AnyParam, Bool, Choice, Float, ParamId, ParamRef};
 
 /// What a mapping drives.
 ///
 /// The tier follows from the kind, decided once, when the target exists.
 /// A parameter is host-projected, so a learned value reaches its store
-/// on the audio thread in the block it arrived in. A [`Custom`](Self::Custom)
-/// target is registered with [`Learn::register`](crate::Learn::register)
-/// and written on the UI thread.
+/// on the audio thread in the block it arrived in. So does a parameter made
+/// at run time, which no host lists. A [`Custom`](Self::Custom) target is
+/// registered with [`Learn::register`](crate::Learn::register) and written
+/// on the UI thread.
 ///
 /// # Examples
 ///
@@ -51,6 +52,134 @@ pub enum TargetId {
     Param(ParamId),
     /// A target registered with learn.
     Custom(CustomId),
+    /// A parameter the plugin made at run time. It is in no set, so learn
+    /// is handed the parameter itself to arm or map it.
+    RunTime(RunTimeId),
+}
+
+/// A parameter made at run time, as [`TargetId::RunTime`] names it: which
+/// store, for as long as the process runs. Learn hands one back, from
+/// [`armed`](crate::Learn::armed), [`mappings`](crate::Learn::mappings) or
+/// a [`Learned`](crate::Learned); a plugin cannot make one, and arms or
+/// maps such a parameter by passing the parameter itself.
+///
+/// # Examples
+///
+/// ```
+/// use seam_learn::{Config, Learn, TargetId, Takes};
+#[doc = include_str!("../doc/setup.rs")]
+#[doc = include_str!("../doc/run_time.rs")]
+/// // `volume` is a parameter made at run time, as `Parts::declare` makes one.
+/// let (mut learn, _audio) = Learn::new(&set, Config::default());
+/// learn.arm(&volume, Takes::CONTROLLER)?;
+/// let Some((TargetId::RunTime(_), _)) = learn.armed() else {
+///     panic!("the parameter made at run time is armed");
+/// };
+/// assert_eq!(learn.key(&volume), Some("volume"));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RunTimeId(u64);
+
+/// What learn's calls take: a [`TargetId`], a [`ParamId`], a [`CustomId`],
+/// or a typed parameter by reference, one the host lists or one made at
+/// run time.
+///
+/// A listed typed parameter is the same target as its [`ParamId`]. One made
+/// at run time is handed to learn itself, which keeps it while it is armed
+/// or mapped. It is sealed: only these implement it.
+///
+/// # Examples
+///
+/// ```
+/// use seam_learn::{Config, Control, Learn, Learnable, Mapping, Source};
+/// use seam_params::Float;
+#[doc = include_str!("../doc/setup.rs")]
+#[doc = include_str!("../doc/run_time.rs")]
+/// /// Maps controller 7 to any target.
+/// fn on_seven(learn: &mut Learn, target: impl Learnable) -> bool {
+///     learn.map(target, Mapping::new(Source::any(Control::Cc(7)))).is_ok()
+/// }
+///
+/// let (mut learn, _audio) = Learn::new(&set, Config::default());
+/// let listed: Float = set.bind("gain")?;
+/// assert!(on_seven(&mut learn, &listed)); // the same target as `gain`
+/// assert!(learn.mapping(gain).is_some());
+/// // `volume` is a parameter made at run time, as `Parts::declare` makes one.
+/// assert!(on_seven(&mut learn, &volume));
+/// assert_eq!(learn.len(), 2);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub trait Learnable: sealed::Sealed {
+    /// The target, and for a parameter made at run time the parameter
+    /// itself.
+    #[doc(hidden)]
+    fn learnable(&self) -> (TargetId, Option<ParamRef>);
+}
+
+mod sealed {
+    /// Keeps [`Learnable`](super::Learnable) to the types this crate gives
+    /// it.
+    pub trait Sealed {}
+}
+
+impl sealed::Sealed for TargetId {}
+impl sealed::Sealed for ParamId {}
+impl sealed::Sealed for CustomId {}
+impl sealed::Sealed for &ParamRef {}
+impl sealed::Sealed for &Float {}
+impl sealed::Sealed for &Bool {}
+impl<E> sealed::Sealed for &Choice<E> {}
+
+impl Learnable for TargetId {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        (*self, None)
+    }
+}
+
+impl Learnable for ParamId {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        (TargetId::Param(*self), None)
+    }
+}
+
+impl Learnable for CustomId {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        (TargetId::Custom(*self), None)
+    }
+}
+
+impl Learnable for &ParamRef {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        erased((*self).clone())
+    }
+}
+
+impl Learnable for &Float {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        erased(self.erased())
+    }
+}
+
+impl Learnable for &Bool {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        erased(self.erased())
+    }
+}
+
+impl<E> Learnable for &Choice<E> {
+    fn learnable(&self) -> (TargetId, Option<ParamRef>) {
+        erased(self.erased())
+    }
+}
+
+/// A parameter's target: by its place when a set lists it, by its store
+/// otherwise.
+fn erased(param: ParamRef) -> (TargetId, Option<ParamRef>) {
+    match param.listed() {
+        Some(id) => (TargetId::Param(id), None),
+        None => (TargetId::RunTime(RunTimeId(param.serial())), Some(param)),
+    }
 }
 
 impl From<ParamId> for TargetId {
