@@ -137,8 +137,9 @@ What keeps that true:
   the line goes to a list the test reads instead.
 
   `seam_host::vst3::TestHost` drives a plugin through the VST3 exporter's own
-  COM interfaces. `seam_host::cabi::TestHost` drives it through the C
-  interface's table, as the JUCE adapter calls it. A call the plugin may refuse
+  COM interfaces, its editor's view included (`TestHost::view`).
+  `seam_host::cabi::TestHost` drives it through the C interface's table, as
+  the JUCE adapter calls it. A call the plugin may refuse
   answers `Result<(), Refused>`: the VST3 host's `Refused` carries the
   `tresult`, the C interface's stands for its `false`, so a test pins what the
   host was told. Both exist only with `seam-host`'s `test-host` feature, which a

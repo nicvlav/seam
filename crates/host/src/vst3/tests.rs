@@ -1320,7 +1320,7 @@ fn a_sync_made_while_no_handler_is_linked_is_told_to_the_next_one() {
 
 /// A component, initialized on this thread, with no timer.
 fn initialized() -> ComWrapper<Component<Probe>> {
-    let component = ComWrapper::new(Component::<Probe>::new(false));
+    let component = Component::<Probe>::wrap(false);
     let plugin = component.as_com_ref::<IComponent>().expect("a component");
     // SAFETY: a call on a live component, passing no pointer.
     let initialized = unsafe { plugin.initialize(std::ptr::null_mut()) };
@@ -1330,7 +1330,7 @@ fn initialized() -> ComWrapper<Component<Probe>> {
 
 #[test]
 fn the_plugin_is_built_at_initialize_on_the_thread_that_calls_it() {
-    let component = std::thread::spawn(|| ComWrapper::new(Component::<Probe>::new(false)))
+    let component = std::thread::spawn(|| Component::<Probe>::wrap(false))
         .join()
         .expect("created on another thread");
     let plugin = component.to_com_ptr::<IComponent>().expect("a component");
@@ -1876,7 +1876,7 @@ fn a_bus_wider_than_stereo_is_refused_by_name() {
 /// A component with its own timer, initialized on this thread, which runs
 /// the timer; and the timer's handle.
 fn ticking() -> (ComWrapper<Component<Probe>>, crate::engine::timer::Handle) {
-    let component = ComWrapper::new(Component::<Probe>::new(true));
+    let component = Component::<Probe>::wrap(true);
     let plugin = component.as_com_ref::<IComponent>().expect("a component");
     // SAFETY: a call on a live component, passing no pointer.
     let initialized = unsafe { plugin.initialize(std::ptr::null_mut()) };
@@ -2084,7 +2084,7 @@ impl Plugin for Unbuilt {
 fn a_refused_declaration_builds_no_instance_and_says_why_through_the_vst3_exporter() {
     let faults = thread_faults();
     written();
-    let component = ComWrapper::new(Component::<Unbuilt>::new(false));
+    let component = Component::<Unbuilt>::wrap(false);
     let plugin = component.to_com_ptr::<IComponent>().expect("a component");
     // SAFETY: the component was just made and `plugin` holds it;
     // `initialize` takes a null context.

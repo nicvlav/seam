@@ -31,6 +31,9 @@
 //!   panic outside any instance. Each such refusal also writes a line with
 //!   the plugin's name and the reason, on the thread that tried to create
 //!   it: no instance exists to report it once.
+//! - **An editor that failed to open** is a fault of its instance, and the
+//!   first of an instance writes its line at once, with the editor's reason,
+//!   on the main thread that tried to open it. Later ones are counted.
 //!
 //! The panic itself is another matter. A processor that panics does so on
 //! the audio thread. There the panic allocates its payload, and std's
@@ -40,13 +43,13 @@
 
 use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 
 /// Every fault the exporters caught, process-wide.
 static TOTAL: AtomicU64 = AtomicU64::new(0);
 
 /// The kinds reported for faults outside any instance.
-static REPORTED: AtomicU8 = AtomicU8::new(0);
+static REPORTED: AtomicU16 = AtomicU16::new(0);
 
 /// Returns how many faults the exporters have recorded in this process, on
 /// every thread and in every instance.
@@ -120,12 +123,15 @@ pub(crate) enum Fault {
     /// A save left out parameters made at run time: the block had no room
     /// for them.
     NoRoom,
+    /// The plugin's editor failed to open in the host's window, and the host
+    /// was told so.
+    NoEditor,
 }
 
 impl Fault {
-    /// Every kind, each once, in the order a report lists them. Eight fill
-    /// the `u8`s the kinds are kept in; a ninth widens them.
-    const ALL: [Fault; 8] = [
+    /// Every kind, each once, in the order a report lists them. Up to 16 fit
+    /// the `u16`s the kinds are kept in.
+    const ALL: [Fault; 9] = [
         Fault::Panic,
         Fault::AudioPanic,
         Fault::WrongThread,
@@ -134,9 +140,10 @@ impl Fault {
         Fault::NoTimer,
         Fault::SharedPath,
         Fault::NoRoom,
+        Fault::NoEditor,
     ];
 
-    fn bit(self) -> u8 {
+    fn bit(self) -> u16 {
         1 << self as u8
     }
 
@@ -169,6 +176,7 @@ impl Fault {
             Fault::NoRoom => {
                 "a save left out parameters made at run time: the saved block had no room for them"
             }
+            Fault::NoEditor => "the plugin's editor failed to open, and the host was told so",
         }
     }
 }
@@ -178,9 +186,9 @@ impl Fault {
 // listed. A kind listed twice makes a pattern unreachable, which the lints
 // refuse. The copy's length makes `ALL` fail to compile here when it grows,
 // until the match reads its new place too. The assertion keeps each kind's
-// bit inside the `u8`s that hold them.
+// bit inside the `u16`s that hold them.
 const _: () = {
-    const ALL: [Fault; 8] = Fault::ALL;
+    const ALL: [Fault; 9] = Fault::ALL;
     const FIRST: Fault = ALL[0];
     const SECOND: Fault = ALL[1];
     const THIRD: Fault = ALL[2];
@@ -189,9 +197,10 @@ const _: () = {
     const SIXTH: Fault = ALL[5];
     const SEVENTH: Fault = ALL[6];
     const EIGHTH: Fault = ALL[7];
-    assert!(Fault::ALL.len() <= u8::BITS as usize);
+    const NINTH: Fault = ALL[8];
+    assert!(Fault::ALL.len() <= u16::BITS as usize);
     match Fault::Panic {
-        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH | SEVENTH | EIGHTH => {}
+        FIRST | SECOND | THIRD | FOURTH | FIFTH | SIXTH | SEVENTH | EIGHTH | NINTH => {}
     }
 };
 
@@ -227,9 +236,9 @@ pub(crate) fn report_refused_declarations(plugin: &str, error: &dyn Error) {
 pub(crate) struct Faults {
     count: AtomicU64,
     /// Kinds recorded and not yet reported.
-    pending: AtomicU8,
+    pending: AtomicU16,
     /// Kinds reported already: each is reported once.
-    reported: AtomicU8,
+    reported: AtomicU16,
     /// Whether a refused load was reported already: only the first is.
     refused_load: AtomicBool,
 }
@@ -241,6 +250,29 @@ impl Faults {
         count();
         self.count.fetch_add(1, Ordering::Relaxed);
         self.pending.fetch_or(fault.bit(), Ordering::Release);
+    }
+
+    /// Records a fault whose reason is known where it happens, and writes the
+    /// first of its kind in this instance at once, with `reason`: `who` names
+    /// the instance, only when a line is written. Later ones are counted, as
+    /// [`record`](Self::record) counts them. The caller is not the audio
+    /// thread.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn record_with_reason(
+        &self,
+        fault: Fault,
+        who: impl FnOnce() -> String,
+        reason: &dyn std::fmt::Display,
+    ) {
+        count();
+        self.count.fetch_add(1, Ordering::Relaxed);
+        if self.reported.fetch_or(fault.bit(), Ordering::Relaxed) & fault.bit() == 0 {
+            write_line(&format!(
+                "seam: {}: {}: {reason}. Later faults of this kind in this instance are                  counted, not reported.",
+                who(),
+                fault.what()
+            ));
+        }
     }
 
     /// Runs an entry point's body for this instance, answering `refused`

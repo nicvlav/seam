@@ -30,8 +30,9 @@ Pre-release: 0.1.0, unpublished. Seam follows [semantic
 versioning](https://semver.org/): before 1.0, a minor version may break the API.
 [CHANGELOG.md](CHANGELOG.md) says what each version holds.
 
-- **Built:** the core crates, the VST3 exporter (Windows and macOS), the C
-  interface and the generic JUCE adapter, the page's React hooks and protocol
+- **Built:** the core crates, the VST3 exporter (Windows and macOS; a plugin's
+  editor in the host's window on Windows), the C interface and the generic
+  JUCE adapter, the page's React hooks and protocol
   and the native side that answers the page, the example gain, the example EQ,
   and the comparison against plain JUCE.
 - **Not built:** the CLAP exporter; the WebView glue that opens the page in a

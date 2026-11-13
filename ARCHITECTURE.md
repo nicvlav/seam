@@ -47,7 +47,9 @@ reading how Seam works inside, start with
   the exporters behind features: `vst3`, and `cabi` (the C interface and
   generated `include/seam.h`). The exporters are thin shells over one core,
   `engine`, which holds the plugin's life and builds with no feature. CLAP is
-  planned, not built.
+  planned, not built. A plugin's editor is an `Editor` (`editor.rs`), which
+  knows no toolkit; `engine/editor.rs` drives one for each view a host asks
+  for, and the VST3 exporter's view is `vst3/view.rs`.
 - `crates/bridge`: the page protocol, its native side (`Dispatcher`, which
   answers a page and tells it of every change), and the TypeScript generated
   from it.
@@ -136,6 +138,7 @@ so one engine serves both shells.
 | Reset the processor | a stop in `setProcessing` | `reset` | `request_reset` |
 | Activate or deactivate | `setActive` | `activate`, `deactivate` | `activate`, `deactivate` |
 | A tick | the exporter's timer | `idle` | `tick`, `idle` |
+| The editor's view | `createView`, then the view's `attached`, `onSize`, `setContentScaleFactor`, `removed` (`vst3/view.rs`) | none | `editor`, then the view's `EditorSlot` |
 
 To prove a change, run the tests that reach it. `engine/tests.rs` tests each of
 the engine's rules through both exporters with one body.
@@ -200,9 +203,10 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 - Generated files (the page's protocol types, its test parameter map, `seam.h`,
   the example EQ's JUCE settings) are committed and compared byte for byte in
   CI ([what runs the generator][generator], [keeping the header true][header]).
-- Absent: no WebView glue exists yet, so nothing in the repository opens a page
-  in a plugin window, and no exporter delivers MIDI events yet ([where the
-  WebView pieces live][webview], [the VST3 exporter's shape][vst3]).
+- Absent: no WebView glue exists yet, so no plugin in the repository has an
+  editor, though the VST3 exporter opens one a plugin hands out; and no
+  exporter delivers MIDI events yet ([where the WebView pieces live][webview],
+  [the VST3 exporter's shape][vst3]).
 
 ## Threads
 
@@ -210,7 +214,9 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
   at activation, with learn's audio side when the parts have learn on, and
   takes both back at deactivation. A tick, about 60 times a second, ticks the
   parts the plugin keeps, then calls `Plugin::idle`, then tells the host of
-  the plugin's [edits](docs/glossary.md#edit). A session
+  the plugin's [edits](docs/glossary.md#edit), then ticks each open editor
+  ([a plugin's editor][editor]); no editor runs a timer of its own. A
+  session
   restore applies to its participants in the parts' tick; `Driver::tick`
   (`parts.rs`) says what it ticks, and in what order. The engine reaches the
   parts through a `Driver`, which does not keep them alive, so a plugin that
@@ -282,6 +288,7 @@ with `cargo doc -p seam-host --features vst3,cabi,test-host
 [applies]: docs/decisions.md#d13-when-a-session-restore-applies
 [cabi]: docs/decisions.md#d62-the-c-interface-for-the-juce-adapter
 [clock]: docs/decisions.md#d52-who-makes-the-restoreclock
+[editor]: docs/decisions.md#d99-a-plugins-editor-and-its-tick
 [faults]: docs/decisions.md#d75-making-a-caught-fault-visible
 [generator]: docs/decisions.md#d27-what-runs-the-generator
 [header]: docs/decisions.md#d63-keeping-the-c-header-true

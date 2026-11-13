@@ -1,6 +1,8 @@
 //! The edit controller half of the component: the parameters as the host
 //! lists, reads and writes them.
 
+use std::ffi::CStr;
+
 use ::vst3::ComRef;
 use ::vst3::Steinberg::Vst::{
     IComponentHandler, IEditControllerTrait, ParamID, ParamValue, ParameterInfo,
@@ -12,10 +14,13 @@ use ::vst3::Steinberg::{
 };
 use seam_params::Kind;
 
-use super::Component;
+use super::{Component, view};
 use crate::Plugin;
 use crate::engine::Engine;
 use crate::vst3::text::{copy_utf16, read_utf16};
+
+/// The view a host asks for to show the plugin's editor (`ViewType::kEditor`).
+const EDITOR: &CStr = c"editor";
 
 impl<P: Plugin> IEditControllerTrait for Component<P> {
     unsafe fn setComponentState(&self, _state: *mut IBStream) -> tresult {
@@ -176,7 +181,25 @@ impl<P: Plugin> IEditControllerTrait for Component<P> {
         })
     }
 
-    unsafe fn createView(&self, _name: FIDString) -> *mut IPlugView {
-        std::ptr::null_mut()
+    unsafe fn createView(&self, name: FIDString) -> *mut IPlugView {
+        self.guard(std::ptr::null_mut(), || {
+            // SAFETY: the SDK's contract: `name` is null or a NUL-terminated
+            // string valid during the call.
+            if name.is_null() || unsafe { CStr::from_ptr(name) } != EDITOR {
+                return std::ptr::null_mut();
+            }
+            let (Some(engine), Some(component)) = (self.engine(), self.this()) else {
+                return std::ptr::null_mut();
+            };
+            let Some(main) = engine.main() else {
+                return std::ptr::null_mut();
+            };
+            match engine.editor(&main) {
+                // The plugin's borrow ended with `editor`; the view's calls
+                // take the main-thread state again for themselves.
+                Some(slot) => view::create(component, engine, slot),
+                None => std::ptr::null_mut(),
+            }
+        })
     }
 }

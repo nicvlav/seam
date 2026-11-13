@@ -7,6 +7,7 @@ use seam_params::Params;
 use serde_json::{Map, Value as Json};
 
 use crate::audio::{Block, ProcessSetup, Status};
+use crate::editor::Editor;
 use crate::info::PluginInfo;
 use crate::parts::Parts;
 
@@ -61,6 +62,12 @@ use crate::parts::Parts;
 ///   declares none leaves bypass to the host. None of Seam's exporters adds a
 ///   hidden parameter, though JUCE's VST3 wrapper does when the JUCE adapter
 ///   hosts the plugin.
+/// - **Editor.** When the plugin hands out an [`Editor`] from
+///   [`editor`](Self::editor), the VST3 exporter opens it in the window the
+///   host makes, drives its size and scale, ticks it after each
+///   [`idle`](Self::idle) while it is open, and closes it with the window. A
+///   plugin writes no pump and no timer for it. The C interface shows no
+///   editor.
 /// - **Programs.** A plugin has one program, and the exporters offer the
 ///   host none to choose.
 /// - **Samples.** 32-bit float only: an exporter refuses a host that asks
@@ -275,8 +282,9 @@ pub trait Plugin: 'static {
     /// meets the plugin busy in a call of its own runs neither, and the next
     /// tick runs both.
     ///
-    /// Surfaces that show values poll their [watches](seam_params::Watch)
-    /// here.
+    /// A surface the plugin draws itself polls its
+    /// [watches](seam_params::Watch) here. An open [`Editor`]'s own tick
+    /// comes after this one, in the same tick.
     ///
     /// Thread: main. The JUCE adapter ticks it on every platform it builds
     /// for, the VST3 exporter with its own timer on Windows and macOS, the
@@ -413,6 +421,123 @@ pub trait Plugin: 'static {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     fn idle(&mut self) {}
+
+    /// Returns an editor for the window a host makes for the plugin, or
+    /// `None`, the default, for a plugin the host shows with its own
+    /// controls.
+    ///
+    /// Seam calls it each time a host asks for a view. The editor keeps what
+    /// it needs of the plugin, a clone of [`Parts::ui`] for its writes among
+    /// them, since the exporter drives it apart from the plugin: [`Editor`]
+    /// says how.
+    ///
+    /// Thread: main.
+    ///
+    /// # Examples
+    ///
+    /// A plugin whose editor writes its gain as a user's, through a clone of
+    /// the parts' handle, so undo records the drag:
+    ///
+    /// ```
+    /// use std::error::Error;
+    ///
+    /// use seam_host::{Editor, ParentWindow, Parts, Plugin, Size};
+    /// # use seam_host::{
+    /// #     AuCodes, Block, Category, Layout, PluginInfo, ProcessSetup, Processor, Status,
+    /// # };
+    /// use seam_params::{Declarer, Float, FloatDecl, Params, UiParams};
+    ///
+    /// struct GainParams {
+    ///     gain: Float,
+    /// }
+    /// # impl Params for GainParams {
+    /// #     fn declare(p: &mut Declarer) -> Self {
+    /// #         GainParams { gain: p.add(FloatDecl::new("gain", "Gain", -24.0..=24.0, 0.0)) }
+    /// #     }
+    /// # }
+    /// # struct Level;
+    /// # impl Processor for Level {
+    /// #     fn process(&mut self, _block: Block<'_, '_>) -> Status {
+    /// #         Status::Continue
+    /// #     }
+    /// # }
+    ///
+    /// /// What the host's window shows: a panel a toolkit would draw.
+    /// struct Panel {
+    ///     ui: UiParams,
+    ///     gain: Float,
+    /// }
+    ///
+    /// impl Editor for Panel {
+    ///     fn size(&self) -> Size {
+    ///         Size { width: 320, height: 200 }
+    ///     }
+    ///
+    ///     fn open(&mut self, _parent: &ParentWindow) -> Result<(), Box<dyn Error>> {
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn close(&mut self) {}
+    ///     fn set_size(&mut self, _size: Size) {}
+    ///     fn set_scale(&mut self, _scale: f64) {}
+    ///
+    ///     fn tick(&mut self) {
+    ///         // A drag the toolkit reported: one undo step, told to the host.
+    ///         self.ui.write(&self.gain, -6.0);
+    ///     }
+    /// }
+    ///
+    /// struct Gain {
+    ///     parts: Parts,
+    ///     params: GainParams,
+    /// }
+    ///
+    /// impl Plugin for Gain {
+    /// #   const INFO: PluginInfo = PluginInfo {
+    /// #       name: "Gain",
+    /// #       vendor: "Example",
+    /// #       url: "",
+    /// #       email: "",
+    /// #       description: "",
+    /// #       version: "0.1.0",
+    /// #       id: "dev.example.gain",
+    /// #       vst3_class_id: [0; 16],
+    /// #       au_codes: AuCodes { subtype: *b"gain", manufacturer: *b"Exmp" },
+    /// #       category: Category::Effect,
+    /// #       features: &[],
+    /// #       layouts: &[Layout::STEREO],
+    /// #       midi_input: false,
+    /// #       midi_output: false,
+    /// #   };
+    ///     type Params = GainParams;
+    ///     type Processor = Level;
+    ///
+    ///     fn new(params: GainParams, parts: Parts) -> Self {
+    ///         Gain { parts, params }
+    ///     }
+    ///
+    ///     fn activate(&mut self, _setup: &ProcessSetup) -> Level {
+    ///         Level
+    ///     }
+    ///
+    ///     fn editor(&mut self) -> Option<Box<dyn Editor>> {
+    ///         let ui = self.parts.ui().clone();
+    ///         Some(Box::new(Panel { ui, gain: self.params.gain.clone() }))
+    ///     }
+    /// }
+    ///
+    /// // A host asks for a view, and the exporter asks the plugin.
+    /// let (params, parts) = Parts::for_plugin::<Gain>()?;
+    /// let mut plugin = Gain::new(params, parts);
+    /// let mut editor = plugin.editor().ok_or("an editor")?;
+    /// assert_eq!(editor.size(), Size { width: 320, height: 200 });
+    /// editor.tick();
+    /// assert_eq!(plugin.params.gain.get(), -6.0);
+    /// # Ok::<(), Box<dyn Error>>(())
+    /// ```
+    fn editor(&mut self) -> Option<Box<dyn Editor>> {
+        None
+    }
 }
 
 /// How long a plugin's output can outlast its input.

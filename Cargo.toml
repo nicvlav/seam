@@ -46,6 +46,9 @@ vst3 = "0.3.0"
 # Win32, for the VST3 exporter's main-thread timer on Windows. Already in
 # the lockfile through other crates.
 windows-sys = "0.61.2"
+# The host's window as a toolkit takes it: the editor's parent window in
+# seam-host.
+raw-window-handle = "0.6.2"
 # Learn's dispatch snapshot: the audio thread takes the newest table
 # without waiting, and a replaced one drops on the UI thread. MPL-2.0, used
 # unmodified (THIRD-PARTY-NOTICES).

@@ -27,11 +27,13 @@ use ::vst3::Steinberg::{
     kInvalidArgument, kNotImplemented, kNotInitialized, kResultFalse, kResultOk, kResultTrue,
     tresult, uint32,
 };
-use ::vst3::{Class, ComPtr, ComRef};
+use ::vst3::{Class, ComPtr, ComRef, ComWrapper};
 use seam_params::{HostEvent, ParamDecl, ParamId, ParamSet, audio_thread};
 
 mod buses;
 mod controller;
+
+use super::view;
 
 use super::stream::{read_all, write_all};
 use super::text::copy_utf16;
@@ -47,7 +49,7 @@ use buses::{arrangement, bus_channels, channels_of, has_input, set_silence_flags
 const _: () = assert!(kNoTail == TAIL_NONE && kInfiniteTail == TAIL_INFINITE);
 
 /// The host's component handler, as the engine reaches it.
-type Handler = ComPtr<IComponentHandler>;
+pub(crate) type Handler = ComPtr<IComponentHandler>;
 
 impl HostLink for Handler {
     /// A host may have read the latency before activating, as JUCE's
@@ -93,6 +95,10 @@ pub(crate) struct Component<P: Plugin> {
     engine: OnceLock<Owned<P>>,
     /// Whether `initialize` starts the engine's timer.
     timer: bool,
+    /// The address of the component's own `IEditController`, set as it is
+    /// made ([`wrap`](Self::wrap)), with no reference of its own: what a
+    /// view takes a reference to the component through.
+    this: OnceLock<usize>,
 }
 
 /// The engine's box, freed in the component's `Drop` when the engine says
@@ -115,17 +121,31 @@ impl<P: Plugin> Class for Component<P> {
 }
 
 impl<P: Plugin> Component<P> {
-    /// A component whose plugin `initialize` builds. With `timer`, that
-    /// also starts the plugin's tick.
+    /// Makes a component whose plugin `initialize` builds, as a COM object.
+    /// With `timer`, `initialize` also starts the plugin's tick.
     ///
     /// A plugin that declares a bus the exporter cannot arrange fails to
     /// build here, as in [`export_vst3!`](crate::export_vst3).
-    pub(crate) fn new(timer: bool) -> Self {
+    pub(crate) fn wrap(timer: bool) -> ComWrapper<Self> {
         const { super::check_layouts(P::INFO.layouts) };
-        Component {
+        let component = ComWrapper::new(Component {
             engine: OnceLock::new(),
             timer,
+            this: OnceLock::new(),
+        });
+        if let Some(this) = component.as_com_ref::<IEditController>() {
+            let _ = component.this.set(this.as_ptr() as usize);
         }
+        component
+    }
+
+    /// A reference to this component, as its own `IEditController`.
+    fn this(&self) -> Option<ComPtr<IEditController>> {
+        let this = *self.this.get()?;
+        // SAFETY: the address is this component's own `IEditController`,
+        // set as `wrap` made it, and the component is alive while `&self`
+        // is. `to_com_ptr` adds the reference the result holds.
+        unsafe { ComRef::from_raw(this as *mut IEditController) }.map(|this| this.to_com_ptr())
     }
 
     /// The engine, once `initialize` built it.
@@ -681,7 +701,7 @@ pub(crate) unsafe fn create<P: Plugin>(interface: FIDString, object: *mut *mut c
     // SAFETY: the caller's contract, with `object` non-null here.
     unsafe { *object = std::ptr::null_mut() };
     guard(kInternalError, || {
-        let component = ::vst3::ComWrapper::new(Component::<P>::new(true));
+        let component = Component::<P>::wrap(true);
         let Some(unknown) = component.to_com_ptr::<FUnknown>() else {
             return kInternalError;
         };

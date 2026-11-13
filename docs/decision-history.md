@@ -896,6 +896,21 @@ Left open in `seam-bridge`'s crate docs until the native side was built, on
 2026-11-13. Commands were built to answer inside the call, which leaves no
 call to drop. To confirm.
 
+### D99. A plugin's editor and its tick
+
+[The decision](decisions.md#d99-a-plugins-editor-and-its-tick)
+
+Built on 2026-11-13 for the first page in a plugin window, from a planned
+shape that was left to the implementer. To confirm.
+
+### D100. The VST3 editor view
+
+[The decision](decisions.md#d100-the-vst3-editor-view)
+
+Built on 2026-11-13 with D99. A resize the editor asks for itself was planned
+and not built, since nothing asks for one; the view asks the frame only for a
+new scale. To confirm.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

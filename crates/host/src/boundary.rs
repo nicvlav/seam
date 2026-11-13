@@ -1,7 +1,8 @@
 //! What every exporter needs where a host calls in, written once: the panic
 //! [`guard`] outside any instance (an instance's own entry points use its
 //! [`Faults`](crate::faults::Faults)), [`FlushDenormals`], the
-//! [`MainThread`] state, the [`AudioSlot`] and the in-place [`Channels`].
+//! [`MainThread`] state, the [`AudioSlot`], the in-place [`Channels`], and
+//! the host's window an editor opens in, [`ParentWindow`].
 
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -21,8 +22,10 @@ use std::time::{Duration, Instant};
 use crate::faults::{Fault, record_fault};
 
 mod channels;
+mod window;
 
 pub(crate) use channels::Channels;
+pub use window::ParentWindow;
 
 /// Runs an entry point's body outside any instance, answering `refused` if
 /// it panics: a panic must never unwind into the host, which would abort

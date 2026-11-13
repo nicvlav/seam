@@ -12,7 +12,9 @@
 //! [`Processor::process`], and reads the parameters the plugin handed its
 //! processor.
 //!
-//! What a host reads before creating an instance is [`PluginInfo`].
+//! What a host reads before creating an instance is [`PluginInfo`]. A plugin
+//! that shows a window of its own hands out an [`Editor`] from
+//! [`Plugin::editor`], which an exporter opens inside the host's.
 //! [`SavedState`] is the saved block, the plugin's parameters and session as
 //! one JSON object, saved and loaded from any thread but audio.
 //!
@@ -117,6 +119,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod audio;
+mod editor;
 mod info;
 mod parts;
 mod plugin;
@@ -155,6 +158,8 @@ pub mod vst3;
 // crate's, so a plugin needs no `seam_ump` import for its blocks.
 #[doc(inline)]
 pub use audio::{Block, Event, EventList, MAX_FRAMES, ProcessSetup, Status};
+pub use boundary::ParentWindow;
+pub use editor::{Editor, Size};
 #[cfg(any(feature = "vst3", feature = "cabi"))]
 pub use faults::boundary_faults;
 pub use info::{AuCodes, Category, Feature, Layout, PluginInfo};

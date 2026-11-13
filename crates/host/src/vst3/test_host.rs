@@ -26,6 +26,12 @@ use super::text::copy_utf16;
 use crate::engine::timer::pump;
 use crate::{Layout, Plugin};
 
+mod view;
+
+#[cfg(windows)]
+pub use view::HiddenWindow;
+pub use view::TestView;
+
 /// VST3's restart flag asking the host to re-read every parameter value.
 pub const RESTART_VALUES: i32 = 4;
 /// VST3's restart flag saying the latency changed.
@@ -244,7 +250,7 @@ impl<P: Plugin> TestHost<P> {
     /// When the plugin's parameter set has its host event drain taken: the
     /// exporter owns it.
     pub fn new() -> Self {
-        Self::initialize(ComWrapper::new(Component::<P>::new(false)))
+        Self::initialize(Component::<P>::wrap(false))
     }
 
     /// Creates and initializes an instance whose own timer ticks it, as in a
@@ -271,7 +277,7 @@ impl<P: Plugin> TestHost<P> {
     /// As [`new`](Self::new).
     pub fn with(options: Options) -> Self {
         let timer = options.timer;
-        let make = move || ComWrapper::new(Component::<P>::new(timer));
+        let make = move || Component::<P>::wrap(timer);
         let component = if options.created_elsewhere {
             std::thread::spawn(make)
                 .join()

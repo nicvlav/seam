@@ -788,7 +788,7 @@ move its line here; when a decision gains code, add one.
 
 - `.github/workflows/ci.yml`: `linux:`
 - `crates/host/src/engine/mod.rs`: `first_layout`
-- `crates/host/src/vst3/component.rs`: `Component::new`
+- `crates/host/src/vst3/component.rs`: `Component::wrap`
 - `crates/host/src/vst3/component/buses.rs`: `arrangement`, `channels_of`
 - `crates/host/src/vst3/mod.rs`: module, `check_layouts`, `export_vst3`
 - test `crates/host/src/vst3/tests.rs`: `every_arrangement_offered_is_one_the_exporter_then_takes`, `a_bus_wider_than_stereo_is_refused_by_name`
@@ -1063,6 +1063,29 @@ move its line here; when a decision gains code, add one.
 
 - `crates/bridge/src/dispatcher.rs`: `Commands`, `Commands::command`, `Commands::call`, `Dispatcher::invoke`
 - test `crates/bridge/tests/dispatcher.rs`: `a_call_is_answered_with_its_commands_result_under_its_call_id`, `a_call_that_fails_is_answered_with_why`, `a_command_added_twice_panics`
+
+### D99. A plugin's editor and its tick
+
+[Record section](decisions.md#d99-a-plugins-editor-and-its-tick)
+
+- `crates/host/src/editor.rs`: module, `Editor`, `Size`
+- `crates/host/src/boundary/window.rs`: `ParentWindow`
+- `crates/host/src/plugin.rs`: `Plugin::editor`
+- `crates/host/src/engine/mod.rs`: `Engine::editor`, `Engine::tick`, `Engine::tick_editors`, `OnThread`
+- `crates/host/src/engine/editor.rs`: module, `EditorSlot`, `EditorSlot::open`, `EditorSlot::tell`
+- test `crates/host/src/vst3/view/tests.rs`: `a_plugin_with_no_editor_offers_no_view`, `attaching_tells_the_editor_its_scale_and_size_then_opens_it`, `a_tick_reaches_an_open_editor_and_not_a_closed_one`, `two_views_each_have_an_editor_of_their_own`
+
+### D100. The VST3 editor view
+
+[Record section](decisions.md#d100-the-vst3-editor-view)
+
+- `crates/host/src/vst3/view.rs`: module, `View`, `View::call`, `View::call_held`, `View::rect`, `View::size`, `View::ask_to_resize`, `create`, `parent_window`
+- `crates/host/src/vst3/component.rs`: `Component::wrap`, `Component::this`
+- `crates/host/src/vst3/component/controller.rs`: `EDITOR`
+- `crates/host/src/engine/editor.rs`: `EditorSlot::close`, `EditorSlot::catch_up`, `Opened`
+- `crates/host/src/faults.rs`: `NoEditor`, `Faults::record_with_reason`
+- `crates/host/src/vst3/test_host/view.rs`: `TestView`, `Frame`, `HiddenWindow`
+- test `crates/host/src/vst3/view/tests.rs`: module, `the_instance_released_before_its_view_lives_until_the_view_goes`, `a_view_released_while_attached_closes_its_editor`, `a_view_call_from_another_thread_is_refused_and_counted`, `an_editor_that_fails_to_open_is_a_fault_with_its_reason`, `an_editor_that_panics_in_open_is_a_fault_and_stays_closed`, `a_resize_and_a_tick_from_inside_open_wait_until_it_returns`, `a_removal_from_inside_open_closes_the_editor_once_it_returns`, `a_view_the_host_releases_from_inside_open_is_freed_after_it`, `a_new_scale_while_open_asks_the_frame_for_the_editors_size_there`, `a_resize_reaches_the_editor_in_logical_pixels`
 
 ## Parameters
 

@@ -135,6 +135,8 @@ comments never cite an id: they state the reason in words, and
 | D96 | [How does a plugin make parameters while it runs, and how are they saved, undone and learned? (D89, D90, D91)](#d96-parameters-made-at-run-time) | `Parts::declare` and `Parts::add` make the same typed parameters from the same declarations, in no set and listed to no host. Writes, undo and learn reach them as they reach listed ones. A save writes each under its path with its learned mapping; a load writes none on the host's thread, and holds its entries for the declares its pass makes. | to confirm |
 | D97 | [What does the native side do with a page's write that names a key the plugin does not list? (B2)](#d97-a-page-write-naming-an-unknown-key) | It drops it unanswered and counts it in `Refusals`: no parameter has a state to answer with. | to confirm |
 | D98 | [What becomes of a page's call still running when a new page session starts? (B5)](#d98-a-call-across-page-sessions) | None can be: a command runs to its end inside the call, so its reply always goes to the session that asked. | to confirm |
+| D99 | [How does a plugin hand out an editor, and what ticks it? (D53)](#d99-a-plugins-editor-and-its-tick) | `Plugin::editor` returns an `Editor`, `None` by default; the trait knows no toolkit. The exporter drives it, and the plugin's one main-thread timer ticks an open editor after `Plugin::idle`. | to confirm |
+| D100 | [What does the VST3 exporter's view of the editor keep to? (D59, D60)](#d100-the-vst3-editor-view) | A view holds its component; it attaches to `HWND` only; its sizes are the screen's pixels at the scale the host gave; it puts off what a host asks while the editor is in a call; a failed open is a fault with its reason. | to confirm |
 
 **Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
 until decided, and no rule depends on it.
@@ -2570,6 +2572,77 @@ session's replies dropped once a new one starts. It waits for a command that
 cannot answer at once.
 
 [History](decision-history.md#d98-a-call-across-page-sessions)
+
+### D99. A plugin's editor and its tick
+
+**Question and C++ Seam.** How does a plugin hand out an editor for the
+window a host makes, and what ticks it? (D53) The C++ Seam's editor was a
+JUCE `AudioProcessorEditor` with its own timer.
+
+**Rust.** `Plugin::editor(&mut self) -> Option<Box<dyn Editor>>`, `None` by
+default, so a plugin with no editor writes nothing and the host shows its own
+controls. Seam calls it each time a host asks for a view. `Editor` knows no
+toolkit: `size`, read once; `open` with the host's window as a
+`ParentWindow`, which implements `raw-window-handle`'s `HasWindowHandle` and
+is lent to that call alone; `close`; `set_size` in logical pixels;
+`set_scale`; and `tick`. It is not `Send`: every call and its drop are on the
+plugin's main thread. The exporter tells it the size and scale the host gave
+before each `open`, and after while it is open.
+
+No editor runs a timer of its own (D53): the instance's one main-thread tick
+runs the parts, then `Plugin::idle`, then tells the host of the edits, then
+ticks each open editor, so the editor shows what that tick changed. A tick
+that finds the plugin busy runs none of them. The C interface shows no
+editor.
+
+**Alternatives.** The alternatives were an editor ticked by its own timer,
+which D53 refused; a hook that names a toolkit, which would make a WebView
+part of `seam-host`; and an `Editor` that is `Send`, which no toolkit's
+window is.
+
+[History](decision-history.md#d99-a-plugins-editor-and-its-tick)
+
+### D100. The VST3 editor view
+
+**Question and C++ Seam.** What does the VST3 exporter's `IPlugView` keep
+to? (D59, D60) JUCE's VST3 wrapper wrote the C++ Seam's.
+
+**Rust.** `createView("editor")` asks the plugin for an editor and answers
+null for none. The view (`vst3/view.rs`) keeps to these:
+
+- **It holds its component.** A view keeps a reference to the component, as
+  the SDK's own views do, so a host that releases the component first, or
+  never removes the view, leaves nothing dangling: the instance lives until
+  the view goes, and a view released while attached closes its editor first.
+- **Main thread, guarded.** Every call runs inside the instance's panic guard
+  and the main-thread rule: on another thread it is refused and counted.
+- **`HWND` only.** It attaches to a Windows window; on any other platform it
+  says no platform is supported, so a host shows its own controls.
+- **Sizes.** VST3 gives a view's size in the screen's pixels on Windows, and
+  the editor's is logical, so the view converts with the scale from
+  `IPlugViewContentScaleSupport`, 1 until the host gives one. The view is
+  resizable and takes any size the host offers. A new scale while open asks
+  the host's frame for the editor's size at that scale.
+- **Calls inside calls.** A toolkit may run the message loop inside `open`, so
+  the host's calls arrive inside it. The editor is never called while in a
+  call: a tick passes it over, a size or scale is told when the call returns,
+  and a removal closes it then. A call that may reach the host holds a
+  reference to the view, so a host that releases the view from inside one
+  frees it only as the call ends.
+- **A failed open** answers `attached` with `kResultFalse` and is a fault of
+  the instance; the first writes a line with the editor's reason. A panic in
+  `open` is a fault too. The host and the audio go on, and the view may be
+  attached again.
+- **Keys** are not handled through `onKeyDown`: an editor's own window takes
+  its keys from the system.
+
+**Alternatives.** The alternatives were a view that does not hold its
+component, with the engine closing views at its release, which leaves the
+view's calls a dangling engine for a host that releases out of order; and a
+second view refused while one lives, which a host that releases late would
+meet as an editor that will not open.
+
+[History](decision-history.md#d100-the-vst3-editor-view)
 
 ## How to read this
 
