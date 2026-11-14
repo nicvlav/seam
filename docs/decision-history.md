@@ -911,6 +911,15 @@ Built on 2026-11-13 with D99. A resize the editor asks for itself was planned
 and not built, since nothing asks for one; the view asks the frame only for a
 new scale. To confirm.
 
+### D104. The module stays loaded once an editor has opened
+
+[The decision](decisions.md#d104-the-module-stays-loaded-once-an-editor-has-opened)
+
+Built on 2026-11-14, after a host unloaded a module whose editor had opened
+and loaded it again at another address: a window class the editor's toolkit
+had registered with the host still named the first load's code, and the next
+editor to open called it. To confirm.
+
 ## Rules
 
 ### P7. The host write: sanitise, clamp, convert, snap, store, publish

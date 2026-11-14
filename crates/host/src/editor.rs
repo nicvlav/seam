@@ -53,6 +53,13 @@ pub struct Size {
 /// waits until the call returns, so a close the host asks for while
 /// [`open`](Self::open) runs comes right after it.
 ///
+/// On Windows, once any editor has opened, the plugin's module stays loaded
+/// until the process ends, even when the host unloads it and loads it again.
+/// So what an editor registers with the system, such as a window class,
+/// stays valid for the life of the process, and the module's statics keep
+/// their values into the host's next load. An editor still removes what it
+/// made at [`close`](Self::close).
+///
 /// Thread: main. An editor is not `Send`: every call, and its drop, is on
 /// the plugin's main thread.
 ///

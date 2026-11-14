@@ -140,6 +140,10 @@ page in a plugin window, and MIDI delivered to a plugin through an exporter.
   is a fault with its reason, and the host and the audio go on.
   `vst3::TestView` drives a view in tests, and `vst3::HiddenWindow` gives a real
   editor a window that is never shown.
+- `seam-host`: on Windows, once an editor has opened, the plugin's module stays
+  loaded until the process ends, so what the editor left with the host stays
+  valid when the host unloads the module and loads it again. The plugin's file
+  stays in use until the host exits.
 - `seam-bridge`: the page protocol, versioned, with its TypeScript generated
   from the Rust types and a check that the version moves when a message's shape
   does. Decoding refuses a position outside 0 to 1, from either side.

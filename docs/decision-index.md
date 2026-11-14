@@ -608,7 +608,7 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/boundary.rs`: `MainThread`, `AudioSlot`
 - `crates/host/src/engine/automation.rs`: module, `Point`, `Points::queue`, `Points::apply`
 - `crates/host/src/engine/mod.rs`: module, `Engine`, `Engine::new`, `Engine::release`, `Engine::leave`, `Engine::controller_write`, `Engine::set_processing`, `Engine::tick`
-- `crates/host/src/engine/timer.rs`: `abandon`
+- `crates/host/src/engine/timer.rs`: `abandon`, `keep_module_loaded`
 - `crates/host/src/vst3/component.rs`: module, `Component`, `Component::initialize`, `read_changes`
 - test `crates/host/src/engine/tests.rs`: module, `a_plugin_created_on_one_thread_runs_on_the_thread_that_calls_it_first`, `a_controller_write_while_processing_is_held_off_only_where_the_host_sends_it_again`, `created_on_one_thread_driven_from_a_second_and_played_on_a_third`
 - test `crates/host/src/vst3/tests.rs`: `the_plugin_is_built_at_initialize_on_the_thread_that_calls_it`, `a_release_on_another_thread_leaks_the_plugin_drops_the_processor_and_counts`, `a_processor_that_panics_as_it_drops_on_another_thread_is_caught_there`, `a_release_inside_a_tick_leaks_what_the_tick_still_uses`, `a_tick_nested_inside_a_tick_does_nothing`, `the_last_point_of_a_queue_wins`, `every_point_keeps_its_offset_and_each_queue_lands_its_last`
@@ -1086,6 +1086,15 @@ move its line here; when a decision gains code, add one.
 - `crates/host/src/faults.rs`: `NoEditor`, `Faults::record_with_reason`
 - `crates/host/src/vst3/test_host/view.rs`: `TestView`, `Frame`, `HiddenWindow`
 - test `crates/host/src/vst3/view/tests.rs`: module, `the_instance_released_before_its_view_lives_until_the_view_goes`, `a_view_released_while_attached_closes_its_editor`, `a_view_call_from_another_thread_is_refused_and_counted`, `an_editor_that_fails_to_open_is_a_fault_with_its_reason`, `an_editor_that_panics_in_open_is_a_fault_and_stays_closed`, `a_resize_and_a_tick_from_inside_open_wait_until_it_returns`, `a_removal_from_inside_open_closes_the_editor_once_it_returns`, `a_view_the_host_releases_from_inside_open_is_freed_after_it`, `a_new_scale_while_open_asks_the_frame_for_the_editors_size_there`, `a_resize_reaches_the_editor_in_logical_pixels`
+
+### D104. The module stays loaded once an editor has opened
+
+[Record section](decisions.md#d104-the-module-stays-loaded-once-an-editor-has-opened)
+
+- `crates/host/src/engine/timer.rs`: module, `keep_module_loaded`, `abandon`
+- `crates/host/src/engine/editor.rs`: module, `EditorSlot::open`
+- `crates/host/src/editor.rs`: `Editor`
+- `crates/host/src/vst3/mod.rs`: module
 
 ## Parameters
 

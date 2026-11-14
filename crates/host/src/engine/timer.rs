@@ -14,14 +14,18 @@
 //! that must leak instead, its instance released inside a tick or on
 //! another thread, is [`abandon`]ed: from any thread, it calls its tick no
 //! more.
+//!
+//! The module's own handle is found here too, and `keep_module_loaded` pins
+//! the module for what an abandoned timer or an opened editor leaves with
+//! the host.
 
 #[cfg(all(test, feature = "vst3"))]
 pub(crate) use imp::detached;
 #[cfg(all(any(test, feature = "test-host"), feature = "vst3"))]
 pub(crate) use imp::pump;
-#[cfg(feature = "vst3")]
-pub(crate) use imp::unregister;
 pub(crate) use imp::{Handle, Timer, abandon};
+#[cfg(feature = "vst3")]
+pub(crate) use imp::{keep_module_loaded, unregister};
 
 #[cfg(all(windows, feature = "vst3", not(miri)))]
 mod imp {
@@ -135,14 +139,33 @@ mod imp {
     /// no longer mapped. That pinning cannot be tested in-process: a test
     /// binary is never unloaded.
     pub(crate) fn abandon(handle: Handle) {
-        // The pin's answer goes unchecked. The address is the running
-        // module's own function, which the loader finds, and were the pin
-        // refused, no safer step is left that works from any thread.
-        module_with(GET_MODULE_HANDLE_EX_FLAG_PIN);
+        keep_module_loaded();
         // SAFETY: a window this module made and never destroys; any thread
         // of the process may set its user data, and the procedure reads zero
         // as no tick.
         unsafe { SetWindowLongPtrW(handle.0 as HWND, GWLP_USERDATA, 0) };
+    }
+
+    /// Keeps this module loaded until the process ends, from any thread. The
+    /// first call pins it, and every later one changes nothing.
+    ///
+    /// For what the module may have left with the host: an abandoned timer's
+    /// window, or what an editor's toolkit made, such as a window class, a
+    /// subclass, a hook or an object the system releases late. A host may
+    /// unload the module once its last instance is gone and load it again at
+    /// another address, and the system would then call code no longer
+    /// mapped. Pinned, the module keeps its mapping: after `ExitDll` the
+    /// host's next load gets the same one, and `InitDll` runs again with
+    /// every static as it was left. No static in Seam assumes a fresh
+    /// mapping, and the timer's class is unregistered at `ExitDll` and
+    /// registered again by the next timer.
+    ///
+    /// The cost: the module's file stays in use until the host exits. The
+    /// pin cannot be tested in-process: a test binary is never unloaded.
+    pub(crate) fn keep_module_loaded() {
+        // The answer goes unchecked: the address is the running module's
+        // own function, which the loader finds.
+        module_with(GET_MODULE_HANDLE_EX_FLAG_PIN);
     }
 
     /// Whether the timer's window takes no more of its messages: none is
@@ -465,6 +488,10 @@ mod imp {
     /// Nothing to undo: the timers hold no class.
     pub(crate) fn unregister() {}
 
+    /// Does nothing yet: the VST3 view attaches to a Windows window only,
+    /// so no host opens an editor here.
+    pub(crate) fn keep_module_loaded() {}
+
     /// Runs this thread's run loop for `period`, as a host's would, so a
     /// timer started here ticks; for tests.
     #[cfg(any(test, feature = "test-host"))]
@@ -514,6 +541,11 @@ mod imp {
 
     #[cfg(feature = "vst3")]
     pub(crate) fn unregister() {}
+
+    /// Does nothing: the VST3 exporter builds no module for this platform,
+    /// and a test binary is never unloaded.
+    #[cfg(feature = "vst3")]
+    pub(crate) fn keep_module_loaded() {}
 
     /// Waits out `period`: there is no loop to run.
     #[cfg(all(any(test, feature = "test-host"), feature = "vst3"))]

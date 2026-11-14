@@ -377,6 +377,9 @@ pluginval --strictness-level 5 --validate-in-process --skip-gui-tests \
   "bundle/Seam Example Gain.vst3"
 ```
 
+Once a plugin's editor has opened, a host keeps the module's file in use until
+the host exits, so quit the host before replacing the bundle.
+
 Open: CI lays out and validates the EQ's Windows bundle only, not the gain's.
 The macOS bundle is not built yet.
 

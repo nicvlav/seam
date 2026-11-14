@@ -19,9 +19,11 @@
 //!   becomes the instance's main thread, whichever thread created the
 //!   instance. A call [`Plugin`]'s threading rule refuses, a release on
 //!   another thread among them, counts as a fault
-//!   ([`boundary_faults`](crate::boundary_faults)), as a panic does. On
-//!   Windows a leaked instance keeps the module loaded until the process
-//!   ends, since its timer's window outlives it.
+//!   ([`boundary_faults`](crate::boundary_faults)), as a panic does.
+//! - On Windows the module stays loaded until the process ends once an
+//!   instance has leaked, since its timer's window outlives it, and once an
+//!   editor has opened, since its toolkit may leave the host something that
+//!   points into the module.
 //!
 //! With the `test-host` feature, `TestHost` drives a plugin through these
 //! interfaces in a test.

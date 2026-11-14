@@ -8,11 +8,16 @@
 //! each call, so a call that finds it borrowed never borrows it twice. A tick
 //! skips it. A size or a scale is kept and told once the call returns, and a
 //! close is kept and done then.
+//!
+//! An open keeps the plugin's module loaded until the process ends, since a
+//! toolkit may leave the host something that points into it and a host may
+//! unload the module and load it again elsewhere.
 
 use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::panic::{self, AssertUnwindSafe};
 
+use super::timer::keep_module_loaded;
 use crate::{Editor, ParentWindow, Size};
 
 /// Where an editor is in its life.
@@ -87,6 +92,11 @@ impl EditorSlot {
     /// Opens the editor inside `parent`, after telling it the size and
     /// scale the host gave so far. A panic inside the editor's `open` is
     /// caught and answered as [`Opened::Panicked`].
+    ///
+    /// Before any of the editor's code runs, it keeps the module loaded until
+    /// the process ends, whatever the open comes to: on Windows, what an
+    /// editor registers with the system stays valid for the life of the
+    /// process.
     pub(crate) fn open(&self, parent: &ParentWindow) -> Opened {
         if self.phase.get() != Phase::Closed {
             return Opened::Already;
@@ -94,6 +104,10 @@ impl EditorSlot {
         let Ok(mut editor) = self.editor.try_borrow_mut() else {
             return Opened::Already;
         };
+        // Before the editor is told anything or opened: an open that fails or
+        // panics may still have left the host something that points into the
+        // module.
+        keep_module_loaded();
         self.phase.set(Phase::Opening);
         self.closing.set(false);
         let opened = panic::catch_unwind(AssertUnwindSafe(|| {

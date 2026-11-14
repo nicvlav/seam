@@ -137,6 +137,7 @@ comments never cite an id: they state the reason in words, and
 | D98 | [What becomes of a page's call still running when a new page session starts? (B5)](#d98-a-call-across-page-sessions) | None can be: a command runs to its end inside the call, so its reply always goes to the session that asked. | to confirm |
 | D99 | [How does a plugin hand out an editor, and what ticks it? (D53)](#d99-a-plugins-editor-and-its-tick) | `Plugin::editor` returns an `Editor`, `None` by default; the trait knows no toolkit. The exporter drives it, and the plugin's one main-thread timer ticks an open editor after `Plugin::idle`. | to confirm |
 | D100 | [What does the VST3 exporter's view of the editor keep to? (D59, D60)](#d100-the-vst3-editor-view) | A view holds its component; it attaches to `HWND` only; its sizes are the screen's pixels at the scale the host gave; it puts off what a host asks while the editor is in a call; a failed open is a fault with its reason. | to confirm |
+| D104 | [What keeps valid what an editor leaves with the host, when the host unloads the module? (D59, D100)](#d104-the-module-stays-loaded-once-an-editor-has-opened) | Once any editor has opened, the module stays loaded until the process ends: one call at every open, before the editor's code runs, for every editor of every plugin. The plugin's file then stays in use until the host exits. | to confirm |
 
 **Open.** D25 is held until `seam-ci` needs it. It keeps its recommendation
 until decided, and no rule depends on it.
@@ -2643,6 +2644,50 @@ second view refused while one lives, which a host that releases late would
 meet as an editor that will not open.
 
 [History](decision-history.md#d100-the-vst3-editor-view)
+
+### D104. The module stays loaded once an editor has opened
+
+**Question and C++ Seam.** What keeps valid what an editor leaves with the
+host, when the host unloads the module? (D59, D100) A toolkit may leave the
+host something that points into the plugin's module: a window class, a
+subclass, a hook, an object the system releases late. A host may unload the
+module once its last instance is gone and load it again at another address,
+and the system would then call code that is no longer mapped. The C++ Seam
+left this to JUCE's VST3 wrapper.
+
+**Rust.** Once any editor has opened, the plugin's module stays loaded until
+the process ends. On Windows every `EditorSlot::open` makes the call that
+pins it, after the checks that find the editor open already and before any
+of the editor's code runs, so an open that fails or panics is covered too:
+a toolkit may leave its window behind when its start-up fails. The first
+call pins the module and every later one changes nothing, so no flag records
+it. It is one call for every editor of every plugin, and names no toolkit.
+The leaked timer's pin (D59) is the same call. No editor opens on macOS yet,
+since the view attaches to `HWND` only (D100).
+
+After `ExitDll` the host's next load gets the same mapping, and `InitDll`
+runs again with every static as it was left. No static in Seam assumes a
+fresh mapping: its counters only need to keep counting, the fault counts are
+per process, the thread-locals are valid while the module is mapped, and the
+timer's class is unregistered at `ExitDll` and registered again by the next
+timer.
+
+The cost is accepted: once an editor has opened, the plugin's file stays in
+use until the host exits, so installing a new build means restarting the
+host. A plugin whose editor never opens leaves nothing with the host and
+keeps a clean unload. The pin does not cover another plugin in the same
+process that registered a class of the same name and was then unloaded;
+only that plugin's toolkit can. It cannot be tested in-process, since a test
+binary is never unloaded.
+
+**Alternatives.** The alternatives were pinning at load, which keeps the file
+in use even for a host that only scans the plugin, and gives up the clean
+unload of a plugin whose editor never opens; pinning only for one toolkit's
+editor, which needs an entry point into `seam-host` for a crate that denies
+`unsafe`, and leaves every other editor uncovered; and cleaning up what a
+toolkit registered, which Seam cannot know.
+
+[History](decision-history.md#d104-the-module-stays-loaded-once-an-editor-has-opened)
 
 ## How to read this
 
